@@ -1,8 +1,8 @@
 # MedRAX reproduction and research extensions
 
-This repository contains an early-stage, independent evaluation adapter and data preparation utilities for [MedRAX](https://github.com/bowang-lab/MedRAX). It does not include patient images, benchmark data, credentials, model weights, logs, or experimental results. The research extensions are planned and are not yet implemented or validated.
+This repository contains independent evaluation adapters, data preparation utilities and an initial structured-memory module for [MedRAX](https://github.com/bowang-lab/MedRAX). It does not include images, benchmark labels, credentials, model weights or raw run logs. Reviewed aggregate run observations are documented separately.
 
-**Status:** offline interface tests only. No clinical claim, reproduced paper metric, real model result, or improvement in accuracy is established. Research use only; do not use for clinical diagnosis.
+**Status (2026-10-27):** the official classifier and report tools have executed on an RTX 3090. A restricted classifier-only Agent completed five real single-image questions through APIYi, with one verified tool return per question. These are functional smoke results, not paper accuracy reproduction. The memory module has offline boundary tests and is not yet integrated into the Agent. See [actual observations and limitations](reports/real-smoke-2026-10-27.md). Research use only.
 
 ## Provenance and reproducibility
 
@@ -14,6 +14,9 @@ The available ChestAgentBench metadata revision inspected was `921e60440927f9893
 
 - `runner/`: early-stage agent adapter and input sanitizer.
 - `data_tools/`: deterministic case grouping and label isolation.
+- `experiments/`: real classifier/report/Agent smoke runners; failures and invocation limits are logged.
+- `memory_core/`: frozen, structured-rule BM25 infrastructure with case exclusion and unknown evidence/credit.
+- `reports/`: reviewed aggregate observations and protocol limitations.
 - `third_party/`: upstream licensing notice.
 
 The adapter invokes the real upstream `initialize_agent` and its event stream, but has only been exercised with simulated objects. It assigns a separate thread to each question and uses one prompt; the authors' `experiments/benchmark_medrax.ipynb` retains one thread across a case's questions and uses a second letter-only request. This protocol difference must be reported rather than described as an exact reproduction. Tool status is not a medical correctness label.
@@ -25,9 +28,11 @@ From this repository directory, with a compatible Python interpreter:
 ```sh
 python -m unittest discover -s runner -p 'test_*.py' -v
 python -m unittest discover -s data_tools -p 'test_*.py' -v
+python -m unittest discover -s experiments -p 'test_*.py' -v
+python -m unittest memory_core.test_memory_core -v
 ```
 
-Tests use fabricated inputs and simulated objects. They do not test clinical inference, actual GPU tools, API billing, model weights, or the compatibility of a given upstream dependency environment.
+Unit tests use fabricated inputs and simulated objects. Real GPU and provider runs are reported separately and do not replace clinical validation or establish exact billing.
 
 ## Data handling
 
