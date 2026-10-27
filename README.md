@@ -2,7 +2,7 @@
 
 This repository contains independent evaluation adapters, data preparation utilities and an initial structured-memory module for [MedRAX](https://github.com/bowang-lab/MedRAX). It does not include images, benchmark labels, credentials, model weights or raw run logs. Reviewed aggregate run observations are documented separately.
 
-**Status (2026-10-27):** the official classifier and report tools have executed on an RTX 3090. A restricted classifier-only Agent completed five real single-image questions through APIYi, with one verified tool return per question. These are functional smoke results, not paper accuracy reproduction. The memory module has offline boundary tests and is not yet integrated into the Agent. See [actual observations and limitations](reports/real-smoke-2026-10-27.md). Research use only.
+**Status (2026-10-27):** the official classifier, report and segmentation tools have executed on RTX 3090 GPUs. A fixed 50-question development comparison found 24/50 correct for both direct answering and a classifier-only Agent, with six improvements and six regressions; this does not reproduce the complete paper protocol. See [diagnostic results](reports/diagnostic50-2026-10-27.md), [tool observations](reports/real-smoke-2026-10-27.md) and [report decoding ablation](reports/report-decoding-2x2-2026-10-27.md). The memory module has offline boundary tests and is not yet integrated into the Agent. Research use only.
 
 ## Provenance and reproducibility
 
@@ -14,7 +14,7 @@ The available ChestAgentBench metadata revision inspected was `921e60440927f9893
 
 - `runner/`: early-stage agent adapter and input sanitizer.
 - `data_tools/`: deterministic case grouping and label isolation.
-- `experiments/`: real classifier/report/Agent smoke runners; failures and invocation limits are logged.
+- `experiments/`: real tool/Agent runners, budgeted paired diagnostics, offline scoring and output-cap follow-up; failures and invocation limits are logged.
 - `memory_core/`: frozen, structured-rule BM25 infrastructure with case exclusion and unknown evidence/credit.
 - `reports/`: reviewed aggregate observations and protocol limitations.
 - `third_party/`: upstream licensing notice.

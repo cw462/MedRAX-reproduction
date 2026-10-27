@@ -1,0 +1,11 @@
+# Classifier score semantics: a source-level finding
+
+The pinned MedRAX classifier describes its 18 returned values as probabilities. TorchXRayVision 1.3.5's default `densenet121-res224-all` path loads per-class operating thresholds, applies sigmoid, then a piecewise linear `op_norm` transformation. The transformation maps each class's operating threshold to 0.5. That does not establish a 50% disease probability for the current benchmark population. [Fixed XRV implementation](https://github.com/mlmed/torchxrayvision/blob/6fa28a2fbfb1b30fcb5f8f501626d91177ef593c/torchxrayvision/models.py#L343-L357), [normalization](https://github.com/mlmed/torchxrayvision/blob/6fa28a2fbfb1b30fcb5f8f501626d91177ef593c/torchxrayvision/models.py#L480-L503).
+
+The PyPI 1.3.5 wheel's models.py matches that fixed commit at SHA256 `554f5b57a2c41e7e35d0b1d4d87ad0b4fa1414818dd87ee86adb21ff225f4984`. The upstream MedRAX initialization leaves this default normalization enabled. Its description and metadata note both use the probability wording. [MedRAX initialization](https://github.com/bowang-lab/MedRAX/blob/dae30e2f136ef0b2a40885a4c335386e9ffad052/medrax/tools/classification.py#L34-L59), [returned metadata](https://github.com/bowang-lab/MedRAX/blob/dae30e2f136ef0b2a40885a4c335386e9ffad052/medrax/tools/classification.py#L113-L123).
+
+The XRV paper calls this calibration, with an operating-point alignment objective. Statistical probability calibration is a separate property; no calibration error or clinical correctness was measured here. [XRV paper](https://arxiv.org/html/2111.00595), [probability-calibration definition](https://arxiv.org/abs/1706.04599).
+
+The interface provides image-level scores, not locations, laterality, lesion correspondences, size attributes or boxes. It therefore cannot independently verify every localization, relationship or characterization answer. This is an interface-scope observation, not proof that the complete visual Agent cannot answer those questions.
+
+A future controlled intervention could change only the tool description and returned note to identify operating-point scores and their scope. The current diagnostic baseline remains unchanged. This audit alone does not show that wording caused a particular wrong answer or that changing it improves accuracy.
