@@ -1,5 +1,7 @@
 # Official classifier smoke test
 
+V3 preparation also includes isolated [LLaVA-Med](llava_smoke.md) and [MAIRA-2](maira_smoke.md) checks, `chexagent_smoke.py`, a [private-process tool bridge](worker_bridge.md), and a [validation plan-only entry](VALIDATION_PROTOCOL.md). These modules' offline tests do not establish that their large models have loaded or inferred successfully. All required tools must complete real server checks before a formal paid comparison. The [two-tool](../reports/multi-tool-first5-2026-10-27.md) and [three-tool](../reports/three-tool-functional-check-2026-10-27.md) five-case runs are retained only as functional diagnostics.
+
 Actual classifier, report and restricted-Agent execution is recorded in [the run report](../reports/real-smoke-2026-10-27.md). Unit tests remain separate from those real runs.
 
 For the two-model report tool, run `python experiments/report_smoke.py --repo /path/to/MedRAX --image /path/to/image.png --output /path/to/new-run --cache-dir /path/to/fixed-hf-cache --device cuda:0`. Its two pinned snapshots must already exist locally; the runner forbids downloads, verifies weight digests, preserves upstream generation parameters, and records EOS/length-limit evidence. Report text remains in the ignored output directory. The classifier-only Agent command is documented in `SINGLE_TOOL_AGENT.md`.

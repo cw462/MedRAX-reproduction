@@ -6,6 +6,8 @@ This repository contains independent evaluation adapters, data preparation utili
 
 A completed ten-question [output-cap follow-up](reports/length-cap-followup-2026-10-27.md) observed no truncation at 1024 tokens; it is a selected development diagnosis, not a general accuracy improvement. [中文初步实验结论与实际耗时](reports/初步实验结论-2026-10-27.md).
 
+**V3 checkpoint:** the complete image audit and a 30-case validation selection are frozen. Two/three-tool five-case batches have checked actual Agent wiring and exposed a tool-budget failure; they are **functional checks only, not the formal full-tool baseline**. New paid question answering is stopped until the remaining large tools finish download, integrity verification and real server inference. See [current execution status](reports/full_run_progress.md), [data audit](reports/data-audit-v3-2026-10-27.md), [three-tool issue](reports/three-tool-functional-check-2026-10-27.md) and [shared budget](reports/budget_and_runtime.md). Full reproduction and memory improvement results remain incomplete.
+
 ## Provenance and reproducibility
 
 The inspected upstream source was `bowang-lab/MedRAX` at commit `dae30e2f136ef0b2a40885a4c335386e9ffad052`; this commit is not established as the exact publication snapshot. Its license is Apache 2.0; a copy is preserved in `third_party/MedRAX-APACHE-2.0.txt`. Obtain the upstream source separately, inspect its requirements, and retain applicable upstream notices and model/data licensing terms. This repository does not itself redistribute the upstream source or data.
@@ -18,6 +20,7 @@ The available ChestAgentBench metadata revision inspected was `921e60440927f9893
 - `data_tools/`: deterministic case grouping and label isolation.
 - `experiments/`: real tool/Agent runners, budgeted paired diagnostics, offline scoring and output-cap follow-up; failures and invocation limits are logged.
 - `memory_core/`: frozen, structured-rule BM25 infrastructure with case exclusion and unknown evidence/credit.
+- `memory_pipeline/`: audited structured execution-trace ingestion and frozen retrieval preparation; no real success pool or Agent memory comparison has run.
 - `reports/`: reviewed aggregate observations and protocol limitations.
 - `third_party/`: upstream licensing notice.
 
@@ -32,6 +35,7 @@ python -m unittest discover -s runner -p 'test_*.py' -v
 python -m unittest discover -s data_tools -p 'test_*.py' -v
 python -m unittest discover -s experiments -p 'test_*.py' -v
 python -m unittest memory_core.test_memory_core -v
+python -m unittest memory_pipeline.test_pipeline -v
 ```
 
 Unit tests use fabricated inputs and simulated objects. Real GPU and provider runs are reported separately and do not replace clinical validation or establish exact billing.
