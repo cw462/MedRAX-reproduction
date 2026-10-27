@@ -52,15 +52,14 @@ def describe(spec):
         import chexagent_smoke as smoke
         import transformers
         if transformers.__version__ != "4.40.0": raise ValueError("Wrong CheXagent Transformers runtime")
-        if (bridge.file_digest(Path(spec.repo) / smoke.TOOL_RELATIVE) != smoke.TOOL_SHA256 or
-                bridge.file_digest(spec.asset_manifest) != smoke.APPROVED_MANIFEST_SHA256):
+        source = smoke.verify_tool_source(spec.repo)
+        if bridge.file_digest(spec.asset_manifest) != smoke.APPROVED_MANIFEST_SHA256:
             raise ValueError("CheXagent source/review manifest changed")
         module_spec = importlib.util.spec_from_file_location("_worker_official_chexagent", Path(spec.repo) / smoke.TOOL_RELATIVE)
         module = importlib.util.module_from_spec(module_spec); sys.modules[module_spec.name] = module
         module_spec.loader.exec_module(module)
         cls = module.XRayVQATool
-        source = {"filename": smoke.TOOL_RELATIVE, "sha256": smoke.TOOL_SHA256,
-                  "review_manifest_sha256": smoke.APPROVED_MANIFEST_SHA256}
+        source = dict(source, review_manifest_sha256=smoke.APPROVED_MANIFEST_SHA256)
     fields = cls.model_fields
     schema = fields["args_schema"].default.model_json_schema()
     return {"name": fields["name"].default, "description": fields["description"].default,

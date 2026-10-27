@@ -27,7 +27,10 @@ MODEL_REVISION = '8f19b53a2eceda4c33b0acec6c81fbc293ad80d0'
 VISION_ID = 'StanfordAIMI/XraySigLIP__vit-l-16-siglip-384__webli'
 VISION_REVISION = 'f0edbf5d90dba44edb7f4f96d8663537cb0749bf'
 APPROVED_MANIFEST_SHA256 = '3277106970e3ed1ac39f943fa0410624883166e4733c16484301c457c395a8b8'
-TOOL_SHA256 = '70ec4997b745716410938de36e50da429ad7134626fe05f405fdcab5a4d6a186'
+# Independently checked with git show <commit>:medrax/tools/xray_vqa.py.
+# Git stores LF; Windows checkouts may have CRLF. Only that conversion is allowed.
+TOOL_REVIEWED_COMMIT = 'dae30e2f136ef0b2a40885a4c335386e9ffad052'
+TOOL_LF_SHA256 = '41ebc005fb0b30d5dd6debba81d020df71e5d84c4195e6afae222964f9a8e254'
 TOOL_RELATIVE = 'medrax/tools/xray_vqa.py'
 PYTHON_FILES = {'configuration_chexagent.py', 'modeling_chexagent.py',
                 'modeling_visual.py', 'tokenization_chexagent.py'}
@@ -54,6 +57,18 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
+def verify_tool_source(repo):
+    """Check the pinned LF source while retaining the checkout's actual bytes."""
+    raw = (Path(repo) / TOOL_RELATIVE).read_bytes()
+    normalized = raw.replace(b'\r\n', b'\n')
+    canonical = hashlib.sha256(normalized).hexdigest()
+    if canonical != TOOL_LF_SHA256:
+        raise ValueError('Official tool differs from the reviewed LF source')
+    return {'filename': TOOL_RELATIVE, 'sha256': hashlib.sha256(raw).hexdigest(),
+            'lf_sha256': canonical, 'reviewed_upstream_commit': TOOL_REVIEWED_COMMIT,
+            'normalization': 'CRLF_to_LF_only'}
+
+
 def write_json(path, value):
     with Path(path).open('w', encoding='utf-8') as handle:
         json.dump(value, handle, indent=2, ensure_ascii=False, allow_nan=False)
@@ -69,8 +84,7 @@ def verify_assets(snapshot, vision_snapshot, manifest_path, repo):
     if (manifest.get('schema_version') != 1 or manifest.get('review_status') != 'static_source_review_completed'
             or manifest.get('required_transformers') != '4.40.0'):
         raise ValueError('Static source review is missing')
-    if sha256_file(repo / TOOL_RELATIVE) != TOOL_SHA256:
-        raise ValueError('Official tool differs from the reviewed source')
+    verify_tool_source(repo)
     for key, path, model_id, revision, expected in (
         ('main', Path(snapshot), MODEL_ID, MODEL_REVISION, MAIN_FILES),
         ('vision', Path(vision_snapshot), VISION_ID, VISION_REVISION, VISION_FILES)):
@@ -186,6 +200,7 @@ def package_versions():
 
 
 def execute_tool(repo, snapshot, vision_snapshot, image, prompt, cap, device, audit):
+    audit['source_tool'] = verify_tool_source(repo)
     import torch
     import transformers
     from PIL import Image
@@ -273,7 +288,8 @@ def main(argv=None):
         image = validate_request(args.image, args.prompt, args.max_new_tokens)
         manifest = verify_assets(args.snapshot, args.vision_snapshot, args.approved_source_manifest, args.repo)
         summary.update(approved_manifest_sha256=APPROVED_MANIFEST_SHA256,
-            source_tool_sha256=TOOL_SHA256, image_sha256=sha256_file(image),
+            source_tool_sha256=verify_tool_source(args.repo)['sha256'],
+            source_tool_lf_sha256=TOOL_LF_SHA256, image_sha256=sha256_file(image),
             prompt_sha256=hashlib.sha256(args.prompt.encode()).hexdigest(), assets=manifest['models'])
         env = {'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1', 'HF_HUB_DISABLE_TELEMETRY': '1',
                'HF_MODULES_CACHE': str((args.output / 'hf_modules').resolve()), 'MPLBACKEND': 'Agg'}
