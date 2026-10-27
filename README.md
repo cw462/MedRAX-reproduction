@@ -8,6 +8,8 @@ A completed ten-question [output-cap follow-up](reports/length-cap-followup-2026
 
 **V3 checkpoint:** the complete image audit and a 30-case validation selection are frozen. Two/three-tool five-case batches have checked actual Agent wiring and exposed a tool-budget failure; they are **functional checks only, not the formal full-tool baseline**. New paid question answering is stopped until the remaining large tools finish download, integrity verification and real server inference. See [current execution status](reports/full_run_progress.md), [data audit](reports/data-audit-v3-2026-10-27.md), [three-tool issue](reports/three-tool-functional-check-2026-10-27.md) and [shared budget](reports/budget_and_runtime.md). Full reproduction and memory improvement results remain incomplete.
 
+Tool preparation is currently stopped on [inconsistent repeated file reads](reports/tool-readiness-integrity-blocker-2026-10-27.md). Partial assets and evidence are preserved; unverified large weights have not been used for inference.
+
 ## Provenance and reproducibility
 
 The inspected upstream source was `bowang-lab/MedRAX` at commit `dae30e2f136ef0b2a40885a4c335386e9ffad052`; this commit is not established as the exact publication snapshot. Its license is Apache 2.0; a copy is preserved in `third_party/MedRAX-APACHE-2.0.txt`. Obtain the upstream source separately, inspect its requirements, and retain applicable upstream notices and model/data licensing terms. This repository does not itself redistribute the upstream source or data.

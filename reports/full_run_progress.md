@@ -4,12 +4,14 @@ Updated 2026-10-27. The full experiment is **in progress**, with no complete pap
 
 **Current priority, clarified by the user:** stop new paid question answering until all remaining tools are downloaded, integrity-verified and tested with real server inference. The completed two/three-tool five-case batches are functional checks only and will not be included as the formal full-tool baseline.
 
+**Current blocker:** repeated server reads of the same unchanged file returned inconsistent bytes under two Python installations. Downloads and the automatic local-test continuation have stopped, with partial assets preserved. See the [integrity evidence and resumption gate](tool-readiness-integrity-blocker-2026-10-27.md). This is an observed read-integrity problem; its hardware/software cause is not established.
+
 | Phase | Evidence and current state |
 |---|---|
 | P0 audit | Complete image integrity/overlap audit; original case splits retained; validation30 frozen. GPU, fixed sources, environments, API pricing and the existing budget ledger checked. [Data audit](data-audit-v3-2026-10-27.md). |
 | P1 protocol | Historical 50 paired questions and selected ten-question cap follow-up retained. New validation30 repetitions and classifier-description control have not run. |
 | P1 real multiple tools | Two-tool and three-tool functional checks completed on the same five train cases. The second run exposed a batch-tool request exceeding the inherited limit and ending the arm; [details](three-tool-functional-check-2026-10-27.md). No formal full-tool baseline is claimed. |
-| Remaining tool deployment | Original segmentation has an earlier real standalone smoke. CheXagent, LLaVA-Med and MAIRA-2 loaders have offline checks; large fixed-revision weights are downloading. Their real GPU inference and Agent integration are not yet verified. |
+| Remaining tool deployment | Original segmentation has real standalone and Agent checks. CheXagent, LLaVA-Med and MAIRA-2 environments pass metadata imports, but large weights remain incomplete/unverified. Downloading is stopped on an observed read-integrity problem; their real GPU inference and Agent integration remain unverified. |
 | P2 trajectory pool | Target is at least 150 eligible training cases when resources permit. The two-tool functional batch has zero successful Agent outcomes and the three-tool check has one; neither is presented as the formal full-tool R0 pool. No success pool is claimed. |
 | P3 success retrieval | Not run. Strict real-trace ingestion and frozen retrieval are being implemented. Historical single-tool outcomes cannot be presented as full-tool R0 trajectories. |
 | P4 summaries / credit | No real summarizer or paired credit experiment. Clinical evidence remains unknown; credit remains null. |
