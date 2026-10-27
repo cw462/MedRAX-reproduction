@@ -4,6 +4,8 @@ This repository contains independent evaluation adapters, data preparation utili
 
 **Status (2026-10-27):** the official classifier, report and segmentation tools have executed on RTX 3090 GPUs. A fixed 50-question development comparison found 24/50 correct for both direct answering and a classifier-only Agent, with six improvements and six regressions; this does not reproduce the complete paper protocol. See [diagnostic results](reports/diagnostic50-2026-10-27.md), [tool observations](reports/real-smoke-2026-10-27.md) and [report decoding ablation](reports/report-decoding-2x2-2026-10-27.md). The memory module has offline boundary tests and is not yet integrated into the Agent. Research use only.
 
+A completed ten-question [output-cap follow-up](reports/length-cap-followup-2026-10-27.md) observed no truncation at 1024 tokens; it is a selected development diagnosis, not a general accuracy improvement. [中文初步实验结论与实际耗时](reports/初步实验结论-2026-10-27.md).
+
 ## Provenance and reproducibility
 
 The inspected upstream source was `bowang-lab/MedRAX` at commit `dae30e2f136ef0b2a40885a4c335386e9ffad052`; this commit is not established as the exact publication snapshot. Its license is Apache 2.0; a copy is preserved in `third_party/MedRAX-APACHE-2.0.txt`. Obtain the upstream source separately, inspect its requirements, and retain applicable upstream notices and model/data licensing terms. This repository does not itself redistribute the upstream source or data.
