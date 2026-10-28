@@ -161,7 +161,31 @@ class ToolVariantTests(unittest.TestCase):
                 self.assertEqual(len(manifests), 2)
                 self.assertNotIn(str(root), json.dumps(manifests))
                 (snapshots["synthetic/findings"][1] / "config.json").write_text("CHANGED_SYNTHETIC_CONFIG")
-                with self.assertRaises(ValueError): variants._report_assets(root)
+                _, changed = variants._report_assets(root)
+                self.assertNotEqual(manifests[0]["manifest_sha256"], changed[0]["manifest_sha256"])
+                self.assertEqual(changed[0]["checksum_verification"], "skipped_by_user")
+
+    def test_source_edits_and_dirty_checkout_are_recorded_without_a_hash_gate(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve(); source = root / variants.SOURCE_RELATIVE["classification"]
+            source.parent.mkdir(parents=True); source.write_text("# locally updated source\n")
+            def git(command, **kwargs):
+                return str(root) if "--show-toplevel" in command else " M local.py" if "status" in command else "different-commit"
+            with patch.object(variants.subprocess, "check_output", side_effect=git):
+                details = variants._source(root, "classification")
+            self.assertTrue(details["working_tree_dirty"])
+            self.assertEqual(details["commit"], "different-commit")
+            self.assertEqual(details["tool_sha256"], hashlib.sha256(source.read_bytes()).hexdigest())
+            self.assertEqual(details["hash_policy"], "record_only")
+
+    def test_checkpoint_digest_does_not_need_to_match_or_be_read(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / variants.CLASSIFIER_FILENAME; path.write_bytes(b"UPDATED")
+            with patch.object(variants, "CLASSIFIER_WEIGHT_BYTES", len(b"UPDATED")), \
+                    patch.object(variants.classifier_audit, "sha256_file", side_effect=AssertionError("no weight hashing")):
+                details = variants._classifier_asset(path)
+            self.assertIsNone(details["sha256"])
+            self.assertEqual(details["checksum_verification"], "skipped_by_user")
 
     def test_report_factory_is_offline_load_only_and_provenance_has_no_paths(self):
         loads = []
@@ -212,7 +236,7 @@ class ToolVariantTests(unittest.TestCase):
         for function, kwargs in ((variants.create_classifier_tool, {"checkpoint": "absent"}),
                                  (variants.create_report_tool, {"cache_dir": "absent"})):
             with self.assertRaises(ValueError): function("absent", device="cpu", mode="unplanned", **kwargs)
-        with self.assertRaises(ValueError): variants._classifier_asset(Path("missing-checkpoint"))
+        with self.assertRaises(FileNotFoundError): variants._classifier_asset(Path("missing-checkpoint"))
         with self.assertRaises(ValueError): variants.validate_observation("unknown-kind", None)
 
     def segmentation_fixture(self, directory, requested=None):
@@ -296,7 +320,7 @@ class ToolVariantTests(unittest.TestCase):
                 stack.enter_context(patch.object(variants, "_source", return_value={"synthetic": True}))
                 stack.enter_context(patch.object(variants, "_device", return_value="cuda:0"))
                 stack.enter_context(patch.object(variants, "_module", return_value=SimpleNamespace(ChestXRaySegmentationTool=Segmentation)))
-                stack.enter_context(patch.object(variants.segmentation_audit, "validate_checkpoint", return_value={"sha256": "synthetic"}))
+                stack.enter_context(patch.object(variants, "_checkpoint_asset", return_value={"sha256": None, "checksum_verification": "skipped_by_user"}))
                 stack.enter_context(patch.object(variants.segmentation_audit, "sha256_file", return_value=variants.segmentation_audit.XRV_WRAPPER_SHA256))
                 tool, provenance = variants.create_segmentation_tool(root, checkpoint=checkpoint, device="cuda:0", temp_dir=output)
                 with self.assertRaises(FileExistsError):

@@ -324,6 +324,7 @@ class WorkerPool:
         return {"protocol": PROTOCOL, "worker_script_sha256": self.source_sha256,
                 "bridge_sha256": self.bridge_sha256, "case_image_allowlist_sha256": digest(self.cases),
                 "tool_names": sorted(self.specs), "visible_gpu_slot": self.gpu,
+                "source_hash_policy": "record_only",
                 "one_active_large_worker": True, "automatic_retries": False,
                 "startup_timeout_seconds": self.startup_timeout, "call_timeout_seconds": self.timeout,
                 "max_protocol_line_bytes": MAX_LINE, "parent_and_child_image_hash_checks": True,
@@ -345,8 +346,9 @@ class WorkerPool:
 
     def _launch(self, name, *, describe):
         if self.closed: raise WorkerFailure("pool_closed")
-        if file_digest(self.script) != self.source_sha256 or file_digest(__file__) != self.bridge_sha256:
-            raise WorkerFailure("worker_source_changed")
+        # Hashes identify the source used for this launch; they are not immutable gates.
+        self.source_sha256 = file_digest(self.script)
+        self.bridge_sha256 = file_digest(__file__)
         spec = self.specs[name]
         folder = self.root / ("worker_" + uuid.uuid4().hex); folder.mkdir(mode=0o700)
         config = {"protocol": PROTOCOL, "spec": asdict(spec), "cases": self.cases,
@@ -360,15 +362,16 @@ class WorkerPool:
         try:
             ready = child.receive(self.startup_timeout)
             if (ready.get("event") != "ready" or ready.get("tool_name") != name or
-                    ready.get("worker_script_sha256") != self.source_sha256 or
                     ready.get("cases_sha256") != digest(self.cases) or type(ready.get("descriptor")) is not dict):
                 raise WorkerFailure("invalid_ready_handshake")
+            self.source_sha256 = ready.get("worker_script_sha256", self.source_sha256)
             desc = ready["descriptor"]
             if (desc.get("name") != name or type(desc.get("description")) is not str or
                     type(desc.get("parameters")) is not dict or desc.get("schema_sha256") != digest(desc["parameters"])):
                 raise WorkerFailure("invalid_official_schema_descriptor")
-            if name in self.descriptors and self.descriptors[name] != desc:
-                raise WorkerFailure("official_schema_or_source_changed")
+            capability_fields = ("name", "description", "parameters", "return_direct")
+            if name in self.descriptors and any(self.descriptors[name].get(key) != desc.get(key) for key in capability_fields):
+                raise WorkerFailure("official_capabilities_changed")
             self.descriptors[name] = desc
             return child, desc
         except Exception:

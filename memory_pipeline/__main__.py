@@ -9,7 +9,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('splits', 'exclusions', 'run', 'output'):
         parser.add_argument('--' + name, type=Path, required=True)
-    parser.add_argument('--exclusions-sha256', required=True)
+    parser.add_argument('--exclusions-sha256', help='Optional historical digest; recorded without enforcing equality')
     parser.add_argument('--family', choices=('multitool_original', 'historical_classifier'), default='multitool_original')
     parser.add_argument('--pool-version', type=int, required=True)
     parser.add_argument('--previous-pool-sha256')

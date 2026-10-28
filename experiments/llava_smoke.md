@@ -1,7 +1,8 @@
 # Official LLaVA-Med offline smoke
 
-`llava_smoke.py` loads the unchanged MedRAX tool from upstream commit
-`dae30e2f136ef0b2a40885a4c335386e9ffad052`. The initial runtime candidate is
+`llava_smoke.py` loads the local MedRAX tool. The historical upstream reference
+is `dae30e2f136ef0b2a40885a4c335386e9ffad052`; actual commit, working-tree state and
+source hashes are recorded. Edits or changed hashes do not block loading. The initial runtime candidate is
 Transformers **4.45.2**, with Torch 2.2.x/CUDA, compatible Accelerate and
 bitsandbytes, SentencePiece, protobuf, Pillow, Pydantic 2 and LangChain Core.
 This is an implementation plus synthetic tests; actual GPU compatibility is
@@ -22,19 +23,19 @@ models--microsoft--llava-med-v1.5-mistral-7b/snapshots/91bb16c122001ddc9cf1fd36c
 models--openai--clip-vit-large-patch14-336/snapshots/ce19dc912ca5cd21c8a653c79e251e808ccabcd1/
 ```
 
-`MODEL_SPECS` is the authoritative file, size and SHA256 allowlist: four LLaVA
+`MODEL_SPECS` provides the required file/size inventory and historical digest references: four LLaVA
 shards plus tokenizer/config files, and the CLIP bin/config/preprocessor. Weight
 bytes total **16,844,508,241**; 8-bit loading does not shrink the download.
 Files not on the runtime allowlist, other than README/license notices, are
 rejected. There is no download fallback. The original repo ID is retained for
-MedRAX's `llava`/`mistral` branch; each loader is redirected to its verified
-local snapshot. This includes all three nested CLIP loaders that upstream
+MedRAX's `llava`/`mistral` branch; each loader is redirected to its local snapshot. This includes all three nested CLIP loaders that upstream
 otherwise invokes without `cache_dir`.
 
-Weight digests come from the official Hub LFS metadata at those revisions.
-Small-file digests are SHA256 of their fixed-revision bytes. All required files
-are hashed before initialization, followed by a size/mtime check after loading;
-the latter is not a second hash proof against concurrent malicious changes.
+Weight checksums are not verified, as requested by the user. Required weight
+files must exist with their complete download sizes; config/tokenizer hashes are
+recorded from actual bytes without equality requirements. The post-load stat
+comparison returns an observation and does not abort on change. Hashes are
+provenance records only; they do not impose an immutable-code or immutable-model rule.
 
 ## Run after assets and environment are ready
 

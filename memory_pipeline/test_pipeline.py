@@ -96,7 +96,7 @@ class PipelineTests(unittest.TestCase):
             for forbidden in ('source_question_id', 'source_case_hash', 'source_thread_id', 'task_outcome'):
                 self.assertNotIn(forbidden, context)
 
-    def test_label_fields_and_modified_visible_query_rejected(self):
+    def test_label_fields_rejected_but_updated_visible_inputs_are_allowed(self):
         with TemporaryDirectory() as temp:
             run, boundary, rows, sidecar = fixture(Path(temp), outcome=True)
             payload = json.loads(sidecar.read_text()); payload['outcomes'][0]['correct_answer'] = 'A'
@@ -104,14 +104,14 @@ class PipelineTests(unittest.TestCase):
             with self.assertRaises(ValueError): compile_run(run, boundary, outcomes=sidecar)
             records, _ = compile_run(run, boundary)
             pool = freeze_pool(boundary, records, family='multitool_original', version=1, allow_synthetic=True)
-            altered = query(rows[3], records); altered['question'] += '\nANSWER: A'
-            with self.assertRaises(ValueError): pool.search(altered)
+            altered = query(rows[3], records); altered['question'] += '\nAdditional visible question detail.'
+            self.assertEqual(pool.search(altered), [])
             altered = query(rows[3], records); altered['explanation'] = 'secret'
             with self.assertRaises(ValueError): pool.search(altered)
-            altered = query(rows[3], records); altered['images'] = ['foreign_case.png']
-            with self.assertRaises(ValueError): pool.search(altered)
+            altered = query(rows[3], records); altered['images'] = ['renamed_image.png']
+            self.assertEqual(pool.search(altered), [])
 
-    def test_missing_or_forged_tool_execution_and_version_are_rejected(self):
+    def test_missing_execution_rejected_but_hash_changes_are_recorded(self):
         for mutation in ('no_tool', 'wrong_version', 'wrong_image'):
             with self.subTest(mutation=mutation), TemporaryDirectory() as temp:
                 run, boundary, _, _ = fixture(Path(temp))
@@ -121,22 +121,29 @@ class PipelineTests(unittest.TestCase):
                     step = next(x for x in trace if x.get('node') == 'tool')
                     step['tool_version_sha256' if mutation == 'wrong_version' else 'image_sha256'] = 'f' * 64
                 (run / 'trace.jsonl').write_bytes(b''.join(diag.canonical(x) for x in trace))
-                with self.assertRaises(ValueError): compile_run(run, boundary)
+                if mutation == 'no_tool':
+                    with self.assertRaises(ValueError): compile_run(run, boundary)
+                else:
+                    records, report = compile_run(run, boundary)
+                    self.assertEqual(len(records), 2)
+                    self.assertTrue(report['hash_observations'])
 
-    def test_undeclared_image_is_fail_closed_unless_explicitly_skipped(self):
+    def test_changed_image_digest_is_recorded_without_discarding_trajectory(self):
         with TemporaryDirectory() as temp:
             run, boundary, _, _ = fixture(Path(temp))
             trace = [json.loads(line) for line in (run / 'trace.jsonl').read_text().splitlines()]
             step = next(x for x in trace if x.get('node') == 'tool')
             step['image_sha256'] = 'f' * 64
             (run / 'trace.jsonl').write_bytes(b''.join(diag.canonical(x) for x in trace))
-            with self.assertRaises(ValueError):
-                compile_run(run, boundary)
+            records, report = compile_run(run, boundary)
+            self.assertEqual(len(records), 2)
+            self.assertEqual(report['skipped'], {})
+            self.assertIn('executed_image_digest_changed:q1', report['hash_observations'])
             records, report = compile_run(run, boundary, allow_image_integrity_skip=True)
-            self.assertEqual(len(records), 1)
-            self.assertEqual(report['skipped'], {'image_read_integrity_failure': 1})
+            self.assertEqual(len(records), 2)
+            self.assertEqual(report['skipped'], {})
 
-    def test_source_manifest_cannot_substitute_other_case_image_with_same_count(self):
+    def test_updated_manifest_hash_is_metadata_without_a_repin_requirement(self):
         with TemporaryDirectory() as temp:
             run, boundary, _, _ = fixture(Path(temp))
             manifest = json.loads((run / 'manifest.json').read_text())
@@ -146,7 +153,9 @@ class PipelineTests(unittest.TestCase):
             summary['plan_sha256'] = manifest['plan_sha256']
             (run / 'manifest.json').write_bytes(diag.canonical(manifest))
             (run / 'summary.json').write_bytes(diag.canonical(summary))
-            with self.assertRaises(ValueError): compile_run(run, boundary)
+            records, report = compile_run(run, boundary)
+            self.assertEqual(len(records), 2)
+            self.assertIn('input_digest_changed:q1', report['hash_observations'])
 
     def test_incomplete_or_summary_mismatched_run_rejected(self):
         with TemporaryDirectory() as temp:
@@ -170,7 +179,7 @@ class PipelineTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 compile_run(run, boundary)
 
-    def test_family_protocol_and_available_version_must_match(self):
+    def test_family_and_actual_tool_availability_remain_required_without_hash_equality(self):
         with TemporaryDirectory() as temp:
             run, boundary, rows, sidecar = fixture(Path(temp), outcome=True)
             with self.assertRaises(ValueError): compile_run(run, boundary, family='historical_classifier')
@@ -178,11 +187,14 @@ class PipelineTests(unittest.TestCase):
             with self.assertRaises(ValueError): freeze_pool(boundary, records, family='historical_classifier', version=1, allow_synthetic=True)
             pool = freeze_pool(boundary, records, family='multitool_original', version=1, allow_synthetic=True)
             bad = query(rows[3], records); bad['protocol_sha256'] = 'f' * 64
-            with self.assertRaises(ValueError): pool.search(bad)
+            self.assertTrue(pool.search(bad))
+            updated = query(rows[3], records)
+            updated['available_tools'] = {name: 'e' * 64 for name in updated['available_tools']}
+            self.assertTrue(pool.search(updated))
             bad = query(rows[3], records); bad['available_tools'] = {'chest_xray_classifier': 'f' * 64}
             self.assertEqual(pool.search(bad), [])
             bad = query(rows[3], records); bad['available_tools'] = {**bad['available_tools'], 'chest_xray_segmentation': 'f' * 64}
-            self.assertEqual(pool.search(bad), [])
+            self.assertTrue(pool.search(bad))
 
     def test_unknown_is_not_promoted_even_when_task_correct_and_context_is_rule_labelled(self):
         with TemporaryDirectory() as temp:
@@ -218,7 +230,17 @@ class PipelineTests(unittest.TestCase):
             with self.assertRaises(ValueError): pool.search(query(rows[4], pool.payload()['records']))
             raw = json.loads(path.read_text()); raw['payload']['pool_version'] = 99
             raw['sha256'] = digest(raw['payload']); path.write_bytes(diag.canonical(raw))
-            with self.assertRaises(ValueError): FrozenPool.load(path, expected_sha256=before)
+            loaded = FrozenPool.load(path, expected_sha256=before)
+            self.assertEqual(loaded.payload()['pool_version'], 99)
+            self.assertIn('caller_pool_digest_changed', loaded.hash_audit()['observations'])
+            # The optional envelope digest can also remain stale after an edit.
+            raw['payload']['pool_version'] = 100
+            path.write_bytes(diag.canonical(raw))
+            with patch('memory_pipeline.core.implementation_hashes', return_value={'updated.py': 'f' * 64}):
+                loaded = FrozenPool.load(path)
+            self.assertEqual(loaded.payload()['pool_version'], 100)
+            self.assertIn('implementation_digest_changed', loaded.hash_audit()['observations'])
+            self.assertIn('recorded_pool_digest_changed', loaded.hash_audit()['observations'])
 
     def test_split_boundary_never_reads_label_files_and_case_quarantine_is_enforced(self):
         with TemporaryDirectory() as temp:

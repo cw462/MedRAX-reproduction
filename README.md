@@ -2,6 +2,8 @@
 
 This repository contains independent evaluation adapters, data preparation utilities and an initial structured-memory module for [MedRAX](https://github.com/bowang-lab/MedRAX). It does not include images, benchmark labels, credentials, model weights or raw run logs. Reviewed aggregate run observations are documented separately.
 
+Hashes in the current workflow are version records only. Code, tool/model or memory-pool hash changes do not invalidate memory, block loading/retrieval/resumption, or require rebuilding a pool. Historical run records are preserved.
+
 **Status (2026-10-28, Qwen memory stage):** the memory pipeline has now run end to end with
 `qwen3-vl-plus` as the central model: a 60-question training pool (59 compiled trajectories, 34
 successful), a frozen pool, and a paired 29-question validation comparison between no-memory (R0)

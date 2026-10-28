@@ -35,22 +35,24 @@ def fixture(root):
 
 
 class SmokeTests(unittest.TestCase):
-    def test_preapproved_manifest_all_files_and_official_tool_checked(self):
+    def test_required_assets_and_changed_custom_source_recorded(self):
         with TemporaryDirectory() as temp:
             main, vision, manifest, repo, mh, th = fixture(Path(temp))
             with patch.object(smoke, 'APPROVED_MANIFEST_SHA256', mh), patch.object(smoke, 'TOOL_LF_SHA256', th):
                 result = smoke.verify_assets(main, vision, manifest, repo)
                 self.assertEqual(result['models']['vision']['revision'], smoke.VISION_REVISION)
                 (main / 'modeling_visual.py').write_text('modified')
-                with self.assertRaises(ValueError): smoke.verify_assets(main, vision, manifest, repo)
+                changed = smoke.verify_assets(main, vision, manifest, repo)
+                self.assertEqual(changed['hash_policy'], 'record_only')
 
-    def test_modified_manifest_is_rejected_before_any_custom_code_import(self):
+    def test_modified_manifest_checksum_does_not_block_or_import_custom_code(self):
         with TemporaryDirectory() as temp:
             main, vision, manifest, repo, mh, th = fixture(Path(temp))
             with patch.object(smoke, 'APPROVED_MANIFEST_SHA256', mh), patch.object(smoke, 'TOOL_LF_SHA256', th):
                 manifest.write_text(manifest.read_text() + ' ')
                 with patch.object(smoke.importlib.util, 'spec_from_file_location', side_effect=AssertionError('must not import')):
-                    with self.assertRaises(ValueError): smoke.verify_assets(main, vision, manifest, repo)
+                    observed = smoke.verify_assets(main, vision, manifest, repo)
+                    self.assertEqual(observed['checksum_verification'], 'skipped_by_user')
 
     def test_unexpected_python_and_pickle_files_are_rejected(self):
         for directory, filename in [('vision', 'extra.py'), ('main', 'pytorch_model.bin')]:
@@ -65,7 +67,7 @@ class SmokeTests(unittest.TestCase):
             main, vision, manifest, repo, mh, th = fixture(Path(temp))
             (vision / 'spiece.model').unlink()
             with patch.object(smoke, 'APPROVED_MANIFEST_SHA256', mh), patch.object(smoke, 'TOOL_LF_SHA256', th):
-                with self.assertRaises(ValueError): smoke.verify_assets(main, vision, manifest, repo)
+                with self.assertRaises(FileNotFoundError): smoke.verify_assets(main, vision, manifest, repo)
 
     def test_lf_and_crlf_source_are_equivalent_with_distinct_recorded_raw_hashes(self):
         with TemporaryDirectory() as temp:
@@ -84,7 +86,7 @@ class SmokeTests(unittest.TestCase):
             self.assertEqual(second['sha256'], smoke.sha256_file(tool))
             self.assertEqual(smoke.sha256_file(manifest), mh)
 
-    def test_source_content_edits_or_lone_cr_are_rejected_before_execution(self):
+    def test_source_content_edits_and_line_endings_record_actual_digest(self):
         with TemporaryDirectory() as temp:
             main, vision, manifest, repo, mh, th = fixture(Path(temp))
             tool = repo / smoke.TOOL_RELATIVE
@@ -92,8 +94,10 @@ class SmokeTests(unittest.TestCase):
             with patch.object(smoke, 'TOOL_LF_SHA256', th), patch.object(smoke, 'APPROVED_MANIFEST_SHA256', mh):
                 for changed in (original.replace(b'fixture', b'CHANGED'), original.replace(b'\n', b'\r'), original + b' '):
                     tool.write_bytes(changed)
-                    with self.assertRaises(ValueError): smoke.verify_tool_source(repo)
-                    with self.assertRaises(ValueError): smoke.verify_assets(main, vision, manifest, repo)
+                    observed = smoke.verify_tool_source(repo)
+                    self.assertEqual(observed['sha256'], hashlib.sha256(changed).hexdigest())
+                    self.assertEqual(observed['hash_policy'], 'record_only')
+                    smoke.verify_assets(main, vision, manifest, repo)
 
     def test_worker_metadata_uses_shared_source_checker_and_retains_raw_evidence(self):
         import medical_tool_worker as worker

@@ -1,8 +1,8 @@
-"""Offline, synchronous smoke/factory of unchanged MedRAX MAIRA-2 grounding.
+"""Offline, synchronous smoke/factory of local MedRAX MAIRA-2 grounding.
 
 Only use assets obtained under the user's accepted model access conditions.
 This script never reads credentials, accepts a gate, downloads or calls an API.
-Custom model code is pinned and loaded only from the reviewed local snapshot.
+Custom model code loads from the selected local snapshot; hashes are records only.
 Initialize in a fresh single-GPU worker before unrelated network/API activity.
 """
 from __future__ import annotations
@@ -68,14 +68,12 @@ def source_provenance(repo):
     def git(*args):
         return subprocess.check_output(["git", "-C", str(repo), *args], text=True,
                                        stderr=subprocess.DEVNULL).strip()
-    if (Path(git("rev-parse", "--show-toplevel")).resolve() != repo or
-            git("rev-parse", "HEAD") != UPSTREAM_COMMIT or git("status", "--porcelain")):
-        raise ValueError("Use the fixed clean official MedRAX checkout")
+    if Path(git("rev-parse", "--show-toplevel")).resolve() != repo:
+        raise ValueError("Use the MedRAX checkout root")
     raw = (repo / TOOL_RELATIVE).read_bytes()
-    if hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest() != TOOL_LF_SHA256:
-        raise ValueError("Official grounding tool source differs")
-    return {"commit": UPSTREAM_COMMIT, "working_tree_dirty": False, "filename": TOOL_RELATIVE,
-            "sha256": hashlib.sha256(raw).hexdigest(), "lf_sha256": TOOL_LF_SHA256,
+    return {"commit": git("rev-parse", "HEAD"), "working_tree_dirty": bool(git("status", "--porcelain")), "filename": TOOL_RELATIVE,
+            "sha256": hashlib.sha256(raw).hexdigest(), "lf_sha256": hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest(),
+            "hash_policy": "record_only",
             "runner_sha256": audit.sha256_file(__file__), "shared_audit_sha256": audit.sha256_file(audit.__file__)}
 
 
@@ -96,7 +94,7 @@ def local_loader(original, *, kind, snapshot, loads):
         if kind == "model":
             changed["use_safetensors"] = True
         value = original(str(snapshot), *args, **changed)
-        loads.append({"loader": kind, "local_files_only": True, "reviewed_custom_code_only": True,
+        loads.append({"loader": kind, "local_files_only": True, "local_custom_code": True,
                       "completed": True})
         return value
     return load
@@ -109,11 +107,10 @@ def loaded_custom_code(tool, dynamic_cache):
         cls = type(obj)
         path = Path(inspect.getfile(cls)).resolve()
         if (cls.__name__ != class_name or path.name != filename or
-                not path.is_relative_to(dynamic_cache.resolve()) or
-                audit.sha256_file(path) != MODEL_SPEC["files"][filename][1]):
+                not path.is_relative_to(dynamic_cache.resolve())):
             raise ValueError("Loaded custom class differs from the freshly cached reviewed source")
         details.append({"role": role, "class": class_name, "filename": filename,
-                        "sha256": MODEL_SPEC["files"][filename][1]})
+                        "sha256": audit.sha256_file(path), "hash_policy": "record_only"})
     return details
 
 

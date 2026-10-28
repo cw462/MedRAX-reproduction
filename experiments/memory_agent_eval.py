@@ -44,6 +44,7 @@ import tool_variants as variants  # noqa: E402
 from provider_ledger import BudgetExceeded as LedgerBudgetExceeded  # noqa: E402
 from provider_ledger import LedgerIntegrityError, ProviderLedger  # noqa: E402
 from provider_profile import get_profile  # noqa: E402
+from recorded_run_journal import RecordedRunJournal  # noqa: E402
 
 MODEL_KINDS = {'classification', 'report', 'segmentation'}
 ARMS = ('r0', 'r1', 'r2', 'r3')
@@ -482,6 +483,7 @@ def build_plan(args, rows, records, runtime, profile, prompt, policy, protocol_s
     files = {'memory_agent_eval.py': Path(__file__), 'tool_variants.py': Path(variants.__file__),
              'provider_profile.py': Path(__file__).with_name('provider_profile.py'),
              'provider_ledger.py': Path(__file__).with_name('provider_ledger.py'),
+             'recorded_run_journal.py': Path(__file__).with_name('recorded_run_journal.py'),
              'memory_injection.py': Path(__file__).resolve().parents[1] / 'memory_pipeline/injection.py',
              'official_agent.py': args.repo / 'medrax/agent/agent.py',
              'official_classifier.py': args.repo / 'medrax/tools/classification.py',
@@ -564,7 +566,7 @@ def main(argv=None):
     parser.add_argument('--profile', default='qwen3-vl-plus')
     parser.add_argument('--arm', choices=ARMS, default='r0')
     parser.add_argument('--pool', type=Path)
-    parser.add_argument('--pool-sha256')
+    parser.add_argument('--pool-sha256', help='Optional historical digest for recording; never a loading requirement')
     parser.add_argument('--top-k', type=int, default=3)
     parser.add_argument('--min-score', type=float, default=0.0)
     parser.add_argument('--memory-max-chars', type=int, default=1400)
@@ -589,8 +591,8 @@ def main(argv=None):
                         help='Stop a resumable run after this many consecutive model/tool failures')
     args = parser.parse_args(argv)
 
-    if args.arm != 'r0' and (args.pool is None or not args.pool_sha256):
-        parser.error('Memory arms require --pool and --pool-sha256')
+    if args.arm != 'r0' and args.pool is None:
+        parser.error('Memory arms require --pool')
     if args.top_k not in (1, 3, 5):
         parser.error('top-k must be one of the calibrated values 1, 3, 5')
     if any(not math.isfinite(x) or x <= 0 for x in (args.max_case_seconds, args.request_timeout_seconds)):
@@ -635,27 +637,30 @@ def main(argv=None):
         protocol = compute_protocol(probe_plan)
         plan = build_plan(args, rows, records, runtime, profile, prompt,
                           ledger.policy_snapshot(), protocol)
-        if compute_protocol(plan) != protocol:
-            raise RuntimeError('Protocol hash is not stable across plan construction')
         pool = None
         if args.pool is not None:
             from memory_pipeline.core import FrozenPool
             pool = FrozenPool.load(args.pool, expected_sha256=args.pool_sha256)
-            if pool.payload()['protocol_sha256'] != protocol:
-                raise ValueError('Pool protocol differs from this run configuration')
+            plan['memory']['hash_audit'] = pool.hash_audit()
+            plan['memory']['requested_pool_sha256'] = args.pool_sha256
+            plan['memory']['pool_sha256'] = pool.sha256
+            args.pool_sha256 = pool.sha256
+        plan['hash_policy'] = 'record_only'
         if args.plan_only:
             print(json.dumps({'protocol_sha256': protocol,
                               'questions': len(rows),
                               'available_tools': plan['available_tool_versions'],
                               'arm': args.arm,
                               'pool_loaded': pool is not None,
+                              'hash_policy': 'record_only',
+                              'pool_hash_audit': pool.hash_audit() if pool is not None else None,
                               'pool_protocol_matches': bool(pool) and
                               pool.payload()['protocol_sha256'] == protocol,
                               'max_tool_calls': plan['max_tool_calls'],
                               'max_model_calls': plan['max_model_calls'],
                               'max_output_tokens': plan['max_output_tokens']}, indent=1))
             return 0
-        journal = diag.RunJournal(output, plan, resume=args.resume)
+        journal = RecordedRunJournal(output, plan, resume=args.resume)
         reason = 'complete'
         failure_streak = 0
         try:

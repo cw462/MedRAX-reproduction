@@ -1,7 +1,8 @@
 # Official MAIRA-2 grounding offline smoke
 
-This runner uses the original synchronous MedRAX grounding tool at commit
-`dae30e2f136ef0b2a40885a4c335386e9ffad052`. It requires an authorized, complete
+This runner uses the local synchronous MedRAX grounding tool. Historical source
+reference: `dae30e2f136ef0b2a40885a4c335386e9ffad052`. Its actual source/commit
+metadata is recorded; changes no longer block loading. It requires an authorized, complete
 local snapshot of `microsoft/maira-2` revision
 `795a2b1cd4a310624b4e3d14b5a23e41fd273deb`. It never requests credentials,
 accepts access conditions, downloads a file, or calls an external API.
@@ -18,7 +19,7 @@ Use a standard cache containing:
 models--microsoft--maira-2/snapshots/795a2b1cd4a310624b4e3d14b5a23e41fd273deb/
 ```
 
-The code pins all **22 files / 27,525,118,360 bytes**, including six safetensors
+The required local inventory covers **22 files / 27,525,118,360 bytes**, including six safetensors
 shards, all configuration/tokenizer files, chat template, license notices, and
 the three reviewed custom Python modules. The complete checkpoint includes
 the DINOv2 image backbone and Llama language model. No separate RAD-DINO or
@@ -33,9 +34,14 @@ The actual GPU peak and quantized compatibility remain to be measured.
 The loader retains the original `load_in_8bit=True`, `load_in_4bit=False` and
 does not add a dtype override. All model/processor loads are local-only;
 pickle fallback is denied. The reviewed custom classes execute from a new
-private HF dynamic-module cache, and their loaded source digests are checked.
+private HF dynamic-module cache, and their actual loaded source digests are recorded without equality requirements.
 Initialize in a fresh worker with exactly one visible CUDA GPU. Loader/network
 patches are process-wide, so initialization must precede unrelated API work.
+
+The user requested removal of immutable-hash rules. Weight checksums are skipped;
+file existence and complete weight download sizes still determine readiness.
+Small-file and source hashes are recorded as provenance only. A changed code,
+configuration or model digest does not itself stop the run.
 
 ## CLI and factory
 

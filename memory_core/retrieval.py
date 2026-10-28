@@ -9,9 +9,9 @@ from pathlib import Path
 import re
 
 from .schema import (
-    SCHEMA_VERSION, TASKS, MODALITIES, VIEWS, AuditRegistry, Experience,
+    SCHEMA_VERSION, TASKS, MODALITIES, VIEWS, TOOLS, AuditRegistry, Experience,
     canonical_bytes, catalog_payload, digest, exact_enum, identifier, model_context,
-    parse_versions, read_json, retrieval_text, sha256_string, strict_fields, strict_list,
+    read_json, retrieval_text, strict_fields, strict_list,
 )
 
 
@@ -27,6 +27,16 @@ def implementation_hashes():
 
 def tokenize(text):
     return re.findall(r"[a-z0-9]+|[\u3400-\u9fff]", text.lower())
+
+
+def _available_tool_pairs(value):
+    """Validate available capabilities; version text is audit metadata only."""
+    if type(value) is not dict:
+        raise ValueError("available_tools must be an object")
+    for name, version in value.items():
+        exact_enum(name, TOOLS, "available tool name")
+        identifier(version)
+    return tuple(sorted(value.items()))
 
 
 @dataclass(frozen=True)
@@ -76,14 +86,14 @@ class RetrievalQuery:
         exact_enum(self.view, VIEWS, "query view")
         if type(self.available_tools) is not tuple or any(type(x) is not tuple for x in self.available_tools):
             raise ValueError("Available tool versions must be immutable")
-        if parse_versions(dict(self.available_tools), allow_empty=True) != self.available_tools:
+        if _available_tool_pairs(dict(self.available_tools)) != self.available_tools:
             raise ValueError("Available tools must be unique and sorted")
 
     @classmethod
     def from_dict(cls, value):
         strict_fields(value, ("question_id", "text", "task", "modality", "view", "available_tools"), "retrieval query")
         parsed = dict(value)
-        parsed["available_tools"] = parse_versions(value["available_tools"], allow_empty=True)
+        parsed["available_tools"] = _available_tool_pairs(value["available_tools"])
         return cls(**parsed)
 
 
@@ -145,6 +155,7 @@ class FrozenMemory:
     registry: AuditRegistry
     config: BM25Config
     records: tuple[Experience, ...]
+    _load_hash_audit: tuple[tuple[str, str | None], ...] = ()
 
     def __post_init__(self):
         if type(self.registry) is not AuditRegistry or type(self.config) is not BM25Config or type(self.records) is not tuple:
@@ -168,8 +179,13 @@ class FrozenMemory:
         return digest(self._payload())
 
     def assert_frozen(self, expected_sha256):
-        if self.sha256 != sha256_string(expected_sha256):
-            raise ValueError("Snapshot contents or retrieval configuration changed")
+        """Compatibility name: report equality without blocking a changed snapshot."""
+        return self.sha256 == expected_sha256
+
+    @property
+    def hash_audit(self):
+        """Return recorded load-time hashes; none establishes an admission gate."""
+        return dict(self._load_hash_audit)
 
     def save(self, path):
         payload = self._payload()
@@ -179,25 +195,23 @@ class FrozenMemory:
         return envelope["sha256"]
 
     @classmethod
-    def load(cls, path, *, expected_sha256):
-        """Requires an independently pinned digest, not just the file's own claim."""
-        expected_sha256 = sha256_string(expected_sha256)
+    def load(cls, path, *, expected_sha256=None):
+        """Load valid structured records; hashes are recorded, never version locks."""
         envelope = read_json(path)
         strict_fields(envelope, ("sha256", "payload"), "snapshot envelope")
         payload = envelope["payload"]
         strict_fields(payload, ("schema_version", "catalog", "tokenizer", "implementation_sha256", "registry", "config", "records", "evidence_kind"), "snapshot")
-        if envelope["sha256"] != expected_sha256 or digest(payload) != expected_sha256:
-            raise ValueError("Frozen snapshot digest does not match the independently pinned value")
         if type(payload["schema_version"]) is not int or payload["schema_version"] != SCHEMA_VERSION:
             raise ValueError("Unsupported snapshot schema")
         if canonical_bytes(payload["catalog"]) != canonical_bytes(catalog_payload()) or payload["tokenizer"] != TOKENIZER_VERSION:
             raise ValueError("Snapshot vocabulary/tokenizer differs from this implementation")
-        if payload["implementation_sha256"] != implementation_hashes():
-            raise ValueError("Snapshot implementation differs from this source revision")
         snapshot = cls(AuditRegistry.from_dict(payload["registry"]), BM25Config.from_dict(payload["config"]),
-                       tuple(Experience.from_dict(x) for x in strict_list(payload["records"], "memory records")))
-        # Also validates evidence_kind against registry provenance.
-        snapshot.assert_frozen(expected_sha256)
+                       tuple(Experience.from_dict(x) for x in strict_list(payload["records"], "memory records")),
+                       (("supplied_expected_sha256", None if expected_sha256 is None else str(expected_sha256)),
+                        ("recorded_payload_sha256", str(envelope["sha256"])),
+                        ("actual_payload_sha256", digest(payload)),
+                        ("recorded_implementation_sha256", canonical_bytes(payload["implementation_sha256"]).decode()),
+                        ("current_implementation_sha256", canonical_bytes(implementation_hashes()).decode())))
         return snapshot
 
     def search(self, query):
@@ -213,7 +227,7 @@ class FrozenMemory:
                 continue
             if record.view != "unknown" and record.view != query.view:
                 continue
-            if any(available.get(name) != version for name, version in record.tool_versions):
+            if any(name not in available for name, _ in record.tool_versions):
                 continue
             if record.outcome_kind != "success" and not self.config.include_failure_reflections:
                 continue

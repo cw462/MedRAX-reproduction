@@ -1,7 +1,7 @@
 """Single-image smoke of the official CheXagent tool using audited local assets.
 
-No downloads or model API calls. Verify the pre-reviewed manifest and all asset
-hashes before importing custom model code. The official tool/generation behavior
+No downloads or model API calls. Local files must be present and complete;
+source hashes are recorded without imposing an immutable-hash requirement. The official tool/generation behavior
 is preserved; network loads are mapped to two fixed local snapshots. This checks
 execution and output shape, never medical correctness or full MedRAX reproduction.
 """
@@ -18,6 +18,7 @@ from pathlib import Path
 import platform
 import re
 import socket
+import subprocess
 import sys
 import time
 from unittest.mock import patch
@@ -58,15 +59,20 @@ def sha256_file(path):
 
 
 def verify_tool_source(repo):
-    """Check the pinned LF source while retaining the checkout's actual bytes."""
+    """Record source hashes; source edits do not block execution."""
     raw = (Path(repo) / TOOL_RELATIVE).read_bytes()
     normalized = raw.replace(b'\r\n', b'\n')
     canonical = hashlib.sha256(normalized).hexdigest()
-    if canonical != TOOL_LF_SHA256:
-        raise ValueError('Official tool differs from the reviewed LF source')
+    try:
+        commit = subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD'], stderr=subprocess.DEVNULL, text=True).strip()
+        dirty = bool(subprocess.check_output(['git', '-C', str(repo), 'status', '--porcelain'], stderr=subprocess.DEVNULL, text=True).strip())
+    except (OSError, subprocess.CalledProcessError):
+        commit, dirty = None, None
     return {'filename': TOOL_RELATIVE, 'sha256': hashlib.sha256(raw).hexdigest(),
+            'commit': commit, 'working_tree_dirty': dirty,
             'lf_sha256': canonical, 'reviewed_upstream_commit': TOOL_REVIEWED_COMMIT,
-            'normalization': 'CRLF_to_LF_only'}
+            'normalization': 'CRLF_to_LF_only', 'hash_policy': 'record_only',
+            'review_is_historical_reference': True}
 
 
 def write_json(path, value):
@@ -76,14 +82,11 @@ def write_json(path, value):
 
 
 def verify_assets(snapshot, vision_snapshot, manifest_path, repo):
-    """The manifest itself is pinned to the independent static-review artifact."""
+    """Check required local files and sizes; checksums are observational only."""
     manifest_path, repo = Path(manifest_path), Path(repo)
-    if sha256_file(manifest_path) != APPROVED_MANIFEST_SHA256:
-        raise ValueError('Source manifest differs from the pre-reviewed manifest')
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-    if (manifest.get('schema_version') != 1 or manifest.get('review_status') != 'static_source_review_completed'
-            or manifest.get('required_transformers') != '4.40.0'):
-        raise ValueError('Static source review is missing')
+    if manifest.get('schema_version') != 1 or not isinstance(manifest.get('models'), dict):
+        raise ValueError('Unsupported asset inventory schema')
     verify_tool_source(repo)
     for key, path, model_id, revision, expected in (
         ('main', Path(snapshot), MODEL_ID, MODEL_REVISION, MAIN_FILES),
@@ -98,9 +101,14 @@ def verify_assets(snapshot, vision_snapshot, manifest_path, repo):
             raise ValueError('Unreviewed alternative checkpoint format present')
         for name, expected_file in spec['files'].items():
             file = path / name
-            if (not file.is_file() or file.stat().st_size != expected_file['bytes']
-                    or sha256_file(file) != expected_file['sha256']):
-                raise ValueError('Missing or modified reviewed asset')
+            if not file.is_file():
+                raise FileNotFoundError('Required local asset is missing')
+            is_weight = name.endswith('.safetensors')
+            if is_weight and file.stat().st_size != expected_file['bytes']:
+                raise ValueError('Local weight download is incomplete')
+            expected_file['sha256'] = None if is_weight else sha256_file(file)
+    manifest['checksum_verification'] = 'skipped_by_user'
+    manifest['hash_policy'] = 'record_only'
     return manifest
 
 
@@ -280,16 +288,16 @@ def main(argv=None):
         'clinical_correctness_verified': False, 'model_revision': MODEL_REVISION, 'vision_revision': VISION_REVISION,
         'runner_sha256': sha256_file(__file__), 'max_new_tokens': args.max_new_tokens,
         'protocol_deviations': ['One local image and short bounded generation; not a QA benchmark or full Agent.',
-            'Pre-reviewed local snapshots and no network; nested vision loads are explicitly pinned.',
+            'Selected local snapshots and no network; hashes are recorded without version gates.',
             'Official FP32 loading then BF16 casting and final-token slicing are preserved.',
             'Transformers must actually be 4.40.0; no version-spoof compatibility claim.']}
     write_json(args.output / 'summary.json', summary)
     try:
         image = validate_request(args.image, args.prompt, args.max_new_tokens)
         manifest = verify_assets(args.snapshot, args.vision_snapshot, args.approved_source_manifest, args.repo)
-        summary.update(approved_manifest_sha256=APPROVED_MANIFEST_SHA256,
+        summary.update(approved_manifest_sha256=sha256_file(args.approved_source_manifest),
             source_tool_sha256=verify_tool_source(args.repo)['sha256'],
-            source_tool_lf_sha256=TOOL_LF_SHA256, image_sha256=sha256_file(image),
+            source_tool_lf_sha256=verify_tool_source(args.repo)['lf_sha256'], image_sha256=sha256_file(image),
             prompt_sha256=hashlib.sha256(args.prompt.encode()).hexdigest(), assets=manifest['models'])
         env = {'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1', 'HF_HUB_DISABLE_TELEMETRY': '1',
                'HF_MODULES_CACHE': str((args.output / 'hf_modules').resolve()), 'MPLBACKEND': 'Agg'}

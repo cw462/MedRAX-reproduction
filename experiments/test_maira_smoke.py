@@ -47,7 +47,7 @@ class LoaderTests(unittest.TestCase):
             self.assertEqual(len(calls), 1)
             self.assertNotIn(directory, json.dumps(records))
 
-    def test_custom_code_must_match_hash_and_new_private_module_cache(self):
+    def test_custom_code_digest_can_change_but_private_module_cache_is_required(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory)
             modules, objects, files = {}, {}, {}
@@ -64,7 +64,9 @@ class LoaderTests(unittest.TestCase):
                 self.assertEqual(len(smoke.loaded_custom_code(tool, cache)), 3)
                 with self.assertRaises(ValueError): smoke.loaded_custom_code(tool, cache / "elsewhere")
                 (cache / "modeling_maira2.py").write_text("# TAMPERED")
-                with self.assertRaises(ValueError): smoke.loaded_custom_code(tool, cache)
+                observed = smoke.loaded_custom_code(tool, cache)
+                model = next(x for x in observed if x["role"] == "model")
+                self.assertEqual(model["sha256"], hashlib.sha256(b"# TAMPERED").hexdigest())
 
     def test_factory_preserves_original_8bit_and_uses_reviewed_local_loaders(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -93,11 +93,10 @@ def _source(repo, kind):
     commit, dirty = git("rev-parse", "HEAD"), bool(git("status", "--porcelain"))
     raw = (repo / SOURCE_RELATIVE[kind]).read_bytes()
     canonical = hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()
-    if commit != UPSTREAM_COMMIT or dirty or canonical != SOURCE_SHA256[kind]:
-        raise ValueError("Upstream source differs from the fixed clean tool source")
     return {"commit": commit, "working_tree_dirty": dirty, "relative_file": SOURCE_RELATIVE[kind],
             "tool_sha256": hashlib.sha256(raw).hexdigest(), "tool_lf_sha256": canonical,
-            "variant_module_sha256": classifier_audit.sha256_file(Path(__file__))}
+            "variant_module_sha256": classifier_audit.sha256_file(Path(__file__)),
+            "hash_policy": "record_only"}
 
 
 def _module(repo, kind):
@@ -110,7 +109,7 @@ def _module(repo, kind):
 
 
 def _deny_network(*args, **kwargs):
-    raise RuntimeError("Tool initialization requires complete verified local assets")
+    raise RuntimeError("Tool initialization requires complete local assets")
 
 
 @contextmanager
@@ -141,7 +140,8 @@ def _provenance(tool, kind, mode, source, assets, loads, environment):
     return {"kind": kind, "mode": mode, "tool_name": tool.name,
             "description_sha256": hashlib.sha256(tool.description.encode()).hexdigest(),
             "args_schema_sha256": _schema_hash(tool), "source": source,
-            "assets_verified": assets, "loads_observed": deepcopy(loads),
+            "assets_recorded": assets, "hash_policy": "record_only",
+            "checksum_verification": "skipped_by_user", "loads_observed": deepcopy(loads),
             "environment": environment, "offline_initialization": True,
             "clinical_evidence": "unknown", "clinical_correctness_evaluated": False,
             "step_credit": None}
@@ -169,15 +169,19 @@ def classifier_variant_class(base, mode):
     return OperatingPointClassifier
 
 
+def _checkpoint_asset(checkpoint, *, expected_bytes=None):
+    if not checkpoint.is_file() or checkpoint.stat().st_size <= 0:
+        raise FileNotFoundError("A nonempty local checkpoint is required")
+    if expected_bytes is not None and checkpoint.stat().st_size != expected_bytes:
+        raise ValueError("Local checkpoint download is incomplete")
+    return {"filename": checkpoint.name, "bytes": checkpoint.stat().st_size,
+            "sha256": None, "checksum_verification": "skipped_by_user"}
+
+
 def _classifier_asset(checkpoint):
-    if (not checkpoint.is_file() or checkpoint.name != CLASSIFIER_FILENAME or
-            checkpoint.stat().st_size != CLASSIFIER_WEIGHT_BYTES or
-            classifier_audit.sha256_file(checkpoint) != CLASSIFIER_WEIGHT_SHA256):
-        raise ValueError("Classifier checkpoint differs from the previously fixed local asset")
-    return {"filename": CLASSIFIER_FILENAME, "bytes": CLASSIFIER_WEIGHT_BYTES,
-            "sha256": CLASSIFIER_WEIGHT_SHA256,
-            "digest_basis": "fixed_download_sha256_verified_in_previous_real_smoke",
-            "model_name": classifier_audit.MODEL_NAME}
+    asset = _checkpoint_asset(checkpoint, expected_bytes=CLASSIFIER_WEIGHT_BYTES)
+    asset.update(model_name=classifier_audit.MODEL_NAME)
+    return asset
 
 
 def create_classifier_tool(repo, *, checkpoint, device, mode="original"):
@@ -192,7 +196,7 @@ def create_classifier_tool(repo, *, checkpoint, device, mode="original"):
         import torchxrayvision as xrv
         target = _device(torch, device)
         xrv_source = Path(xrv.__file__).resolve().parent / "models.py"
-        if xrv.__version__ != "1.3.5" or classifier_audit.sha256_file(xrv_source) != XRV_MODELS_SHA256:
+        if xrv.__version__ != "1.3.5":
             raise ValueError("The score-semantics variant requires the audited XRV 1.3.5 source")
         module = _module(repo, "classification")
         cls = classifier_variant_class(module.ChestXRayClassifierTool, mode)
@@ -209,16 +213,16 @@ def create_classifier_tool(repo, *, checkpoint, device, mode="original"):
                 patch.object(xrv.utils, "download", side_effect=_deny_network), \
                 patch.object(torch, "load", side_effect=load):
             tool = cls(model_name=classifier_audit.MODEL_NAME, device=target)
-        if len(loads) != 1 or _classifier_asset(checkpoint) != asset:
-            raise ValueError("Expected exactly one unchanged verified classifier load")
+        if len(loads) != 1:
+            raise ValueError("Expected exactly one classifier load")
         if (tool.name != "chest_xray_classifier" or tuple(tool.model.pathologies) != CLASSIFIER_LABELS or
                 tuple(xrv.datasets.default_pathologies) != CLASSIFIER_LABELS):
             raise ValueError("Classifier name or 18-output mapping differs from the fixed model")
     environment = classifier_audit.versions()
     environment["imported_runtime_versions"] = classifier_audit.loaded_module_versions()
     provenance = _provenance(tool, "classification", mode, source, [asset], loads, environment)
-    provenance.update(xrv_models_sha256=XRV_MODELS_SHA256,
-                      numeric_model_and_preprocessing_unchanged=True,
+    provenance.update(xrv_models_sha256=classifier_audit.sha256_file(xrv_source),
+                      factory_overrides_numeric_model_or_preprocessing=False,
                       changed_fields=[] if mode == "original" else ["description", "returned_metadata.note"])
     return tool, provenance
 
@@ -257,10 +261,22 @@ def report_variant_class(base, generation_config_class, mode):
 def _report_assets(cache_dir):
     snapshots, manifests = {}, []
     for role, spec in report_audit.MODEL_SPECS.items():
-        snapshot, manifest = report_audit.inspect_snapshot(cache_dir, spec)
-        # Freeze configs/tokenizers/processors as well as the weight bytes.
-        if manifest["manifest_sha256"] != REPORT_ASSET_MANIFESTS[role]:
-            raise ValueError("Report snapshot differs from the assets used by the successful fixed smoke")
+        snapshot = (Path(cache_dir) / ("models--" + spec["repo_id"].replace("/", "--")) /
+                    "snapshots" / spec["revision"])
+        if any(not (snapshot / name).is_file() for name in report_audit.REQUIRED_FILES):
+            raise FileNotFoundError("Required report snapshot is incomplete")
+        artifacts = []
+        for name in report_audit.AUDITED_FILES:
+            path = snapshot / name
+            if path.is_file():
+                weight = name == "model.safetensors"
+                if weight and path.stat().st_size != spec["weight_bytes"]:
+                    raise ValueError("Report checkpoint download is incomplete")
+                artifacts.append({"filename": name, "bytes": path.stat().st_size,
+                    "sha256": None if weight else classifier_audit.sha256_file(path)})
+        manifest = {"repo_id": spec["repo_id"], "revision": spec["revision"],
+                    "files": artifacts, "checksum_verification": "skipped_by_user"}
+        manifest["manifest_sha256"] = _hash_json(manifest)
         snapshots[spec["repo_id"]] = (role, snapshot)
         manifests.append({"role": role, **manifest})
     return snapshots, manifests
@@ -304,8 +320,8 @@ def create_report_tool(repo, *, cache_dir, device, mode="original"):
                                 "pad_token_id", "decoder_start_token_id")}
             if str(model.dtype) != "torch.float32":
                 raise ValueError("Report weights must retain the original FP32 inference dtype")
-        if _report_assets(cache_dir)[1] != assets:
-            raise ValueError("Report asset files changed during initialization")
+    for entry in loads:
+        entry["provenance"] = "successful_from_pretrained_local_snapshot"
     environment = report_audit.versions()
     environment["imported_runtime_versions"] = report_audit.imported_versions(environment)
     # Transformers is a lazy module: getattr resolves its version when vars alone does not.
@@ -321,12 +337,12 @@ def create_segmentation_tool(repo, *, checkpoint, device, temp_dir):
     """Load the unchanged official PSPNet tool; put private overlays in a new dir.
 
     The caller supplies an existing parent directory and a never-used temp_dir.
-    No inference happens here. The fixed hash is the prior verified local
-    download hash, not an upstream-authenticated release digest.
+    No inference happens here. Weight checksums are skipped; file completeness
+    and actual model loading determine readiness.
     """
     repo, checkpoint, temp_dir = (Path(path).expanduser().resolve() for path in (repo, checkpoint, temp_dir))
     source = _source(repo, "segmentation")
-    asset = segmentation_audit.validate_checkpoint(checkpoint, SEGMENTATION_WEIGHT_SHA256)
+    asset = _checkpoint_asset(checkpoint, expected_bytes=segmentation_audit.CHECKPOINT_BYTES)
     temp_dir.mkdir(exist_ok=False)
     (temp_dir / ".gitignore").write_text("*\n", encoding="utf-8")
     loads = []
@@ -337,16 +353,15 @@ def create_segmentation_tool(repo, *, checkpoint, device, temp_dir):
         matplotlib.use("Agg")
         target = _device(torch, device)
         wrapper = Path(xrv.__file__).resolve().parent / "baseline_models/chestx_det/__init__.py"
-        if (xrv.__version__ != segmentation_audit.XRV_VERSION or
-                segmentation_audit.sha256_file(wrapper) != segmentation_audit.XRV_WRAPPER_SHA256):
+        if xrv.__version__ != segmentation_audit.XRV_VERSION:
             raise ValueError("Use the previously audited XRV 1.3.5 PSPNet wrapper")
         module = _module(repo, "segmentation")
         with patch.object(xrv.utils, "get_cache_dir", return_value=str(checkpoint.parent)), \
                 patch.object(xrv.utils, "download", side_effect=_deny_network), \
                 patch.object(torch, "load", side_effect=segmentation_audit.offline_load_recorder(torch.load, checkpoint, loads)):
             tool = module.ChestXRaySegmentationTool(device=target, temp_dir=temp_dir)
-        if (len(loads) != 1 or segmentation_audit.validate_checkpoint(checkpoint, SEGMENTATION_WEIGHT_SHA256) != asset):
-            raise ValueError("Expected one unchanged fixed PSPNet checkpoint load")
+        if len(loads) != 1:
+            raise ValueError("Expected one PSPNet checkpoint load")
         if (tool.name != "chest_xray_segmentation" or
                 tool.organ_map != dict(zip(segmentation_audit.ORGANS, range(14))) or
                 list(tool.model.targets) != list(segmentation_audit.ORGANS)):
@@ -356,7 +371,7 @@ def create_segmentation_tool(repo, *, checkpoint, device, temp_dir):
     env["imported_runtime_versions"] = segmentation_audit.imported_versions(env)
     provenance = _provenance(tool, "segmentation", "original", source, [asset], loads, env)
     provenance.update(changed_fields=[], model_channel_count=14,
-                      xrv_wrapper_sha256=segmentation_audit.XRV_WRAPPER_SHA256,
+                      xrv_wrapper_sha256=segmentation_audit.sha256_file(wrapper),
                       pixel_spacing_mm_assumed=0.2, physical_area_calibrated=False,
                       segmentation_is_reference_label=False, private_overlay_contains_source_image=True,
                       factory_did_inference=False)

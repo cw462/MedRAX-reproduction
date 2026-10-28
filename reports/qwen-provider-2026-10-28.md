@@ -106,19 +106,16 @@ case, 120 s request timeout, zero retries.
 
 ## Protocol separation
 
-`memory_pipeline` hashes the model and provider endpoint into `protocol_sha256`. Qwen runs
-therefore form their own protocol family and can never retrieve GPT-4o memory records, and
-vice versa. The frozen protocol for the current Qwen code state is
+`protocol_sha256`, source hashes, model/provider settings and tool versions are recorded
+in each run manifest for comparison. At the user's request, these hashes are **records
+only**: changing code, model assets, protocol metadata or a pool does not invalidate the
+pool or block loading, retrieval or resumption. `--pool-sha256` is optional metadata.
 
-```
-af04e2b8f868a655579db1d1186b36dae5c20f704863c1e2986223be70fe4574
-```
-
-Verified identical across two independent process invocations (2026-10-28). **Any edit to
-`memory_agent_eval.py`, `tool_variants.py`, `provider_profile.py`, `provider_ledger.py`,
-`memory_pipeline/injection.py`, the upstream tool sources, the prompts or the tool
-provenance changes this hash and invalidates the pool.** Freeze the code before building the
-pool.
+Retrieval checks that the required tools are available by name, alongside case and source
+partition rules. It does not require identical version digests or rebuilding memory after
+every edit. When interpreting results, use the recorded actual models and settings to
+identify differences between groups. The recorded source hashes of completed runs remain
+historical evidence, rather than restrictions on subsequent work.
 
 ## Known deviations to report
 

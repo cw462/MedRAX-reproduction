@@ -1,144 +1,72 @@
-# Train-only execution memory foundation
+# Training execution memory
 
-This module compiles completed, auditable tool executions into an immutable local
-pool. It does not call an API, read reference-label files, modify an Agent, or claim
-an accuracy improvement. It is an execution-fact foundation for the V3 experiment,
-not a completed implementation of its memory ablations.
+This module converts completed tool-call journals into structured training experiences
+and retrieves them for the Agent. It does not call a model API or read reference labels.
+The Qwen prototype has used a real training pool; aggregate results are recorded in
+`reports/qwen-memory-initial-2026-10-28.md` and subsequent comparison reports.
 
-Status at this delivery: offline tests and a read-only in-memory compilation check
-of the completed two-tool first-five logs have passed. No real pool snapshot was
-created, no memory-assisted Agent experiment was run, and no formal successful
-trajectory pool is available. The compilation check established five trajectories
-and ten tool executions, with task outcomes left unknown inside this module.
+## Hashes are records
 
-The compiler currently understands the original classifier/report multi-tool
-first-five format (optionally segmentation) and the separate historical
-single-classifier diagnostic format. `multitool_original` means that the declared
-tools used their original implementations; it does **not** mean the complete
-paper tool set was available. Those two pool families cannot be mixed. A future
-worker-backed or full-tool run requires an explicitly reviewed format adapter and
-a new protocol/pool version.
+Source, model, protocol, input and pool digests are recorded for tracing a run.
+They are not locks: editing code or changing those digests does not invalidate memory,
+discard a trajectory, require rebuilding the pool or block loading and retrieval.
+Historical expected hashes may be supplied as optional audit information.
 
-## Admission and evidence
-
-- The split manifest, audit index, and strict three-field inference inputs are
-  verified with the existing `memory_core` registry. No labels are opened.
-- The caller must independently pin the V3 leakage-exclusion manifest SHA-256.
-  Its bound `image_audit.jsonl` is checked too. Each run question's image byte
-  hashes must match that question's frozen input, even if execution renamed files.
-  Cross-split exact-duplicate case exclusions apply to new pools; membership in
-  the original training split alone is insufficient.
-- Only completed runs with consistent manifest, summary, started/terminal pairs,
-  thread IDs, denominator, and actual per-tool counters are accepted. Each actual
-  step must have argument/image hashes, execution timing, and the initialized
-  tool's provenance version. Zero tool calls create no trajectory. An argument
-  rejected before invocation is not counted as an execution.
-- Tool output validity describes execution and output structure. Clinical
-  evidence is always `unknown`; step credit is always JSON `null`. A correct final
-  answer never turns an individual step into medically verified evidence.
-- Original reasoning and report text were not retained by these source runs.
-  Their hashes cannot reconstruct that text. The compiler stores safe structures
-  and source references; it does not invent the missing content.
-- File hashes establish consistency with supplied artifacts, not authenticity of
-  an external producer. The independently pinned artifacts remain the trust root.
-
-Task outcomes default to `unknown`. A separate evaluator may supply this strict
-sidecar; reference answers, predicted letters, and explanations are forbidden:
-
-```json
-{
-  "schema_version": 1,
-  "source_run_manifest_sha256": "64 hexadecimal characters",
-  "source_results_sha256": "64 hexadecimal characters",
-  "split_manifest_sha256": "64 hexadecimal characters",
-  "outcomes": [
-    {"question_id": "training question ID", "arm": "agent", "task_outcome": "correct"}
-  ]
-}
+```python
+pool = FrozenPool.load("/private/pool.json")
+audit = pool.hash_audit()  # Actual digest and observed changes; no rejection.
 ```
 
-Allowed outcomes are `correct`, `incorrect`, `invalid`, `error`, and `unknown`.
-Correct/incorrect rows require a completed response. The compiler checks the
-sidecar's file bindings and training membership; the independent evaluator is
-responsible for the outcome judgment. Adding outcomes creates a new immutable
-pool rather than changing an existing snapshot.
+`expected_sha256=...` remains an optional compatibility argument. It never requires
+equality with the current pool. Pool and implementation updates can be loaded together.
+An explicit pool version and previous-pool digest can describe an update without being
+requirements to edit its content. Saving uses a new filename to preserve existing files.
 
-## Compile without API calls
+## Data and execution boundaries
 
-Run from the repository root, replacing paths and the independently verified
-exclusion hash:
+- Training membership, case IDs, excluded-case lists and strict field schemas remain
+  checked. Validation and heldout trajectories cannot become training experiences.
+- Completed runs must contain the declared questions, matched starts/terminals and
+  thread identities, supported tool kinds and actual invocation counts. Zero actual
+  tool calls create no experience. Updated source/tool/image hashes are audit notes.
+- Outcome sidecars contain question ID, arm and a coarse outcome plus file metadata.
+  Reference letters, predictions, explanations and report prose are not accepted.
+- Execution validity, whole-task correctness, clinical evidence and step credit remain
+  distinct. Clinical evidence is unknown and step credit is null in this module.
+- Output lengths and tool sequences do not reconstruct missing reasoning or reports.
 
-```powershell
-python -m memory_pipeline --splits C:\path\prepared_v2 --exclusions C:\path\audit_v3\leakage_exclusion_manifest.json --exclusions-sha256 PINNED_SHA256 --run C:\path\multi_tool_first5_v1 --output C:\path\memory_execution_first5_v1 --pool-version 1
+## Compile and retrieve
+
+```bash
+python -m memory_pipeline --splits /private/prepared_v2 --exclusions /private/exclusions.json --run /private/completed-training-run --output /private/new-pool --pool-version 1 --outcomes /private/scorer-outcomes.json
 ```
 
-The output directory must be new. It receives `pool.json`, `compile_report.json`,
-and a `.gitignore` that keeps private evidence out of Git. For a separately scored
-version add `--outcomes C:\path\safe_outcomes.json`, increment `--pool-version`,
-and supply `--previous-pool-sha256` from the previous report. Historical single-tool
-compilation requires the explicit `--family historical_classifier` flag.
+`--exclusions-sha256` is optional. Compilation records actual file digests and observed
+differences. The older `allow_image_integrity_skip` argument remains compatible; a hash
+difference no longer causes skipping or rejection.
 
-Load with `FrozenPool.load(path, expected_sha256=independently_pinned_pool_sha)`.
-The payload and implementation source hashes must match. In-memory payload copies
-cannot mutate a frozen pool, and saving refuses to overwrite an existing file.
+Retrieval accepts the current question ID, visible question/images, available tools
+and protocol metadata. It excludes every experience from the current case and checks
+that the tools actually used in a trajectory are available. It does not require exact
+version hashes or equality of the entire registered tool set. Protocol digests may
+differ. Default retrieval uses known successful training outcomes; include_failures
+also admits known failures. Unknown outcomes are never treated as success. Heldout
+queries require a separate evaluation adapter and remain disabled here.
 
-## Retrieval boundary and current limits
+Summary mode produces deterministic execution summaries, not an LLM medical summary.
+`injection.build_memory_block` renders only permitted context fields, without source
+case/question identifiers, answer text or raw report prose. The Agent entry is
+`experiments/memory_agent_eval.py`: memory arms require --pool, with no required hash.
+Resuming after code/hash updates records the new plan in `plan_history.jsonl`, while
+keeping the original manifest and completed question outcomes.
 
-`FrozenPool.search` accepts exactly `question_id`, `question`, `images`,
-`available_tools` (name-to-version-hash mapping), and `protocol_sha256`. Visible
-question/image references must exactly match the frozen input. The query's entire
-available tool set and versions must match; the protocol includes prompts, model,
-limits, package versions, and source hashes. Every same-case trajectory is removed
-before BM25 scoring, including other questions from that case. Heldout queries
-are deliberately disabled until a separate locked final-evaluation adapter exists.
+## Offline checks
 
-The default search admits only independently marked successful trajectories.
-Unknown outcomes never count as successes. `include_failures=True` additionally
-admits known incorrect/invalid/error outcomes for a later failure-memory condition.
-The output context excludes case/question/thread identifiers, audit references,
-outcome flags, answer text, raw options, and raw reports. Returned memory IDs and
-scores are audit metadata; an eventual Agent adapter must pass only `context`.
-
-Search uses fixed BM25 over a small vocabulary of operational task features and
-observed tool names. Features come from the question stem before the options.
-This is a coarse lexical baseline, not medical semantic retrieval or an image
-embedding. `summary_mode=True` emits a **deterministic execution-rule summary**,
-explicitly marked as such. It is not an LLM summary and cannot claim causal step
-credit or reconstruct missing medical reasoning.
-
-Not yet implemented: real-tokenizer token-matched random controls, learned retrieval, LLM
-success/failure summaries, clinical step judgments, heldout evaluation, or reported performance
-gains. No mock token counts are accepted as a substitute for a future real tokenizer.
-
-## Agent-side injection (2026-10-28)
-
-`injection.build_memory_block(hits, max_chars=...)` renders validated retrieval contexts into a
-bounded prompt block and returns an audit record (rendered count, memory ids, scores, character
-count, SHA-256). It cannot widen the retrieval boundary: it only formats what
-`FrozenPool.search` returned. `experiments/memory_agent_eval.py` inserts the block into the
-first user prompt; the static prompt configuration is unchanged, so the protocol hash stays
-identical between the no-memory and memory arms.
-
-Rendered content is structural only (task features, tool order, execution validity, whitelisted
-integer output shapes, and — for failure-aware retrieval only — the whole-question outcome). No
-question text, options, answers, patient identifiers, case ids or report prose are rendered. One
-retrieval row per question is written to `retrieval.jsonl`.
-
-`compile_run` gained `allow_image_integrity_skip`: by default an execution whose image hash is
-not among the question's declared images still aborts compilation; with the flag (used once,
-after a documented server read fault) that question is skipped and counted as
-`image_read_integrity_failure`. Also added: `MEMORY_KIND` as an accepted run-format name for the
-new runner, and an optional `task_outcome` in the retrieved context for failure-aware retrieval.
-
-## Offline tests
-
-```powershell
-python -m unittest memory_pipeline.test_pipeline -v
+```bash
+python -m unittest memory_pipeline.test_pipeline memory_core.test_memory_core -v
+python -m unittest discover -s experiments -p 'test_recorded_run_journal.py' -v
 ```
 
-Tests use synthetic inference only. They check label-I/O guards (`builtins.open`
-and `io.open`, including `Path.open`), extra label fields, modified visible inputs,
-validation/heldout rejection, same-case exclusion, exact-duplicate quarantine,
-image substitution, execution/count/version proofs, family isolation,
-unknown/null semantics, safe context structures, independent snapshot hashes,
-immutability, and the disabled heldout boundary.
+Tests cover older hashes/implementations, updated tool versions, continued retrieval,
+source/label boundaries, case exclusion, actual execution accounting and resumption
+without repeating completed API work. Synthetic tests are software checks only.

@@ -1,4 +1,4 @@
-"""Offline smoke/factory for the unchanged official MedRAX LLaVA-Med tool.
+"""Offline smoke/factory for the local MedRAX LLaVA-Med tool.
 
 Use a standard HF cache with both fixed snapshots below. No downloads, CPU
 fallback, clinical validation, or Agent benchmark are performed by this script.
@@ -114,21 +114,18 @@ def source_provenance(repo):
                                        stderr=subprocess.DEVNULL).strip()
     if Path(git("rev-parse", "--show-toplevel")).resolve() != repo:
         raise ValueError("Use the fixed official checkout root")
-    if git("rev-parse", "HEAD") != UPSTREAM_COMMIT or git("status", "--porcelain"):
-        raise ValueError("Official checkout must retain the fixed clean commit")
     files = []
     for name, expected in SOURCE_SHA256.items():
         raw = (repo / name).read_bytes()
         canonical = hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()
-        if canonical != expected:
-            raise ValueError("Official LLaVA source digest mismatch")
         files.append({"filename": name, "sha256": hashlib.sha256(raw).hexdigest(), "lf_sha256": canonical})
-    return {"commit": UPSTREAM_COMMIT, "working_tree_dirty": False, "files": files,
+    return {"commit": git("rev-parse", "HEAD"), "working_tree_dirty": bool(git("status", "--porcelain")), "files": files,
+            "hash_policy": "record_only",
             "runner_sha256": sha256_file(Path(__file__))}
 
 
 def inspect_snapshot(cache_dir, spec):
-    """Hash every runtime artifact, including tokenizer/config, before importing ML."""
+    """Require complete local weights and configs; hashes never gate loading."""
     snapshot = (Path(cache_dir) / ("models--" + spec["repo_id"].replace("/", "--")) /
                 "snapshots" / spec["revision"])
     if not snapshot.is_dir():
@@ -142,33 +139,31 @@ def inspect_snapshot(cache_dir, spec):
         if not path.is_file():
             raise FileNotFoundError("Fixed snapshot is incomplete")
         before = path.stat()
-        if before.st_size != size or sha256_file(path) != expected:
-            raise ValueError("Local artifact differs from the fixed official snapshot")
+        weight = name.endswith((".safetensors", ".bin"))
+        if before.st_size <= 0 or (weight and before.st_size != size):
+            raise ValueError("Local artifact download is incomplete")
         after = path.stat()
-        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-            raise ValueError("Artifact changed during digest verification")
         states[name] = (after.st_size, after.st_mtime_ns)
-        artifacts.append({"filename": name, "bytes": size, "sha256": expected})
+        artifacts.append({"filename": name, "bytes": after.st_size,
+                          "sha256": None if weight else sha256_file(path)})
     if "model.safetensors.index.json" in spec["files"]:
         index = json.loads((snapshot / "model.safetensors.index.json").read_text(encoding="utf-8"))
         shards = {name for name in spec["files"] if name.endswith(".safetensors")}
         if not index.get("weight_map") or set(index["weight_map"].values()) != shards:
             raise ValueError("Weight index does not describe exactly the fixed shards")
     manifest = {"repo_id": spec["repo_id"], "revision": spec["revision"], "files": artifacts,
-                "weight_digest_source": "official_hub_lfs_sha256_at_fixed_revision",
-                "small_file_digest_source": "sha256_of_fixed_revision_download",
-                "all_required_artifacts_verified": True}
+                "reference_weight_digest_source": "official_hub_lfs_sha256_at_reference_revision",
+                "small_file_digest_source": "actual_local_bytes",
+                "all_required_artifacts_verified": False, "checksum_verification": "skipped_by_user",
+                "hash_policy": "record_only"}
     manifest["manifest_sha256"] = json_hash(manifest)
     return snapshot.resolve(), manifest, states
 
 
 def assert_files_unchanged(snapshot, states):
-    # Full hashes were checked before loading; this is a post-load stat check,
-    # not a second hash proof or protection against malicious concurrent writes.
-    for name, before in states.items():
-        now = (snapshot / name).stat()
-        if (now.st_size, now.st_mtime_ns) != before:
-            raise ValueError("An asset changed while the model was loading")
+    """Return whether stat metadata changed; changes no longer abort a run."""
+    return all((path.stat().st_size, path.stat().st_mtime_ns) == before
+               for name, before in states.items() for path in [snapshot / name])
 
 
 def deny_network(*args, **kwargs):
@@ -188,7 +183,7 @@ def offline_context():
 
 
 def local_loader(original, *, role, kind, snapshot, loads):
-    """Map only an exact repository ID or its verified local path; preserve kwargs."""
+    """Map only an exact repository ID or its local path; preserve kwargs."""
     snapshot = Path(snapshot).resolve()
     repo_id = MODEL_SPECS[role]["repo_id"]
     revision = MODEL_SPECS[role]["revision"]

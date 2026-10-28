@@ -135,16 +135,18 @@ class MemoryTests(unittest.TestCase):
         for clinical in ("verified", "refuted"):
             with self.assertRaises(ValueError): StepEvaluation(clinical_evidence=clinical)
 
-    def test_task_modality_tool_and_version_are_hard_filters(self):
+    def test_task_modality_and_tool_capability_are_filters_but_versions_are_metadata(self):
         pool = self.pool()
         for field, value in (("task", "classification"), ("modality", "CT"),
-                             ("available_tools", {}), ("available_tools", {"grounding": "fixture-v2"})):
+                             ("available_tools", {})):
             row = query_dict(); row[field] = value
             with self.subTest(field=field, value=value):
                 self.assertEqual(pool.search(RetrievalQuery.from_dict(row)), ())
-        for version in ("unknown", "latest", "*"):
+        for version in ("fixture-v2", "unknown", "latest", "*"):
             row = query_dict(); row["available_tools"]["grounding"] = version
-            with self.assertRaises(ValueError): RetrievalQuery.from_dict(row)
+            self.assertEqual(len(pool.search(RetrievalQuery.from_dict(row))), 1)
+        row = query_dict(); row["available_tools"] = {"unregistered_tool": "fixture-v1"}
+        with self.assertRaises(ValueError): RetrievalQuery.from_dict(row)
 
     def test_view_unknown_only_uses_generic_rules(self):
         specific = replace(self.record, view="PA")
@@ -174,10 +176,12 @@ class MemoryTests(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError): pool.config.top_k = 1
         with self.assertRaises(TypeError): pool.records[0].tool_versions[0] = ("grounding", "changed")
         exported = pool.records[0].to_dict(); exported["conditions"].append("arbitrary text")
-        pool.assert_frozen(before)
-        self.assertNotEqual(before, replace(pool, config=BM25Config(top_k=1)).sha256)
+        self.assertTrue(pool.assert_frozen(before))
+        changed = replace(pool, config=BM25Config(top_k=1))
+        self.assertNotEqual(before, changed.sha256)
+        self.assertFalse(changed.assert_frozen(before))
 
-    def test_snapshot_roundtrip_and_tamper_rejected_even_with_self_updated_hash(self):
+    def test_snapshot_hash_changes_are_recorded_without_blocking_load(self):
         pool = self.pool()
         with TemporaryDirectory() as temp:
             path = Path(temp) / "snapshot.json"
@@ -185,12 +189,29 @@ class MemoryTests(unittest.TestCase):
             restored = FrozenMemory.load(path, expected_sha256=pinned)
             self.assertEqual(restored.sha256, pinned)
             self.assertEqual(restored.search(RetrievalQuery.from_dict(query_dict())), pool.search(RetrievalQuery.from_dict(query_dict())))
+            self.assertEqual(FrozenMemory.load(path).records, pool.records)
             with self.assertRaises(FileExistsError): pool.save(path)
             envelope = json.loads(path.read_text())
             envelope["payload"]["config"]["top_k"] = 1
+            envelope["payload"]["implementation_sha256"] = {"schema.py": h("older-source"), "retrieval.py": h("older-retriever")}
+            path.write_bytes(canonical_bytes(envelope))
+            loaded = FrozenMemory.load(path, expected_sha256=pinned)
+            self.assertEqual(loaded.config.top_k, 1)
+            self.assertFalse(loaded.assert_frozen(pinned))
+            self.assertEqual(loaded.hash_audit["supplied_expected_sha256"], pinned)
+            self.assertEqual(loaded.hash_audit["recorded_payload_sha256"], pinned)
+            self.assertEqual(loaded.hash_audit["actual_payload_sha256"], digest(envelope["payload"]))
+            exported = loaded.hash_audit; exported["actual_payload_sha256"] = "local change"
+            self.assertNotEqual(exported, loaded.hash_audit)
+
+    def test_loading_changed_snapshot_still_rejects_label_fields(self):
+        with TemporaryDirectory() as temp:
+            path = Path(temp) / "snapshot.json"; self.pool().save(path)
+            envelope = json.loads(path.read_text())
+            envelope["payload"]["records"][0]["answer"] = "SECRET_REFERENCE"
             envelope["sha256"] = digest(envelope["payload"])
             path.write_bytes(canonical_bytes(envelope))
-            with self.assertRaises(ValueError): FrozenMemory.load(path, expected_sha256=pinned)
+            with self.assertRaises(ValueError): FrozenMemory.load(path)
 
     def test_bm25_order_and_pool_hash_do_not_change_with_query_history(self):
         other = replace(self.record, source_question_id="train-b", source_audit_ref=h("case-b"),
@@ -206,7 +227,7 @@ class MemoryTests(unittest.TestCase):
         reverse = self.pool(records=[self.record, other])
         self.assertEqual(pool.sha256, reverse.sha256)
 
-    def test_verified_split_loader_never_reads_label_files_and_detects_changes(self):
+    def test_split_loader_records_changed_hashes_without_reading_labels_and_keeps_boundaries(self):
         with TemporaryDirectory() as temp:
             root = Path(temp); rows = audit_rows()
             audit_path = root / "audit_index.jsonl"
@@ -239,6 +260,16 @@ class MemoryTests(unittest.TestCase):
             self.assertEqual(registry.source_kind, "split_artifacts")
             builder = MemoryBuilder(registry); builder.add(self.record)
             self.assertEqual(len(builder.freeze().records), 1)
+            changed_path = root / "memory_train.inputs.jsonl"
+            changed_rows = [json.loads(line) for line in changed_path.read_text().splitlines()]
+            changed_rows[0]["question"] = "Revised synthetic inference text"
+            changed_path.write_bytes(b"".join(canonical_bytes(row) for row in changed_rows))
+            changed_registry = AuditRegistry.from_split_directory(root)
+            self.assertNotEqual(dict(changed_registry.input_file_sha256)["memory_train"],
+                                dict(registry.input_file_sha256)["memory_train"])
+            changed_rows[0]["question_id"] = "validation-q"
+            changed_path.write_bytes(b"".join(canonical_bytes(row) for row in changed_rows))
+            with self.assertRaises(ValueError): AuditRegistry.from_split_directory(root)
             (root / "memory_train.inputs.jsonl").write_text("{}\n", encoding="utf-8")
             with self.assertRaises(ValueError): AuditRegistry.from_split_directory(root)
 

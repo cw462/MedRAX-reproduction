@@ -55,7 +55,8 @@ safe_audit)` and lets the runner supply a stable logical tool-request ID.
 attempt, including failed attempts. The official name, description, JSON
 argument schema and `return_direct` flag are obtained from the official class
 in its correct environment. The reconstructed main-process Pydantic schema
-must have exactly the same canonical hash or binding fails. The worker's
+must expose the same actual argument schema when binding. Source hashes and
+source/provenance fields are recorded without requiring historical equality. The worker's
 verified JSON can also be used with `official_function_schema(descriptor)`.
 
 The main runner must keep one shared per-case tool/model budget, wrap every
@@ -76,7 +77,7 @@ CheXagent's existing audited entry point couples loading and inference, so
 this first bridge starts a new process and reloads it for **every call**;
 initialization time is recorded separately from inference.
 
-Timeout, child death, malformed/oversized JSON, changed schema/source, invalid
+Timeout, child death, malformed/oversized JSON, changed actual tool capabilities, invalid
 serialization, response identity mismatch and invalid input raise
 `WorkerFailure`. They are never converted into a medical answer. Original
 tool returns with `analysis_status='failed'` remain original tool returns.
@@ -85,7 +86,7 @@ execution; duplicate request IDs in that pool session are refused. Failures
 record whether execution may have started. The trusted experiment runner owns
 cross-session resume and must not silently replay unresolved intents in a new
 pool root. Every pool root is new, so previous private outputs are not replaced.
-Freeze `pool.policy_snapshot()` in the run manifest; it records the image,
+Record `pool.policy_snapshot()` in the run manifest; it records the image,
 token, single-image, text, timeout and loading restrictions without private
 paths. It does not contain mutable current-case or model-loaded state.
 
@@ -129,3 +130,12 @@ not force the Agent to call every tool on every question.
 ```bash
 python -B -m unittest discover -s experiments -p 'test_worker_bridge.py' -v
 ```
+
+## Hash policy
+
+Source, model, config and provenance hashes are records, not immutable version
+requirements. Editing a worker or source file no longer prevents a new worker
+launch, and a descriptor's changed source hash does not invalidate a compatible
+tool. Changes to actual tool names, descriptions, argument schemas or return
+behavior require a new binding. Same-request identity, parameter/result message
+checks and the current-case image/path allowlist remain enforced.

@@ -50,7 +50,7 @@ class SnapshotTests(unittest.TestCase):
             self.assertNotIn(directory, json.dumps(manifest))
             smoke.assert_files_unchanged(actual, states)
 
-    def test_changed_config_and_unverified_tokenizer_rejected(self):
+    def test_unknown_files_rejected_but_changed_config_digest_recorded(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             spec, path = self.fixture(root)
@@ -59,8 +59,10 @@ class SnapshotTests(unittest.TestCase):
                 smoke.inspect_snapshot(root, spec)
             (path / "tokenizer.json").unlink()
             (path / "config.json").write_bytes(b"X" * spec["files"]["config.json"][0])
-            with self.assertRaises(ValueError):
-                smoke.inspect_snapshot(root, spec)
+            _, observed, _ = smoke.inspect_snapshot(root, spec)
+            config = next(x for x in observed["files"] if x["filename"] == "config.json")
+            self.assertEqual(config["sha256"], hashlib.sha256((path / "config.json").read_bytes()).hexdigest())
+            self.assertEqual(observed["hash_policy"], "record_only")
 
     def test_missing_shard_and_index_reference_escape_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -75,14 +77,13 @@ class SnapshotTests(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 smoke.inspect_snapshot(root, spec)
 
-    def test_post_load_mutation_detected(self):
+    def test_post_load_stat_change_is_observational(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             spec, path = self.fixture(root)
             actual, _, states = smoke.inspect_snapshot(root, spec)
             (path / "a.safetensors").write_bytes(b"changed-length")
-            with self.assertRaises(ValueError):
-                smoke.assert_files_unchanged(actual, states)
+            self.assertFalse(smoke.assert_files_unchanged(actual, states))
 
 
 class LoaderTests(unittest.TestCase):

@@ -53,13 +53,11 @@ def describe(spec):
         import transformers
         if transformers.__version__ != "4.40.0": raise ValueError("Wrong CheXagent Transformers runtime")
         source = smoke.verify_tool_source(spec.repo)
-        if bridge.file_digest(spec.asset_manifest) != smoke.APPROVED_MANIFEST_SHA256:
-            raise ValueError("CheXagent source/review manifest changed")
         module_spec = importlib.util.spec_from_file_location("_worker_official_chexagent", Path(spec.repo) / smoke.TOOL_RELATIVE)
         module = importlib.util.module_from_spec(module_spec); sys.modules[module_spec.name] = module
         module_spec.loader.exec_module(module)
         cls = module.XRayVQATool
-        source = dict(source, review_manifest_sha256=smoke.APPROVED_MANIFEST_SHA256)
+        source = dict(source, review_manifest_sha256=bridge.file_digest(spec.asset_manifest), hash_policy="record_only")
     fields = cls.model_fields
     schema = fields["args_schema"].default.model_json_schema()
     return {"name": fields["name"].default, "description": fields["description"].default,
@@ -155,17 +153,15 @@ def invoke_real(spec, tool, provenance, params, images, root, *, first_call, ima
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--config-sha256", required=True)
+    parser.add_argument("--config-sha256", help="Optional provenance record; never a version gate")
     parser.add_argument("--describe", action="store_true")
     args = parser.parse_args(argv)
     protocol_out = sys.stdout.buffer
     request = None
     try:
-        if bridge.file_digest(args.config) != args.config_sha256: raise ValueError("Private config digest mismatch")
         config = bridge.parse_json(args.config.read_text(encoding="utf-8"))
-        if (config.get("protocol") != bridge.PROTOCOL or config.get("worker_script_sha256") != bridge.file_digest(__file__) or
-                config.get("bridge_sha256") != bridge.file_digest(bridge.__file__)):
-            raise ValueError("Frozen worker/bridge source mismatch")
+        if config.get("protocol") != bridge.PROTOCOL:
+            raise ValueError("Unsupported worker protocol")
         spec = bridge.WorkerSpec(**config["spec"]); spec.validate()
         cases = bridge.validate_cases(config["cases"])
         if bridge.digest(cases) != config["cases_sha256"]: raise ValueError("Frozen case-image allowlist mismatch")
@@ -178,7 +174,7 @@ def main(argv=None):
             stack.enter_context(patch.object(socket, "create_connection", side_effect=deny_network))
             descriptor = describe(spec)
             emit(protocol_out, {"protocol": bridge.PROTOCOL, "event": "ready", "tool_name": bridge.KINDS[spec.kind],
-                "descriptor": descriptor, "worker_script_sha256": config["worker_script_sha256"],
+                "descriptor": descriptor, "worker_script_sha256": bridge.file_digest(__file__),
                 "cases_sha256": config["cases_sha256"]})
             if args.describe: return 0
             tool, provenance, first_call = None, None, True

@@ -22,6 +22,7 @@ p=argparse.ArgumentParser();p.add_argument('--config');p.add_argument('--config-
 c=b.parse_json(open(a.config,encoding='utf-8').read()); kind=c['spec']['kind']; name=b.KINDS[kind]
 descriptor={'name':name,'description':'SYNTHETIC IPC FIXTURE, NOT A MEDICAL TOOL','parameters':{'title':'SyntheticInput','type':'object','properties':{}},'return_direct':False,'model_loaded':False}
 descriptor['schema_sha256']=b.digest(descriptor['parameters'])
+descriptor['source']={'worker_script_sha256':c['worker_script_sha256']}
 def send(x): print(json.dumps(x,allow_nan=False),flush=True)
 send({'protocol':1,'event':'ready','tool_name':name,'descriptor':descriptor,'worker_script_sha256':c['worker_script_sha256'],'cases_sha256':c['cases_sha256']})
 if a.describe: sys.exit(0)
@@ -161,12 +162,24 @@ class PoolTests(unittest.TestCase):
             with self.assertRaises(bridge.WorkerFailure): self.pool.set_case("case_a")
         finally: self.pool.busy.release()
 
-    def test_gpu_slot_lock_competing_handles_and_source_change_fail_closed(self):
+    def test_gpu_slot_lock_enforced_but_source_hash_changes_do_not_block(self):
         lock = bridge._GpuLock(self.root / "gpu.lock")
         with self.assertRaises(bridge.WorkerFailure): lock.acquire()
+        old = self.pool.describe("llava_med_qa")["source"]["worker_script_sha256"]
         self.worker.write_text(self.worker.read_text() + "\n# CHANGED\n")
-        with self.assertRaises(bridge.WorkerFailure) as error: self.request("synthetic")
-        self.assertEqual(error.exception.category, "worker_source_changed")
+        result, _ = self.request("synthetic")
+        self.assertEqual(result[0]["synthetic"], "PRIVATE_FAKE_RESULT")
+        actual = self.pool.descriptors["llava_med_qa"]["source"]["worker_script_sha256"]
+        self.assertNotEqual(old, actual)
+        self.assertEqual(actual, bridge.file_digest(self.worker))
+
+    def test_changed_tool_capabilities_still_require_a_new_binding(self):
+        self.pool.describe("llava_med_qa")
+        self.worker.write_text(self.worker.read_text().replace(
+            "SYNTHETIC IPC FIXTURE, NOT A MEDICAL TOOL", "CHANGED TOOL DESCRIPTION"))
+        with self.assertRaises(bridge.WorkerFailure) as error:
+            self.request("synthetic")
+        self.assertEqual(error.exception.category, "official_capabilities_changed")
 
     def test_policy_snapshot_records_restrictions_without_private_paths(self):
         policy = self.pool.policy_snapshot()
@@ -214,7 +227,7 @@ class ProxyTests(unittest.TestCase):
 
 
 class WorkerEntrypointTests(unittest.TestCase):
-    def run_worker(self, mutation=None):
+    def run_worker(self, mutation=None, config_mutation=None):
         import medical_tool_worker as worker
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -225,6 +238,7 @@ class WorkerEntrypointTests(unittest.TestCase):
                       "cases_sha256": bridge.digest(cases), "private_root": str(root),
                       "worker_script_sha256": bridge.file_digest(worker.__file__),
                       "bridge_sha256": bridge.file_digest(bridge.__file__)}
+            if config_mutation is not None: config_mutation(config)
             path = root / "config.private.json"; bridge.write_private(path, config)
             params = {"image_path": str(image), "question": "SYNTHETIC"}
             request = {"protocol": 1, "op": "invoke", "request_id": "synthetic-request", "case_id": "current",
@@ -256,6 +270,14 @@ class WorkerEntrypointTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(len(calls), 1)
         self.assertEqual([event["event"] for event in events], ["ready", "result"])
+        self.assertEqual(bridge.decode_value(events[1]["result_tree"]), original)
+
+    def test_worker_config_source_hashes_are_records_without_version_locks(self):
+        def changed(config):
+            config.update(worker_script_sha256="0" * 64, bridge_sha256="1" * 64)
+        code, events, calls, original = self.run_worker(config_mutation=changed)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 1)
         self.assertEqual(bridge.decode_value(events[1]["result_tree"]), original)
 
     def test_worker_checks_case_and_parameter_digest_before_invoking(self):

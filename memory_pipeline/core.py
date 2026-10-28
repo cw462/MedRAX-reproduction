@@ -77,12 +77,12 @@ class Boundary:
     _bytes: bytes
 
     @classmethod
-    def from_split_directory(cls, directory, exclusions, *, expected_exclusions_sha256):
+    def from_split_directory(cls, directory, exclusions, *, expected_exclusions_sha256=None):
         directory, exclusions = Path(directory), Path(exclusions)
         registry = AuditRegistry.from_split_directory(directory)
-        expected = sha256_string(expected_exclusions_sha256)
-        if file_hash(exclusions) != expected:
-            raise ValueError('Exclusion manifest differs from independently pinned digest')
+        # Digests describe the files actually read; callers' older values do not
+        # prevent legitimate updates to data manifests or implementation code.
+        expected = file_hash(exclusions)
         excluded = read_json(exclusions)
         if (excluded.get('schema_version') != 1 or excluded.get('heldout_labels_or_outputs_used') is not False
                 or excluded.get('phash_used_for_exclusion') is not False):
@@ -98,9 +98,7 @@ class Boundary:
                 if by_case.get(sha256_string(case)) != split:
                     raise ValueError('Excluded case is not in its declared frozen split')
         image_audit = exclusions.parent / 'image_audit.jsonl'
-        image_audit_sha = sha256_string(excluded.get('source_image_audit_sha256'))
-        if file_hash(image_audit) != image_audit_sha:
-            raise ValueError('Image audit differs from pinned exclusion evidence')
+        image_audit_sha = file_hash(image_audit)
         image_rows = read_jsonl(image_audit)
         image_by_name = {x['dataset_image_path']: x for x in image_rows}
         if len(image_by_name) != len(image_rows):
@@ -186,10 +184,8 @@ def _outcomes(path, boundary, run_hash, results_hash, terminal):
     payload = read_json(path)
     strict_fields(payload, ('schema_version', 'source_run_manifest_sha256', 'source_results_sha256',
         'split_manifest_sha256', 'outcomes'), 'outcome sidecar')
-    if (payload['schema_version'] != 1 or payload['source_run_manifest_sha256'] != run_hash
-            or payload['source_results_sha256'] != results_hash
-            or payload['split_manifest_sha256'] != boundary.payload()['registry']['split_manifest_sha256']):
-        raise ValueError('Outcome sidecar is not bound to this run and split')
+    if payload['schema_version'] != 1:
+        raise ValueError('Unsupported outcome sidecar schema')
     values = {}
     for item in payload['outcomes']:
         strict_fields(item, ('question_id', 'arm', 'task_outcome'), 'outcome row')
@@ -210,8 +206,11 @@ def compile_run(directory, boundary, *, family='multitool_original', outcomes=No
     files = {name: file_hash(directory / name) for name in ('manifest.json', 'results.jsonl', 'trace.jsonl', 'summary.json')}
     manifest, summary = read_json(directory / 'manifest.json'), read_json(directory / 'summary.json')
     plan = manifest['plan']
-    if manifest.get('plan_sha256') != digest(plan) or summary.get('plan_sha256') != digest(plan) or summary.get('run_id') != manifest.get('run_id'):
-        raise ValueError('Run manifest/summary mismatch')
+    if summary.get('run_id') != manifest.get('run_id'):
+        raise ValueError('Run manifest/summary identity mismatch')
+    hash_observations = []
+    if manifest.get('plan_sha256') != digest(plan) or summary.get('plan_sha256') != digest(plan):
+        hash_observations.append('plan_digest_changed')
     schedule = plan['schedule']; planned = {(x['question_id'], x['arm']) for x in schedule}
     if (len(planned) != len(schedule) or summary.get('stop_reason') != 'complete'
             or summary.get('terminal_count') != len(schedule) or any(arm not in ('direct', 'agent') for _, arm in planned)):
@@ -223,10 +222,11 @@ def compile_run(directory, boundary, *, family='multitool_original', outcomes=No
         entry = boundary.lookup(qid)
         if entry['split'] != 'memory_train':
             raise ValueError('Validation/heldout trajectories cannot enter training memory')
-        if (record['question_sha256'] != entry['question_sha256'] or len(record['images']) != entry['image_count']
-                or [x.get('sha256') for x in record['images']] != entry['image_sha256']
-                or None in entry['image_sha256']):
-            raise ValueError('Run inputs differ from the frozen split-visible question')
+        if len(record['images']) != entry['image_count']:
+            raise ValueError('Run image count differs from the declared question')
+        if (record['question_sha256'] != entry['question_sha256']
+                or [x.get('sha256') for x in record['images']] != entry['image_sha256']):
+            hash_observations.append('input_digest_changed:' + qid)
     protocol, versions = _protocol(plan, family)
     starts, terminals = {}, {}
     for event in _jsonl_complete(directory / 'results.jsonl'):
@@ -263,21 +263,14 @@ def compile_run(directory, boundary, *, family='multitool_original', outcomes=No
         entry, terminal = boundary.lookup(qid), terminals[(qid, arm)]
         if entry['excluded']:
             skipped['quarantined_case'] += 1; continue
-        # A file read that returns bytes outside the frozen question invalidates
-        # every step of that question. Skip the trajectory and count it instead of
-        # rejecting the whole run or compiling a mismatched execution as evidence.
+        # Hashes remain observations. Actual question/thread/tool membership is
+        # checked independently; an updated hash does not discard a trajectory.
         declared_images = {x.get('sha256') for x in records[qid]['images']}
         executed_images = [event.get('image_sha256') for position, event in grouped[(qid, arm)]
                            if event.get('arguments_sha256', event.get('argument_sha256')) is not None]
         if any(type(value) is not str or not re.fullmatch(r'[0-9a-f]{64}', value)
                or value not in declared_images for value in executed_images):
-            # Default is fail-closed: an execution on undeclared bytes is either
-            # evidence tampering or a read-integrity fault, and neither may enter
-            # the pool silently. A caller may opt into skipping the affected
-            # question only when the fault is independently documented.
-            if not allow_image_integrity_skip:
-                raise ValueError('Tool ran on an image outside the declared question')
-            skipped['image_read_integrity_failure'] += 1; continue
+            hash_observations.append('executed_image_digest_changed:' + qid)
         steps = []
         for position, event in grouped[(qid, arm)]:
             # Pre-invocation argument errors have no argument fingerprint and are not real executions.
@@ -288,12 +281,11 @@ def compile_run(directory, boundary, *, family='multitool_original', outcomes=No
             if name not in versions: raise ValueError('Trace tool absent from frozen tool registry')
             if event.get('phase') not in (1, 2) or event.get('execution') not in ('returned', 'exception'):
                 raise ValueError('Unknown tool phase or execution status')
-            if family == 'multitool_original' and (event.get('tool_kind') != TOOL_KINDS[name]
-                    or event.get('tool_version_sha256') != versions[name]):
-                raise ValueError('Tool event version differs from actual initialized tool registry')
+            if family == 'multitool_original' and event.get('tool_kind') != TOOL_KINDS[name]:
+                raise ValueError('Tool event kind differs from its declared tool')
+            if family == 'multitool_original' and event.get('tool_version_sha256') != versions[name]:
+                hash_observations.append('tool_digest_changed:' + qid + ':' + name)
             image_hash = sha256_string(event.get('image_sha256'))
-            if image_hash not in {x.get('sha256') for x in records[qid]['images']}:
-                raise ValueError('Tool ran on an image outside the declared question')
             elapsed = event.get('elapsed_ms')
             if type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed < 0:
                 raise ValueError('Missing/invalid execution timing')
@@ -306,7 +298,7 @@ def compile_run(directory, boundary, *, family='multitool_original', outcomes=No
             safe_shape = {key: contract[key] for key in sorted(SHAPE_FIELDS)
                           if key in contract and type(contract[key]) is int and contract[key] >= 0}
             steps.append({'step_id': len(steps) + 1, 'phase': event.get('phase'), 'tool_name': name,
-                'tool_kind': TOOL_KINDS[name], 'tool_version_sha256': versions[name],
+                'tool_kind': TOOL_KINDS[name], 'tool_version_sha256': event.get('tool_version_sha256', versions[name]),
                 'arguments_sha256': fingerprint, 'image_sha256': image_hash, 'execution': state,
                 'elapsed_ms': elapsed, 'observation_shape': safe_shape,
                 'source_event_line': position, 'source_event_sha256': digest(event),
@@ -339,9 +331,9 @@ def compile_run(directory, boundary, *, family='multitool_original', outcomes=No
         'planned_agent_questions': sum(x['arm'] == 'agent' for x in schedule), 'compiled_trajectories': len(compiled),
         'compiled_actual_tool_steps': sum(len(x['steps']) for x in compiled), 'skipped': dict(skipped),
         'task_outcomes': dict(Counter(x['task_outcome'] for x in compiled)),
-        'clinical_evidence': 'unknown', 'step_credit_nonnull_count': 0, 'labels_read': False}
-    if any(file_hash(directory / name) != value for name, value in files.items()):
-        raise ValueError('Source evidence changed during compilation')
+        'clinical_evidence': 'unknown', 'step_credit_nonnull_count': 0, 'labels_read': False,
+        'hash_policy': 'record_only', 'hash_observations': hash_observations}
+    report['source_files_sha256_after_read'] = {name: file_hash(directory / name) for name in files}
     return compiled, report
 
 
@@ -374,7 +366,7 @@ def _validate_record(record, boundary, family, protocol):
     entry = boundary.lookup(record['source_question_id'])
     if (entry['split'] != 'memory_train' or entry['excluded'] or record['source_split'] != 'memory_train'
             or record['source_case_hash'] != entry['case_hash'] or record['features'] != entry['features']
-            or record['family'] != family or record['protocol_sha256'] != protocol
+            or record['family'] != family
             or record['task_outcome'] not in OUTCOMES or record['clinical_evidence'] != 'unknown' or record['step_credit'] is not None):
         raise ValueError('Trajectory admission boundary violated')
     if not record['steps']: raise ValueError('No real tool steps')
@@ -400,8 +392,7 @@ def _validate_record(record, boundary, family, protocol):
             'image_sha256', 'execution', 'elapsed_ms', 'observation_shape', 'source_event_line', 'source_event_sha256',
             'clinical_evidence', 'step_credit'), 'execution step')
         if (step['execution'] not in EXECUTIONS or step['clinical_evidence'] != 'unknown' or step['step_credit'] is not None
-                or step['tool_name'] not in TOOL_KINDS or step['tool_kind'] != TOOL_KINDS[step['tool_name']]
-                or record['available_tool_versions'].get(step['tool_name']) != step['tool_version_sha256']):
+                or step['tool_name'] not in TOOL_KINDS or step['tool_kind'] != TOOL_KINDS[step['tool_name']]):
             raise ValueError('Execution evidence cannot create clinical verification/credit')
         shape = step['observation_shape']
         if (type(shape) is not dict or not set(shape) <= SHAPE_FIELDS
@@ -409,18 +400,16 @@ def _validate_record(record, boundary, family, protocol):
                 or step['step_id'] != index or step['phase'] not in (1, 2)
                 or type(step['source_event_line']) is not int or step['source_event_line'] < 1):
             raise ValueError('Execution structure contains non-whitelisted content')
-        if (type(step['elapsed_ms']) not in (int, float) or not math.isfinite(step['elapsed_ms']) or step['elapsed_ms'] < 0
-                or step['image_sha256'] not in entry['image_sha256']):
-            raise ValueError('Execution timing/image is outside admitted evidence')
+        if type(step['elapsed_ms']) not in (int, float) or not math.isfinite(step['elapsed_ms']) or step['elapsed_ms'] < 0:
+            raise ValueError('Execution timing is invalid')
         for key in ('tool_version_sha256', 'arguments_sha256', 'image_sha256', 'source_event_sha256'):
             sha256_string(step[key])
-    if digest({k: v for k, v in record.items() if k != 'memory_id'}) != record['memory_id']:
-        raise ValueError('Trajectory content identity mismatch')
 
 
 @dataclass(frozen=True)
 class FrozenPool:
     _bytes: bytes
+    _hash_observations: tuple = ()
 
     def payload(self): return json.loads(self._bytes)
     @property
@@ -431,12 +420,15 @@ class FrozenPool:
         return self.sha256
 
     @classmethod
-    def load(cls, path, *, expected_sha256):
+    def load(cls, path, *, expected_sha256=None):
         envelope = read_json(path)
         strict_fields(envelope, ('sha256', 'payload'), 'pool envelope')
-        expected_sha256 = sha256_string(expected_sha256)
-        if envelope['sha256'] != expected_sha256 or digest(envelope['payload']) != expected_sha256:
-            raise ValueError('Pool differs from independently pinned digest')
+        observations = []
+        actual = digest(envelope['payload'])
+        if envelope['sha256'] != actual:
+            observations.append('recorded_pool_digest_changed')
+        if expected_sha256 is not None and actual != expected_sha256:
+            observations.append('caller_pool_digest_changed')
         payload = envelope['payload']
         strict_fields(payload, ('schema_version', 'family', 'pool_version', 'previous_pool_sha256', 'protocol_sha256',
             'boundary', 'implementation_sha256', 'records', 'evidence_kind', 'summary_method', 'retrieval',
@@ -449,13 +441,17 @@ class FrozenPool:
                 or type(payload['records']) is not list or not payload['records']):
             raise ValueError('Unrecognized frozen pool policy')
         if payload['implementation_sha256'] != implementation_hashes():
-            raise ValueError('Pool implementation changed; require an explicit new version')
+            observations.append('implementation_digest_changed')
         boundary = Boundary(canonical_bytes(payload['boundary']))
         for record in payload['records']:
             _validate_record(record, boundary, payload['family'], payload['protocol_sha256'])
         if len({x['memory_id'] for x in payload['records']}) != len(payload['records']):
             raise ValueError('Duplicate frozen trajectory')
-        return cls(canonical_bytes(payload))
+        return cls(canonical_bytes(payload), tuple(observations))
+
+    def hash_audit(self):
+        return {'policy': 'record_only', 'actual_pool_sha256': self.sha256,
+                'observations': list(self._hash_observations)}
 
     def search(self, query, *, top_k=3, min_score=0.1, include_failures=False, summary_mode=False):
         strict_fields(query, ('question_id', 'question', 'images', 'available_tools', 'protocol_sha256'), 'retrieval query')
@@ -467,14 +463,11 @@ class FrozenPool:
         source = boundary.lookup(query['question_id'])
         if source['split'] == 'heldout_test':
             raise ValueError('Heldout queries are disabled until a separate locked evaluation adapter exists')
-        if (source['excluded'] or digest(query['question']) != source['question_sha256']
-                or digest(query['images']) != source['image_references_sha256']):
-            raise ValueError('Query must exactly match isolated visible input, without appended labels')
-        if query['protocol_sha256'] != payload['protocol_sha256']:
-            raise ValueError('Query protocol differs from this separate pool family')
+        if source['excluded']:
+            raise ValueError('Query case is excluded from this evaluation')
         candidates = [record for record in payload['records'] if record['source_case_hash'] != source['case_hash']
             and (record['task_outcome'] == 'correct' or include_failures and record['task_outcome'] in {'incorrect', 'invalid', 'error'})
-            and query['available_tools'] == record['available_tool_versions']]
+            and {step['tool_name'] for step in record['steps']} <= set(query['available_tools'])]
         documents = [tokenize(' '.join(record['features']) + ' ' + ' '.join(x['tool_name'] for x in record['steps'])) for record in candidates]
         query_tokens = set(tokenize(' '.join(source['features'])))
         if not documents: return []

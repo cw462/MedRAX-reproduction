@@ -202,23 +202,20 @@ class AuditRegistry:
 
     @classmethod
     def from_split_directory(cls, directory):
-        """Verify existing data_tools outputs. Never open any labels file."""
+        """Load grouped data_tools inputs and record hashes; never open labels."""
         directory = Path(directory)
         manifest_path = directory / "manifest.json"
         manifest = read_json(manifest_path)
-        hashes = manifest.get("artifact_sha256", {})
+        if type(manifest) is not dict:
+            raise ValueError("Split manifest must be an object")
         audit_path = directory / "audit_index.jsonl"
         audit_hash = hashlib.sha256(audit_path.read_bytes()).hexdigest()
-        if hashes.get(audit_path.name) != audit_hash:
-            raise ValueError("Audit file digest differs from split manifest")
         rows = tuple(sorted((AuditRow.from_dict(x) for x in read_jsonl(audit_path)), key=lambda x: x.question_id))
         input_hashes, observed = [], set()
         by_question = {r.question_id: r for r in rows}
         for split in sorted(SPLITS):
             path = directory / f"{split}.inputs.jsonl"
             file_hash = hashlib.sha256(path.read_bytes()).hexdigest()
-            if hashes.get(path.name) != file_hash:
-                raise ValueError("Inference input digest differs from split manifest")
             input_hashes.append((split, file_hash))
             for row in read_jsonl(path):
                 strict_fields(row, ("question_id", "question", "images"), "inference input")
