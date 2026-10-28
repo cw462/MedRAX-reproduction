@@ -106,10 +106,29 @@ embedding. `summary_mode=True` emits a **deterministic execution-rule summary**,
 explicitly marked as such. It is not an LLM summary and cannot claim causal step
 credit or reconstruct missing medical reasoning.
 
-Not yet implemented: live Agent memory injection, real-tokenizer token-matched
-random controls, learned retrieval, LLM success/failure summaries, clinical step
-judgments, heldout evaluation, or reported performance gains. No mock token counts
-are accepted as a substitute for a future real tokenizer.
+Not yet implemented: real-tokenizer token-matched random controls, learned retrieval, LLM
+success/failure summaries, clinical step judgments, heldout evaluation, or reported performance
+gains. No mock token counts are accepted as a substitute for a future real tokenizer.
+
+## Agent-side injection (2026-10-28)
+
+`injection.build_memory_block(hits, max_chars=...)` renders validated retrieval contexts into a
+bounded prompt block and returns an audit record (rendered count, memory ids, scores, character
+count, SHA-256). It cannot widen the retrieval boundary: it only formats what
+`FrozenPool.search` returned. `experiments/memory_agent_eval.py` inserts the block into the
+first user prompt; the static prompt configuration is unchanged, so the protocol hash stays
+identical between the no-memory and memory arms.
+
+Rendered content is structural only (task features, tool order, execution validity, whitelisted
+integer output shapes, and — for failure-aware retrieval only — the whole-question outcome). No
+question text, options, answers, patient identifiers, case ids or report prose are rendered. One
+retrieval row per question is written to `retrieval.jsonl`.
+
+`compile_run` gained `allow_image_integrity_skip`: by default an execution whose image hash is
+not among the question's declared images still aborts compilation; with the flag (used once,
+after a documented server read fault) that question is skipped and counted as
+`image_read_integrity_failure`. Also added: `MEMORY_KIND` as an accepted run-format name for the
+new runner, and an optional `task_outcome` in the retrieved context for failure-aware retrieval.
 
 ## Offline tests
 

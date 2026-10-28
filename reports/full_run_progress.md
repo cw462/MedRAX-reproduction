@@ -1,26 +1,46 @@
-# V3 execution checkpoint
+# Execution checkpoint
 
-Updated 2026-10-27. The full experiment is **in progress**, with no complete paper reproduction, heldout memory comparison or demonstrated memory gain. Existing results remain unchanged.
+Updated 2026-10-28 (Asia/Shanghai). The full experiment is **still incomplete**: there is no
+paper reproduction, no heldout evaluation and no demonstrated general improvement. The first
+end-to-end run of the memory pipeline on a hosted Qwen model is complete enough to report.
 
-**Current priority, clarified by the user:** stop new paid question answering until all remaining tools are downloaded, integrity-verified and tested with real server inference. The completed two/three-tool five-case batches are functional checks only and will not be included as the formal full-tool baseline.
+## What changed since the 2026-10-27 checkpoint
 
-**Current blocker:** repeated server reads of the same unchanged file returned inconsistent bytes under two Python installations. Downloads and the automatic local-test continuation have stopped, with partial assets preserved. See the [integrity evidence and resumption gate](tool-readiness-integrity-blocker-2026-10-27.md). This is an observed read-integrity problem; its hardware/software cause is not established.
+- The Codex execution budget was exhausted; work continued in the DeepSeek Harness.
+- The central model is now `qwen3-vl-plus` (DashScope compatible endpoint) instead of
+  `gpt-4o-2024-11-20`. Provider facts, capability probes and the account-arrears incident are
+  in [qwen-provider-2026-10-28.md](qwen-provider-2026-10-28.md).
+- A memory-agent runner, a provider ledger, a prompt-block renderer, an independent scorer and
+  a paired comparison script were added (`experiments/memory_agent_eval.py`,
+  `provider_ledger.py`, `provider_profile.py`, `memory_pipeline/injection.py`,
+  `score_memory_runs.py`, `compare_memory_arms.py`).
+- A 60-question training pool run and a 30-question validation baseline were completed; a
+  frozen success pool (59 trajectories) was compiled. See
+  [memory-agent-qwen-2026-10-28.md](memory-agent-qwen-2026-10-28.md).
+- One server image flipped content in place (same size, same inode) and was healed; the
+  compiler now counts such questions as `image_read_integrity_failure` instead of rejecting
+  the whole run. See [data-read-integrity-2026-10-28.md](data-read-integrity-2026-10-28.md).
 
 | Phase | Evidence and current state |
 |---|---|
-| P0 audit | Complete image integrity/overlap audit; original case splits retained; validation30 frozen. GPU, fixed sources, environments, API pricing and the existing budget ledger checked. [Data audit](data-audit-v3-2026-10-27.md). |
-| P1 protocol | Historical 50 paired questions and selected ten-question cap follow-up retained. New validation30 repetitions and classifier-description control have not run. |
-| P1 real multiple tools | Two-tool and three-tool functional checks completed on the same five train cases. The second run exposed a batch-tool request exceeding the inherited limit and ending the arm; [details](three-tool-functional-check-2026-10-27.md). No formal full-tool baseline is claimed. |
-| Remaining tool deployment | Original segmentation has real standalone and Agent checks. CheXagent, LLaVA-Med and MAIRA-2 environments pass metadata imports, but large weights remain incomplete/unverified. Downloading is stopped on an observed read-integrity problem; their real GPU inference and Agent integration remain unverified. |
-| P2 trajectory pool | Target is at least 150 eligible training cases when resources permit. The two-tool functional batch has zero successful Agent outcomes and the three-tool check has one; neither is presented as the formal full-tool R0 pool. No success pool is claimed. |
-| P3 success retrieval | Not run. Strict real-trace ingestion and frozen retrieval are being implemented. Historical single-tool outcomes cannot be presented as full-tool R0 trajectories. |
-| P4 summaries / credit | No real summarizer or paired credit experiment. Clinical evidence remains unknown; credit remains null. |
-| P5 actions / conflicts / capacity | No real ablations. Candidate selection, comparable conflicts and capacity controls remain required. |
-| P6 heldout / full paper benchmark | Not run; see [heldout status](heldout_results.md). |
-| P7 external / online | Not run; see [external status](external_results.md). |
+| P0 audit | Complete image integrity/overlap audit; splits unchanged; validation30 frozen. [Data audit](data-audit-v3-2026-10-27.md). |
+| P1 protocol | Qwen profile frozen and hash-pinned; output ceiling caused two aborted R1 attempts (documented). Classifier-description control still not rerun. |
+| P1 real multiple tools | Classifier + report verified with the Qwen Agent; segmentation available but not used in these runs. CheXagent/LLaVA-Med/MAIRA-2 remain unverified and unused. |
+| P2 trajectory pool | **First real success pool built**: 60 training questions, 59 compiled trajectories, 34 successful / 25 failed outcomes, one integrity-skipped question. `success_retrieval_ready = true`. |
+| P3 success retrieval | **Implemented and exercised**: protocol/tool-version-checked retrieval, same-case exclusion, bounded structural prompt block, per-question retrieval log. |
+| P4 summaries / credit | Deterministic rule summary mode exists (`r2`), LLM summarisation does not. No paired step-credit experiment; `clinical_evidence` is `unknown` and `step_credit` is `null` throughout. |
+| P5 actions / conflicts / capacity | Not implemented. No candidate selection, conflict review or capacity-limited update. |
+| P6 heldout | Not run; `heldout_test` untouched. |
+| P7 external | Not run; authorization still required. |
 
-The earlier first-ten training-repeat proposal was superseded before execution by V3's validation protocol. No paid calls were made under that superseded proposal. Tool availability is always reported separately from actual selection and valid return.
+## Open issues
 
-Large tool dependencies use separate environments to preserve the already executed report/classifier runtime: CheXagent Transformers 4.40.0, LLaVA-Med 4.45.2, MAIRA-2 4.51.3. Import checks do not establish successful model inference. MAIRA-2 access was granted following the user's explicit authorization; its scoped read credential is stored privately outside the repository and is never published.
-
-The next sequence is to finish/download-verify the remaining assets, run their real standalone checks, integrate the complete tool registry with explicit process/GPU management, freeze a common protocol, then build and evaluate memory using the predeclared development controls. Stop and preserve pending work when the original budget cannot reserve the next request. See [budget and time](budget_and_runtime.md) and [known deviations](reproduction_deviations.md).
+1. The output ceiling in the frozen provider profile (2048 completion tokens) is lower than
+   Qwen3-VL-Plus occasionally produces; the ledger permanently blocks on such a call. Raising
+   it changes the protocol hash and would require rebuilding the pool.
+2. One validation question triggers the ceiling deterministically and was removed from the R1
+   input (documented deviation, not an outcome-based exclusion).
+3. Step credit, action selection, conflict review and capacity updates remain unimplemented, so
+   R4-R7 in the plan have no result.
+4. Pricing is an assumption (4 / 12 CNY per million tokens), not a provider quote.
+5. The server is not a trusted bit-exact store; hashes must be re-verified before every stage.

@@ -17,7 +17,7 @@ from test_diagnostic_eval import FakeModel, Message, FakeGuard, arguments, fake_
 from .core import Boundary, FrozenPool, compile_run, freeze_pool, digest, file_hash, visible_features
 
 
-def fixture(root, *, outcome=False, source_split='memory_train'):
+def fixture(root, *, outcome=False, source_split='memory_train', kind=None):
     image = root / 'image.png'; image.write_bytes(b'SYNTHETIC IMAGE NOT FOR INFERENCE')
     rows = [{'question_id': name, 'question': 'Where is the finding?\nA. SECRET_OPTION\nB. OTHER_OPTION',
              'images': ['image.png'], 'image_sha256': [file_hash(image)], 'case_hash': case * 64, 'split': split}
@@ -26,7 +26,7 @@ def fixture(root, *, outcome=False, source_split='memory_train'):
     boundary = Boundary.synthetic(rows)
     source = rows[:2]
     provenance = runtime(FakeModel([])).tool_provenance
-    plan = {'kind': multi.KIND, 'planned_question_count': 2, 'question_ids': ['q1', 'q2'],
+    plan = {'kind': kind or multi.KIND, 'planned_question_count': 2, 'question_ids': ['q1', 'q2'],
         'schedule': [{'question_id': x['question_id'], 'arm': 'agent'} for x in source],
         'records': [diag.inspect_input(x, root)[0] for x in source], 'tool_registry': provenance,
         'model': diag.MODEL, 'provider_base_url': 'https://example.invalid/v1', 'prompts': {'fixture': True},
@@ -123,6 +123,19 @@ class PipelineTests(unittest.TestCase):
                 (run / 'trace.jsonl').write_bytes(b''.join(diag.canonical(x) for x in trace))
                 with self.assertRaises(ValueError): compile_run(run, boundary)
 
+    def test_undeclared_image_is_fail_closed_unless_explicitly_skipped(self):
+        with TemporaryDirectory() as temp:
+            run, boundary, _, _ = fixture(Path(temp))
+            trace = [json.loads(line) for line in (run / 'trace.jsonl').read_text().splitlines()]
+            step = next(x for x in trace if x.get('node') == 'tool')
+            step['image_sha256'] = 'f' * 64
+            (run / 'trace.jsonl').write_bytes(b''.join(diag.canonical(x) for x in trace))
+            with self.assertRaises(ValueError):
+                compile_run(run, boundary)
+            records, report = compile_run(run, boundary, allow_image_integrity_skip=True)
+            self.assertEqual(len(records), 1)
+            self.assertEqual(report['skipped'], {'image_read_integrity_failure': 1})
+
     def test_source_manifest_cannot_substitute_other_case_image_with_same_count(self):
         with TemporaryDirectory() as temp:
             run, boundary, _, _ = fixture(Path(temp))
@@ -144,6 +157,18 @@ class PipelineTests(unittest.TestCase):
             summary['stop_reason'] = 'complete'; summary['question_results'][0]['actual_tool_attempts'] = 9
             (run / 'summary.json').write_bytes(diag.canonical(summary))
             with self.assertRaises(ValueError): compile_run(run, boundary)
+
+    def test_memory_agent_run_kind_is_compilable_and_unknown_kinds_are_not(self):
+        from .core import MEMORY_KIND
+        with TemporaryDirectory() as temp:
+            run, boundary, rows, _ = fixture(Path(temp), kind=MEMORY_KIND)
+            records, report = compile_run(run, boundary)
+            self.assertEqual(report['compiled_trajectories'], 2)
+            self.assertEqual(report['family'], 'multitool_original')
+        with TemporaryDirectory() as temp:
+            run, boundary, _, _ = fixture(Path(temp), kind='undefined_run_kind_v1')
+            with self.assertRaises(ValueError):
+                compile_run(run, boundary)
 
     def test_family_protocol_and_available_version_must_match(self):
         with TemporaryDirectory() as temp:

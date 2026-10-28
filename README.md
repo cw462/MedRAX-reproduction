@@ -2,13 +2,27 @@
 
 This repository contains independent evaluation adapters, data preparation utilities and an initial structured-memory module for [MedRAX](https://github.com/bowang-lab/MedRAX). It does not include images, benchmark labels, credentials, model weights or raw run logs. Reviewed aggregate run observations are documented separately.
 
-**Status (2026-10-27):** the official classifier, report and segmentation tools have executed on RTX 3090 GPUs. A fixed 50-question development comparison found 24/50 correct for both direct answering and a classifier-only Agent, with six improvements and six regressions; this does not reproduce the complete paper protocol. See [diagnostic results](reports/diagnostic50-2026-10-27.md), [tool observations](reports/real-smoke-2026-10-27.md) and [report decoding ablation](reports/report-decoding-2x2-2026-10-27.md). The memory module has offline boundary tests and is not yet integrated into the Agent. Research use only.
+**Status (2026-10-28, Qwen memory stage):** the memory pipeline has now run end to end with
+`qwen3-vl-plus` as the central model: a 60-question training pool (59 compiled trajectories, 34
+successful), a frozen pool, and a paired 29-question validation comparison between no-memory (R0)
+and success-trajectory retrieval (R1). Both arms scored **12/29 (41.4%)**; the paired transitions
+were 9 both-correct, 14 both-wrong, 3 R0-only and 3 R1-only (exact McNemar p = 1.0). The pipeline
+works; **no accuracy improvement is demonstrated**. See
+[the memory run report](reports/memory-agent-qwen-2026-10-28.md),
+[provider facts](reports/qwen-provider-2026-10-28.md) and
+[the execution checkpoint](reports/full_run_progress.md). Step credit, action selection, conflict
+review, capacity updates, heldout and external evaluation remain unimplemented or unrun. Research
+use only.
+
+**Earlier status (2026-10-27):** the official classifier, report and segmentation tools have executed on RTX 3090 GPUs. A fixed 50-question development comparison found 24/50 correct for both direct answering and a classifier-only Agent, with six improvements and six regressions; this does not reproduce the complete paper protocol. See [diagnostic results](reports/diagnostic50-2026-10-27.md), [tool observations](reports/real-smoke-2026-10-27.md) and [report decoding ablation](reports/report-decoding-2x2-2026-10-27.md).
 
 A completed ten-question [output-cap follow-up](reports/length-cap-followup-2026-10-27.md) observed no truncation at 1024 tokens; it is a selected development diagnosis, not a general accuracy improvement. [中文初步实验结论与实际耗时](reports/初步实验结论-2026-10-27.md).
 
-**V3 checkpoint:** the complete image audit and a 30-case validation selection are frozen. Two/three-tool five-case batches have checked actual Agent wiring and exposed a tool-budget failure; they are **functional checks only, not the formal full-tool baseline**. New paid question answering is stopped until the remaining large tools finish download, integrity verification and real server inference. See [current execution status](reports/full_run_progress.md), [data audit](reports/data-audit-v3-2026-10-27.md), [three-tool issue](reports/three-tool-functional-check-2026-10-27.md) and [shared budget](reports/budget_and_runtime.md). Full reproduction and memory improvement results remain incomplete.
+**V3 checkpoint:** the complete image audit and a 30-case validation selection are frozen. Two/three-tool five-case batches have checked actual Agent wiring and exposed a tool-budget failure; they are **functional checks only, not the formal full-tool baseline**. See [current execution status](reports/full_run_progress.md), [data audit](reports/data-audit-v3-2026-10-27.md), [three-tool issue](reports/three-tool-functional-check-2026-10-27.md) and [shared budget](reports/budget_and_runtime.md). Full reproduction remains incomplete.
 
-Tool preparation is currently stopped on [inconsistent repeated file reads](reports/tool-readiness-integrity-blocker-2026-10-27.md). Partial assets and evidence are preserved; unverified large weights have not been used for inference.
+Large tool assets are still incomplete on the server, and the machine has shown in-place file
+corruption ([data read integrity](reports/data-read-integrity-2026-10-28.md)); unverified weights
+have not been used for inference.
 
 ## Provenance and reproducibility
 

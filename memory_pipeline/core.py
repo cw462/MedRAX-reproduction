@@ -20,6 +20,8 @@ from memory_core.schema import (AuditRegistry, canonical_bytes, digest, read_jso
 from memory_core.retrieval import tokenize
 
 MULTI_KIND = 'first5_matched_direct_vs_available_original_classifier_report_agent'
+MEMORY_KIND = 'memory_agent_available_original_tools_v1'
+MULTI_KINDS = (MULTI_KIND, MEMORY_KIND)
 HISTORICAL_KIND = 'matched_diagnostic_direct_vs_restricted_classifier_agent'
 TOOL_KINDS = {'chest_xray_classifier': 'classification', 'chest_xray_report_generator': 'report',
               'chest_xray_segmentation': 'segmentation'}
@@ -155,7 +157,7 @@ def _jsonl_complete(path):
 def _protocol(plan, family):
     if family == 'multitool_original':
         registry = plan.get('tool_registry')
-        if plan.get('kind') != MULTI_KIND or type(registry) is not dict:
+        if plan.get('kind') not in MULTI_KINDS or type(registry) is not dict:
             raise ValueError('Only the declared multi-tool run format can enter this family')
         if not {'chest_xray_classifier', 'chest_xray_report_generator'} <= set(registry) or not set(registry) <= set(TOOL_KINDS):
             raise ValueError('Multiple-tool registry differs from supported original tools')
@@ -201,7 +203,8 @@ def _outcomes(path, boundary, run_hash, results_hash, terminal):
     return values, file_hash(path)
 
 
-def compile_run(directory, boundary, *, family='multitool_original', outcomes=None):
+def compile_run(directory, boundary, *, family='multitool_original', outcomes=None,
+                allow_image_integrity_skip=False):
     """Compile completed train execution facts; reference answers are never opened."""
     directory = Path(directory)
     files = {name: file_hash(directory / name) for name in ('manifest.json', 'results.jsonl', 'trace.jsonl', 'summary.json')}
@@ -260,6 +263,21 @@ def compile_run(directory, boundary, *, family='multitool_original', outcomes=No
         entry, terminal = boundary.lookup(qid), terminals[(qid, arm)]
         if entry['excluded']:
             skipped['quarantined_case'] += 1; continue
+        # A file read that returns bytes outside the frozen question invalidates
+        # every step of that question. Skip the trajectory and count it instead of
+        # rejecting the whole run or compiling a mismatched execution as evidence.
+        declared_images = {x.get('sha256') for x in records[qid]['images']}
+        executed_images = [event.get('image_sha256') for position, event in grouped[(qid, arm)]
+                           if event.get('arguments_sha256', event.get('argument_sha256')) is not None]
+        if any(type(value) is not str or not re.fullmatch(r'[0-9a-f]{64}', value)
+               or value not in declared_images for value in executed_images):
+            # Default is fail-closed: an execution on undeclared bytes is either
+            # evidence tampering or a read-integrity fault, and neither may enter
+            # the pool silently. A caller may opt into skipping the affected
+            # question only when the fault is independently documented.
+            if not allow_image_integrity_skip:
+                raise ValueError('Tool ran on an image outside the declared question')
+            skipped['image_read_integrity_failure'] += 1; continue
         steps = []
         for position, event in grouped[(qid, arm)]:
             # Pre-invocation argument errors have no argument fingerprint and are not real executions.
@@ -327,18 +345,25 @@ def compile_run(directory, boundary, *, family='multitool_original', outcomes=No
     return compiled, report
 
 
-def _context(record, summary_mode=False):
+def _context(record, summary_mode=False, include_outcome=False):
     steps = [{'tool': x['tool_name'], 'execution': x['execution'], 'output_structure': x['observation_shape']}
              for x in record['steps']]
     if summary_mode:
-        return {'representation': 'deterministic_execution_rule_summary_not_llm', 'task_features': record['features'],
+        context = {'representation': 'deterministic_execution_rule_summary_not_llm',
+            'task_features': record['features'],
             'observed_tool_sequence': [x['tool'] for x in steps],
             'execution_validity': [x['execution'] for x in steps],
             'limits': ['Execution success does not establish clinical correctness.',
                        'Source observations were logged as structures and hashes; medical reasoning is unavailable.'],
             'clinical_evidence': 'unknown', 'step_credit': None}
-    return {'representation': 'observed_structured_execution_trajectory', 'task_features': record['features'],
-            'steps': steps, 'clinical_evidence': 'unknown', 'step_credit': None}
+    else:
+        context = {'representation': 'observed_structured_execution_trajectory',
+            'task_features': record['features'], 'steps': steps,
+            'clinical_evidence': 'unknown', 'step_credit': None}
+    if include_outcome:
+        # A whole-question training outcome, never medical evidence for a step.
+        context['task_outcome'] = record['task_outcome']
+    return context
 
 
 def _validate_record(record, boundary, family, protocol):
@@ -464,7 +489,8 @@ class FrozenPool:
                     inverse = math.log(1 + (len(documents) - frequency[word] + 0.5) / (frequency[word] + 0.5))
                     score += inverse * count * 2.5 / (count + 1.5 * (0.25 + 0.75 * len(document) / average))
             if score > 0 and score >= min_score:
-                scored.append({'memory_id': record['memory_id'], 'score': score, 'context': _context(record, summary_mode)})
+                scored.append({'memory_id': record['memory_id'], 'score': score,
+                               'context': _context(record, summary_mode, include_outcome=include_failures)})
         return sorted(scored, key=lambda x: (-x['score'], x['memory_id']))[:top_k]
 
 

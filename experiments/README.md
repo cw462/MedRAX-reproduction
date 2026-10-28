@@ -1,5 +1,44 @@
 # Official classifier smoke test
 
+## Memory-agent runs with a non-OpenAI central model (2026-10-28)
+
+`memory_agent_eval.py` is the entry point for the R0/R1-R3 memory experiment. It runs the
+audited upstream Agent with the original classifier and report tools (segmentation
+optional) against a frozen question subset, records every real tool execution in the format
+`memory_pipeline.compile_run` accepts, and optionally injects retrieved training
+trajectories into the first prompt. It does not read labels.
+
+```bash
+python experiments/memory_agent_eval.py \
+  --repo /path/to/MedRAX \
+  --input /path/to/frozen_subset.jsonl --images-root /path/to/images \
+  --output /path/to/new-run --ledger /path/to/provider_ledger.json \
+  --inherit-ledger /path/to/api_budget_100cny.json \
+  --profile qwen3-vl-plus --arm r0 \
+  --classifier-checkpoint /path/to/classifier.pt --report-cache /path/to/hf_cache \
+  --max-cases 60 --max-tool-calls 3 --max-model-calls 4 --max-output-tokens 1024 \
+  --api-key-stdin
+```
+
+Add `--pool runs/memory_pool_v1/pool.json --pool-sha256 <hex> --top-k 3` and `--arm r1`
+for success-trajectory retrieval, `r2` for the deterministic rule summary, `r3` for
+failure-aware retrieval. `--plan-only` prints the protocol hash and tool versions without
+opening a journal or calling the API.
+
+Companion entry points:
+
+- `score_memory_runs.py` — the only label reader; writes the bound outcome sidecar
+  (`correct`/`incorrect`/`invalid`/`error`), never predictions or answer text.
+- `compare_memory_arms.py` — paired aggregate comparison (accuracy, transitions, exact
+  McNemar, retrieval hit rate) for two arms over the same questions.
+- `prepare_memory_subset.py` — declares and extracts a label-blind frozen subset with
+  byte-verified images.
+- `provider_profile.py` / `provider_ledger.py` — frozen provider profile and the shared-cap
+  conservative ledger (see [the provider report](../reports/qwen-provider-2026-10-28.md)).
+
+`test_provider_ledger.py` covers ledger accounting, inheritance, locking and the prompt-block
+renderer. These are still execution facts, not clinical evidence; `step_credit` stays null.
+
 V3 preparation also includes isolated [LLaVA-Med](llava_smoke.md) and [MAIRA-2](maira_smoke.md) checks, `chexagent_smoke.py`, a [private-process tool bridge](worker_bridge.md), and a [validation plan-only entry](VALIDATION_PROTOCOL.md). These modules' offline tests do not establish that their large models have loaded or inferred successfully. All required tools must complete real server checks before a formal paid comparison. The [two-tool](../reports/multi-tool-first5-2026-10-27.md) and [three-tool](../reports/three-tool-functional-check-2026-10-27.md) five-case runs are retained only as functional diagnostics.
 
 Actual classifier, report and restricted-Agent execution is recorded in [the run report](../reports/real-smoke-2026-10-27.md). Unit tests remain separate from those real runs.

@@ -14,10 +14,14 @@ def main(argv=None):
     parser.add_argument('--pool-version', type=int, required=True)
     parser.add_argument('--previous-pool-sha256')
     parser.add_argument('--outcomes', type=Path)
+    parser.add_argument('--allow-image-integrity-skip', action='store_true',
+                        help='Skip (and count) a question whose executed image hash is undeclared, '
+                             'only after the read fault has been independently documented')
     args = parser.parse_args(argv)
     boundary = Boundary.from_split_directory(args.splits, args.exclusions,
                                               expected_exclusions_sha256=args.exclusions_sha256)
-    records, report = compile_run(args.run, boundary, family=args.family, outcomes=args.outcomes)
+    records, report = compile_run(args.run, boundary, family=args.family, outcomes=args.outcomes,
+                                  allow_image_integrity_skip=args.allow_image_integrity_skip)
     pool = freeze_pool(boundary, records, family=args.family, version=args.pool_version,
                        previous_sha256=args.previous_pool_sha256)
     args.output.mkdir(parents=True, exist_ok=False)
