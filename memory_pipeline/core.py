@@ -24,7 +24,9 @@ MEMORY_KIND = 'memory_agent_available_original_tools_v1'
 MULTI_KINDS = (MULTI_KIND, MEMORY_KIND)
 HISTORICAL_KIND = 'matched_diagnostic_direct_vs_restricted_classifier_agent'
 TOOL_KINDS = {'chest_xray_classifier': 'classification', 'chest_xray_report_generator': 'report',
-              'chest_xray_segmentation': 'segmentation'}
+              'chest_xray_segmentation': 'segmentation', 'chest_xray_expert': 'vqa',
+              'llava_med_qa': 'llava', 'xray_phrase_grounding': 'grounding',
+              'image_visualizer': 'utility', 'dicom_processor': 'utility'}
 FAMILIES = ('multitool_original', 'historical_classifier')
 FEATURES = {'vqa', 'laterality', 'localization', 'comparison', 'diagnosis', 'finding', 'report',
             'anatomy', 'single_image', 'multi_image', 'no_image'}
@@ -33,7 +35,8 @@ EXECUTIONS = {'returned_valid', 'returned_invalid', 'exception', 'unknown'}
 TERMINALS = {'completed', 'invalid_answer', 'tool_error', 'model_error', 'failed', 'case_budget_exceeded',
              'monetary_budget_exceeded', 'monetary_guard_error', 'interrupted_no_retry', 'invalid_input', 'missing_image'}
 SHAPE_FIELDS = {'score_count', 'report_chars', 'findings_chars', 'impression_chars',
-                'metrics_returned_count', 'configured_model_channel_count'}
+                'metrics_returned_count', 'configured_model_channel_count',
+                'response_chars', 'predictions_count', 'boxes_count', 'image_count'}
 
 
 def file_hash(path):
@@ -170,7 +173,7 @@ def _protocol(plan, family):
     else:
         raise ValueError('Unknown pool family')
     keys = ('model', 'provider_base_url', 'prompts', 'max_output_tokens', 'max_model_calls', 'max_tool_calls',
-            'temperature', 'top_p', 'provider_retries', 'image_detail', 'source_sha256', 'package_versions')
+            'temperature', 'top_p', 'provider_retries', 'image_detail', 'package_versions')
     if any(key not in plan for key in keys):
         raise ValueError('Source inference protocol is incomplete')
     description = {key: plan[key] for key in keys}

@@ -2,19 +2,30 @@
 
 This repository contains independent evaluation adapters, data preparation utilities and an initial structured-memory module for [MedRAX](https://github.com/bowang-lab/MedRAX). It does not include images, benchmark labels, credentials, model weights or raw run logs. Reviewed aggregate run observations are documented separately.
 
-Hashes in the current workflow are version records only. Code, tool/model or memory-pool hash changes do not invalidate memory, block loading/retrieval/resumption, or require rebuilding a pool. Historical run records are preserved.
+**Status (2026-10-29, seven-tool memory run):** the agent now runs with **seven tools**
+(classifier, report generator, segmentation, CheXagent VQA, LLaVA-Med, image visualizer, DICOM
+processor) and `qwen3-vl-plus` as the central model. A 60-question training pool produced a
+frozen pool of 60 trajectories; the same 29 validation questions were then run four times
+(no memory, success retrieval, rule summary, success+failure retrieval):
 
-**Status (2026-10-28, Qwen memory stage):** the memory pipeline has now run end to end with
-`qwen3-vl-plus` as the central model: a 60-question training pool (59 compiled trajectories, 34
-successful), a frozen pool, and a paired 29-question validation comparison between no-memory (R0)
-and success-trajectory retrieval (R1). Both arms scored **12/29 (41.4%)**; the paired transitions
-were 9 both-correct, 14 both-wrong, 3 R0-only and 3 R1-only (exact McNemar p = 1.0). The pipeline
-works; **no accuracy improvement is demonstrated**. See
-[the memory run report](reports/memory-agent-qwen-2026-10-28.md),
+| arm | answered | correct | accuracy (all 29) | accuracy (answered) |
+|---|---:|---:|---:|---:|
+| R0 no memory | 20/29 | 11 | 37.9% | 55.0% |
+| R1 success retrieval | 27/29 | 14 | 48.3% | 51.8% |
+| R2 rule summary | 26/29 | 12 | 41.4% | 46.2% |
+| R3 success + failure retrieval | 28/29 | 16 | **55.2%** | 57.1% |
+
+The raw gain comes mostly from **not exhausting the per-case call budget** (R0 failed 9 of 29
+cases, R3 only 1); among answered cases the arms are nearly equal. R3 improved all 5 discordant
+pairs (exact McNemar p = 0.0625) — suggestive, not conclusive. Missing tools: MAIRA-2 grounding
+(runtime incompatibility) and the chest X-ray generator (no public weights).
+
+See [the seven-tool report](reports/memory-agent-qwen-7tools-2026-10-29.md),
+[the restricted two-tool run](reports/memory-agent-qwen-2026-10-28.md),
 [provider facts](reports/qwen-provider-2026-10-28.md) and
 [the execution checkpoint](reports/full_run_progress.md). Step credit, action selection, conflict
-review, capacity updates, heldout and external evaluation remain unimplemented or unrun. Research
-use only.
+review and capacity updates (R4-R7) remain unimplemented; heldout and external evaluation were
+not run. Research use only.
 
 **Earlier status (2026-10-27):** the official classifier, report and segmentation tools have executed on RTX 3090 GPUs. A fixed 50-question development comparison found 24/50 correct for both direct answering and a classifier-only Agent, with six improvements and six regressions; this does not reproduce the complete paper protocol. See [diagnostic results](reports/diagnostic50-2026-10-27.md), [tool observations](reports/real-smoke-2026-10-27.md) and [report decoding ablation](reports/report-decoding-2x2-2026-10-27.md).
 

@@ -20,7 +20,7 @@ python experiments/memory_agent_eval.py \
   --api-key-stdin
 ```
 
-Add `--pool runs/memory_pool_v1/pool.json --top-k 3` and `--arm r1`
+Add `--pool runs/memory_pool_v1/pool.json --pool-sha256 <hex> --top-k 3` and `--arm r1`
 for success-trajectory retrieval, `r2` for the deterministic rule summary, `r3` for
 failure-aware retrieval. `--plan-only` prints the protocol hash and tool versions without
 opening a journal or calling the API.

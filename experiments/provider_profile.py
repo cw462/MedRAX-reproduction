@@ -67,10 +67,11 @@ PROFILES = {
         output_cny_per_million=Decimal('12'),
         price_basis='assumed_upper_bound_plus_tier_unverified_2026-10-28',
         max_input_tokens=32000,
-        max_output_tokens=2048,
+        max_output_tokens=8192,
         supports_vision=True,
         notes='Vision and tool calling verified live 2026-10-28; reasoning text is '
-              'returned inline; no separate text-only fallback.',
+              'returned inline; no separate text-only fallback. The completion ceiling is 8192 '
+              'because the model sometimes exceeds the requested max_tokens (observed 4469).',
     ),
     'qwen3.8-flash': ProviderProfile(
         name='qwen3.8-flash',

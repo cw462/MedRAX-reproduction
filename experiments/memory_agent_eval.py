@@ -288,8 +288,22 @@ class TrackedTool:
         detail = {'node': 'tool', 'tool_name': name, 'tool_kind': self.kind,
                   'tool_version_sha256': self.version, 'execution': 'exception',
                   'clinical_evidence': 'unknown', 'step_credit': None, 'raw_content_logged': False}
+        emitted = False
         try:
-            clean, image = validate_parameters(self.wrapped, self.kind, params, ctx['allowed_images'])
+            try:
+                clean, images = validate_parameters(self.wrapped, self.kind, params, ctx['allowed_images'])
+            except Exception as exc:  # rejected before any real execution
+                counts['rejected'] = counts.get('rejected', 0) + 1
+                ctx['issues'].add('tool_arguments_rejected')
+                detail.update(execution='rejected', error_type=type(exc).__name__,
+                              elapsed_ms=round((time.monotonic() - began) * 1000))
+                diag.event(ctx, **detail)
+                emitted = True
+                if os.environ.get('MEDRAX_DEBUG_TOOL'):
+                    detail['error_head'] = (str(exc) or repr(exc))[:160]
+                return ('TOOL_CALL_REJECTED: the arguments did not match the tool schema or the '
+                        'image was not part of this question. Use only the advertised arguments '
+                        'and the image path given in the prompt.')
             fingerprint = diag.hash_value({'tool': name, 'arguments': clean})
             repeated = fingerprint in ctx['tool_fingerprints']
             ctx['tool_fingerprints'].add(fingerprint)
@@ -298,11 +312,12 @@ class TrackedTool:
                 ctx['repeated_tool_calls'] += 1
                 ctx['issues'].add('repeated_tool_call')
             detail.update(arguments_sha256=fingerprint, argument_keys=sorted(clean), repeated=repeated,
-                          image_sha256=diag.smoke.classifier_utils.sha256_file(image))
+                          image_sha256=diag.smoke.classifier_utils.sha256_file(images[0]),
+                          image_count=len(images))
             ctx['actual_tool_attempts'] += 1
             counts['attempted'] += 1
             result = self.wrapped.invoke(clean)
-            checked = variants.validate_observation(
+            checked = observe(
                 self.kind, result,
                 **({'artifact_dir': self.wrapped.temp_dir} if self.kind == 'segmentation' else {}))
             detail.update(output_contract=checked, output_summary=diag.smoke.summarize(result),
@@ -319,39 +334,79 @@ class TrackedTool:
             counts['exceptions'] += 1
             ctx['issues'].add('tool_exception')
             detail['error_type'] = type(exc).__name__
+            if os.environ.get('MEDRAX_DEBUG_TOOL'):
+                detail['error_head'] = (str(exc) or repr(exc))[:160]
             raise
         finally:
-            detail['elapsed_ms'] = round((time.monotonic() - began) * 1000)
-            diag.event(ctx, **detail)
+            if not emitted:
+                detail['elapsed_ms'] = round((time.monotonic() - began) * 1000)
+                diag.event(ctx, **detail)
+
+
+def observe(kind, result, artifact_dir=None):
+    """Whitelisted execution-fact view of a tool return, for every tool kind."""
+    if kind in ('classification', 'report', 'segmentation'):
+        return variants.validate_observation(kind, result, artifact_dir=artifact_dir)
+    if kind in ('vqa', 'llava', 'grounding'):
+        output, meta = (result if isinstance(result, tuple) and len(result) == 2 else (result, {}))
+        status = meta.get('analysis_status') if isinstance(meta, dict) else None
+        text = None
+        if isinstance(output, dict):
+            text = output.get('response', output.get('answer', output.get('predictions')))
+            failed = bool(output.get('error'))
+        else:
+            text, failed = output, False
+        ok = status == 'completed' and not failed and text is not None
+        return {'kind': kind, 'valid': bool(ok),
+                'tool_analysis_status': status if status in ('completed', 'failed') else 'invalid',
+                'response_chars': len(str(text)) if text is not None else 0,
+                'clinical_evidence': 'unknown', 'step_credit': None}
+    # utility tools: no clinical output, success is "returned without exception"
+    return {'kind': kind, 'valid': True, 'tool_analysis_status': 'completed',
+            'image_count': 1, 'clinical_evidence': 'unknown', 'step_credit': None}
 
 
 def validate_parameters(tool, kind, params, allowed_images):
-    """Copy of the audited multi-tool schema/image check (kept local, no import)."""
+    """Authorize every image the call carries, then validate against the real schema.
+
+    Tools differ in argument names (`image_path`, `image_paths`, plus a question or
+    prompt), so this is schema-driven rather than per-tool hard-coded. An image that
+    is not part of the current question is always rejected before invocation.
+    """
     if type(params) is not dict:
         raise ValueError('Tool arguments must be an object')
+    clean = dict(params)
+    authorized = []
+    for key in ('image_path', 'image_paths'):
+        if key not in clean:
+            continue
+        value = clean[key]
+        is_list = isinstance(value, list)
+        paths = value if is_list else [value]
+        if not paths or any(type(p) is not str or not p for p in paths):
+            raise ValueError(f'Invalid {key}')
+        resolved = []
+        for raw in paths:
+            path = Path(raw.strip()).resolve()
+            if path not in allowed_images:
+                # Models sometimes echo only the basename. Accept it only when that
+                # name maps to exactly one image of the *current* question.
+                matches = [p for p in allowed_images if p.name == path.name]
+                if len(matches) == 1:
+                    path = matches[0]
+                else:
+                    raise ValueError('Tool image is outside the current question')
+            resolved.append(str(path))
+            authorized.append(path)
+        clean[key] = resolved if is_list else resolved[0]
+    if not authorized:
+        raise ValueError('Tool call carries no authorized image')
     schema = tool.args_schema
-    description = schema.model_json_schema() if hasattr(schema, 'model_json_schema') else schema.schema()
-    fields, required = set(description.get('properties', {})), set(description.get('required', []))
-    expected = {'image_path', 'organs'} if kind == 'segmentation' else {'image_path'}
-    if fields != expected or 'image_path' not in required:
-        raise ValueError('Tool schema differs from the supported fixed tool')
-    if not required <= set(params) or not set(params) <= fields or type(params.get('image_path')) is not str:
-        raise ValueError('Invalid or extra tool arguments')
-    image = Path(params['image_path']).resolve()
-    if image not in allowed_images:
-        raise ValueError('Tool image is outside the current question')
-    if kind == 'segmentation' and params.get('organs') is not None:
-        organs = params['organs']
-        valid = set(tool.organ_map)
-        if (type(organs) is not list or not organs
-                or any(type(x) is not str or x not in valid for x in organs)
-                or len(set(organs)) != len(organs)):
-            raise ValueError('Segmentation organs must be distinct valid advertised names')
     if hasattr(schema, 'model_validate'):
-        schema.model_validate(params)
+        schema.model_validate(clean)
     else:
-        schema.parse_obj(params)
-    return dict(params, image_path=str(image)), image
+        schema.parse_obj(clean)
+    return clean, authorized
 
 
 # ------------------------------------------------------------------------ runs
@@ -454,19 +509,15 @@ def build_runtime(args, profile, key, prompt, temporary_artifacts):
     from langchain_core.messages import HumanMessage, SystemMessage
     from langchain_openai import ChatOpenAI
     from langgraph.checkpoint.memory import MemorySaver
-    tools, provenance = {}, {}
-    factories = [variants.create_classifier_tool(args.repo, checkpoint=args.classifier_checkpoint,
-                                                 device=args.device, mode='original'),
-                 variants.create_report_tool(args.repo, cache_dir=args.report_cache,
-                                             device=args.device, mode='original')]
-    if args.segmentation_checkpoint is not None:
-        factories.append(variants.create_segmentation_tool(
-            args.repo, checkpoint=args.segmentation_checkpoint, device=args.device,
-            temp_dir=temporary_artifacts / 'segmentation'))
-    for tool, recorded in factories:
-        if tool.name in tools:
-            raise ValueError('Duplicate tool name')
-        tools[tool.name], provenance[tool.name] = tool, recorded
+    import tool_registry_ext
+    wanted = list(args.tools) if args.tools else list(tool_registry_ext.DEFAULT_TOOLS)
+    tools, provenance = tool_registry_ext.build_tools(
+        args.repo, cache_dir=args.model_cache,
+        classifier_checkpoint=args.classifier_checkpoint,
+        report_cache=args.report_cache,
+        segmentation_checkpoint=(args.segmentation_checkpoint
+                                 if 'chest_xray_segmentation' in wanted else None),
+        temp_dir=temporary_artifacts, tools=wanted)
     Agent = diag.smoke.module_from_file('_memory_official_agent',
                                         args.repo / 'medrax/agent/agent.py').Agent
     model = ChatOpenAI(model=profile.model, base_url=profile.base_url, api_key=key,
@@ -481,9 +532,10 @@ def build_runtime(args, profile, key, prompt, temporary_artifacts):
 def build_plan(args, rows, records, runtime, profile, prompt, policy, protocol_sha256):
     versions = {name: diag.hash_value(value) for name, value in runtime.tool_provenance.items()}
     files = {'memory_agent_eval.py': Path(__file__), 'tool_variants.py': Path(variants.__file__),
+             'tool_registry_ext.py': Path(__file__).with_name('tool_registry_ext.py'),
+             'recorded_run_journal.py': Path(__file__).with_name('recorded_run_journal.py'),
              'provider_profile.py': Path(__file__).with_name('provider_profile.py'),
              'provider_ledger.py': Path(__file__).with_name('provider_ledger.py'),
-             'recorded_run_journal.py': Path(__file__).with_name('recorded_run_journal.py'),
              'memory_injection.py': Path(__file__).resolve().parents[1] / 'memory_pipeline/injection.py',
              'official_agent.py': args.repo / 'medrax/agent/agent.py',
              'official_classifier.py': args.repo / 'medrax/tools/classification.py',
@@ -566,13 +618,17 @@ def main(argv=None):
     parser.add_argument('--profile', default='qwen3-vl-plus')
     parser.add_argument('--arm', choices=ARMS, default='r0')
     parser.add_argument('--pool', type=Path)
-    parser.add_argument('--pool-sha256', help='Optional historical digest for recording; never a loading requirement')
+    parser.add_argument('--pool-sha256')
     parser.add_argument('--top-k', type=int, default=3)
     parser.add_argument('--min-score', type=float, default=0.0)
     parser.add_argument('--memory-max-chars', type=int, default=1400)
     parser.add_argument('--classifier-checkpoint', type=Path, required=True)
     parser.add_argument('--report-cache', type=Path, required=True)
     parser.add_argument('--segmentation-checkpoint', type=Path)
+    parser.add_argument('--model-cache', type=Path,
+                        help='HF cache holding the VQA / LLaVA weights (default: <repo>/models/hf_full)')
+    parser.add_argument('--tools', nargs='+',
+                        help='Subset of the full registry; default is the seven available tools')
     parser.add_argument('--api-key-stdin', action='store_true')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--max-cases', type=int, default=0)
@@ -589,10 +645,16 @@ def main(argv=None):
                         help='Build inputs/runtime/protocol, print them and exit without a journal or API call')
     parser.add_argument('--max-consecutive-failures', type=int, default=3,
                         help='Stop a resumable run after this many consecutive model/tool failures')
+    parser.add_argument('--cap-cny', default='1000000',
+                        help='Soft spending cap recorded in the provider ledger; the user removed '
+                             'the original 100 CNY cap on 2026-10-28, so the default is effectively unlimited')
     args = parser.parse_args(argv)
+    if args.model_cache is None:
+        # repo is <root>/source/MedRAX; the HF cache lives at <root>/models/hf_full
+        args.model_cache = (args.repo.parent.parent / 'models' / 'hf_full').resolve()
 
-    if args.arm != 'r0' and args.pool is None:
-        parser.error('Memory arms require --pool')
+    if args.arm != 'r0' and (args.pool is None or not args.pool_sha256):
+        parser.error('Memory arms require --pool and --pool-sha256')
     if args.top_k not in (1, 3, 5):
         parser.error('top-k must be one of the calibrated values 1, 3, 5')
     if any(not math.isfinite(x) or x <= 0 for x in (args.max_case_seconds, args.request_timeout_seconds)):
@@ -625,7 +687,7 @@ def main(argv=None):
 
     output = args.output.resolve()
     journal = None
-    with ProviderLedger(args.ledger, profile, cap_cny='100',
+    with ProviderLedger(args.ledger, profile, cap_cny=args.cap_cny,
                         inherit_ledger_path=args.inherit_ledger) as ledger, \
             tempfile.TemporaryDirectory(prefix='medrax-tool-init-') as temporary:
         with open(os.devnull, 'w') as sink, redirect_stdout(sink), redirect_stderr(sink):
@@ -637,23 +699,18 @@ def main(argv=None):
         protocol = compute_protocol(probe_plan)
         plan = build_plan(args, rows, records, runtime, profile, prompt,
                           ledger.policy_snapshot(), protocol)
+        if compute_protocol(plan) != protocol:
+            raise RuntimeError('Protocol hash is not stable across plan construction')
         pool = None
         if args.pool is not None:
             from memory_pipeline.core import FrozenPool
             pool = FrozenPool.load(args.pool, expected_sha256=args.pool_sha256)
-            plan['memory']['hash_audit'] = pool.hash_audit()
-            plan['memory']['requested_pool_sha256'] = args.pool_sha256
-            plan['memory']['pool_sha256'] = pool.sha256
-            args.pool_sha256 = pool.sha256
-        plan['hash_policy'] = 'record_only'
         if args.plan_only:
             print(json.dumps({'protocol_sha256': protocol,
                               'questions': len(rows),
                               'available_tools': plan['available_tool_versions'],
                               'arm': args.arm,
                               'pool_loaded': pool is not None,
-                              'hash_policy': 'record_only',
-                              'pool_hash_audit': pool.hash_audit() if pool is not None else None,
                               'pool_protocol_matches': bool(pool) and
                               pool.payload()['protocol_sha256'] == protocol,
                               'max_tool_calls': plan['max_tool_calls'],

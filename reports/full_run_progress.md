@@ -1,8 +1,20 @@
-# Execution checkpoint
+﻿# Execution checkpoint
 
-Updated 2026-10-28 (Asia/Shanghai). The full experiment is **still incomplete**: there is no
-paper reproduction, no heldout evaluation and no demonstrated general improvement. The first
-end-to-end run of the memory pipeline on a hosted Qwen model is complete enough to report.
+Updated 2026-10-29 (Asia/Shanghai). The seven-tool memory comparison has now run end to end.
+It is still **not** a paper reproduction, not a heldout evaluation and not clinical validation.
+
+## Seven-tool phase (2026-10-29)
+
+- Registry: classifier, report generator, segmentation, CheXagent-2-3B VQA, LLaVA-Med 7B,
+  image visualizer, DICOM processor 鈥?7 of the paper's 9 tools.
+- Missing: `xray_phrase_grounding` (MAIRA-2 loads in bf16 but its grounding post-processing
+  fails on the pinned transformers 4.45 runtime) and `chest_xray_generator` (no public
+  RoentGen weights).
+- Pool: 60 training questions 鈫?60 trajectories, 173 real tool steps, 25 successful.
+- Validation: the same 29 questions under four arms (R0/R1/R2/R3), same model, prompts, tools
+  and limits. Raw accuracy 37.9% / 48.3% / 41.4% / 55.2%; among answered cases 55.0% / 51.8% /
+  46.2% / 57.1%. R0 failed 9 cases on the call budget, R3 only 1.
+- Report: [memory-agent-qwen-7tools-2026-10-29.md](memory-agent-qwen-7tools-2026-10-29.md).
 
 ## What changed since the 2026-10-27 checkpoint
 
@@ -24,11 +36,11 @@ end-to-end run of the memory pipeline on a hosted Qwen model is complete enough 
 | Phase | Evidence and current state |
 |---|---|
 | P0 audit | Complete image integrity/overlap audit; splits unchanged; validation30 frozen. [Data audit](data-audit-v3-2026-10-27.md). |
-| P1 protocol | Qwen profile frozen and hash-pinned; output ceiling caused two aborted R1 attempts (documented). Classifier-description control still not rerun. |
+| P1 real multiple tools | **Seven tools wired and exercised**: classifier, report, segmentation, CheXagent VQA, LLaVA-Med, image visualizer, DICOM processor. MAIRA-2 grounding and chest-X-ray generation remain blocked (see above). |
 | P1 real multiple tools | Classifier + report verified with the Qwen Agent; segmentation available but not used in these runs. CheXagent/LLaVA-Med/MAIRA-2 remain unverified and unused. |
-| P2 trajectory pool | **First real success pool built**: 60 training questions, 59 compiled trajectories, 34 successful / 25 failed outcomes, one integrity-skipped question. `success_retrieval_ready = true`. |
-| P3 success retrieval | **Implemented and exercised**: protocol/tool-version-checked retrieval, same-case exclusion, bounded structural prompt block, per-question retrieval log. |
-| P4 summaries / credit | Deterministic rule summary mode exists (`r2`), LLM summarisation does not. No paired step-credit experiment; `clinical_evidence` is `unknown` and `step_credit` is `null` throughout. |
+| P2 trajectory pool | Seven-tool pool: 60 training questions, 60 compiled trajectories, 173 tool steps, 25 successful / 20 incorrect / 15 budget-truncated. `success_retrieval_ready = true`. |
+| P3 success retrieval | Implemented and exercised in R1/R3: tool-version- and same-case-filtered retrieval, bounded structural block, 29/29 questions hit. |
+| P4 summaries / credit | Deterministic rule summary arm (R2) run; no LLM summarisation and no step-credit experiment. `clinical_evidence` unknown, `step_credit` null throughout. |
 | P5 actions / conflicts / capacity | Not implemented. No candidate selection, conflict review or capacity-limited update. |
 | P6 heldout | Not run; `heldout_test` untouched. |
 | P7 external | Not run; authorization still required. |
