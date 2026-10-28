@@ -6,7 +6,10 @@ development-scale samples, not a paper reproduction and not clinical validation.
 This run replaces the retired Codex execution with the DeepSeek Harness and replaces the
 GPT-4o central model with `qwen3-vl-plus` (DashScope compatible endpoint). The provider facts,
 pricing assumption and the account-arrears interruption are documented in
-[the provider report](qwen-provider-2026-10-28.md).
+[the provider report](qwen-provider-2026-10-28.md). A separate short note on the same
+comparison, including a case-cluster bootstrap interval, is
+[qwen-memory-initial-2026-10-28.md](qwen-memory-initial-2026-10-28.md); its counts and ledger
+total agree with this report.
 
 ## What actually ran
 
@@ -45,7 +48,8 @@ before the question.
 Invalid/error counts over the shared questions: R0 `0` invalid + `0`
 error; R1 `0` invalid + `0` error. The one question excluded from the
 R1 input (`13238_8353800603808`) is the same question on which R0 timed out and both earlier R1
-attempts hit the output ceiling, so it is outside the paired set.
+attempts hit the output ceiling, so it is outside the paired set. Under the full planned R0
+denominator the baseline is 12/30 = 40.0%; the paired table uses the 29 shared questions.
 
 Paired transitions over the 29 shared questions:
 
@@ -71,7 +75,9 @@ committed total:
 - committed after these runs (latest ledger `api_budget_qwen_100cny_v3.json`): **28.533768 CNY**
 - of which reservations for provider-rejected calls during the arrears window are charged in
   full by policy although the provider billed nothing (see the provider report)
-- prices are assumed (4 CNY/M input, 12 CNY/M output) and the ledger is **not** the bill
+- prices are assumed (4 CNY/M input, 12 CNY/M output) and the ledger is **not** the bill. The
+  provider's public pricing page lists CNY 1/M input and CNY 10/M output for Qwen3-VL-Plus up
+  to 32K input, so the internal rates over-reserve; they are conservative, not exact.
 
 ## What this does and does not establish
 
