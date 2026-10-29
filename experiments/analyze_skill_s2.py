@@ -255,6 +255,9 @@ def main(argv=None):
     lines.append("|---|---:|---:|---|---|---:|")
     for name, row in report["paired"].items():
         s = row.get("sign_test") or {}
+        if not row.get("n_cases"):
+            lines.append(f"| {name} | 0 | — | — | — | — |")
+            continue
         lines.append(f"| {name} | {row['n_cases']} | {fmt(row['mean_diff'])} | {row['ci95']} | "
                      f"{s.get('b_better')}/{s.get('a_better')}/{s.get('tied')} | {s.get('p_two_sided')} |")
     lines.append("")
@@ -265,8 +268,12 @@ def main(argv=None):
     for label, entry in report["by_type"].items():
         a = entry["arms"]["A"]["mean"]; b = entry["arms"]["B"]["mean"]; c = entry["arms"]["C"]["mean"]
         ab = entry["A->B"]; bc = entry["B->C"]
+        cells = []
+        for row in (ab, bc):
+            cells.append("—" if not row.get("n_cases")
+                         else f"{fmt(row['mean_diff'])} {row['ci95']}")
         lines.append(f"| {label} | {entry['questions']} | {fmt(a)} | {fmt(b)} | {fmt(c)} | "
-                     f"{fmt(ab['mean_diff'])} {ab['ci95']} | {fmt(bc['mean_diff'])} {bc['ci95']} |")
+                     f"{cells[0]} | {cells[1]} |")
     lines.append("")
     if effort:
         lines.append("## Cost and effort per arm-run (from the terminal records)")
@@ -274,10 +281,14 @@ def main(argv=None):
         lines.append("| run | n | tool calls / q | model calls / q | charged CNY | CNY / q |")
         lines.append("|---|---:|---:|---:|---:|---:|")
         for name, row in effort.items():
-            lines.append(f"| {name} | {row['n']} | {row['mean_tool_calls']} | "
+            mark = "*" if row["n"] < 60 else ""
+            lines.append(f"| {name} | {row['n']}{mark} | {row['mean_tool_calls']} | "
                          f"{row['mean_model_calls']} | {row['charged_cny']} | "
                          f"{row['cny_per_question']} |")
         lines.append("")
+        if any(row["n"] < 60 for row in effort.values()):
+            lines.append("* fewer than 60 terminals: the arm was still running when this file was written.")
+            lines.append("")
     if letters:
         short = {}
         for i, label in enumerate(sorted(report["by_type"]), 1):
