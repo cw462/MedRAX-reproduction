@@ -18,51 +18,63 @@ This work uses **A/B/C/D/E**, and the new modules carry the plan's names.
 | module | verification level |
 |---|---|
 | `semantic_trace.py` | **real run**: 2 questions, 4 tool kinds, 0 unparseable |
-| `skill_distill.py` | compiles; **not run end-to-end yet** (blocked below) |
-| `skill_render.py` | **local check**: 671 chars, all sections, capability mapped to a real tool |
-| `skill_policy.py` | **12 unit tests** |
+| `skill_distill.py` | **real run**: 18 traces -> 17 skills, 0 rejected, no answer/option leakage |
+| `skill_render.py` | **real run**: C's logged blocks rebuild byte-for-byte (5/5 in S0) |
+| `skill_policy.py` | **unit tests** + on-topic filter measured on 29 questions (mismatch 5 -> 1) |
 | `roi_reinspect.py` | **local check**: real crop (325x250), inverted/un-normalised boxes rejected |
 | `tool_step_replay.py` | **6 unit tests** (a test caught the "always pick the classifier" bug) |
 | `tool_step_credit.py` | **6 unit tests** |
-| `run_skill_validation.py` | **local smoke**: parses 29 config keys, refuses unready stages |
-| `configs/skill_validation_v4.yaml` | `heldout_enabled: false` |
+| `run_skill_validation.py` | **real run**: S0 A/B/C completed, resumable, refuses unimplemented stages |
+| `analyze_skill_s2.py` | **synthetic test**: pooling, pairing, per-type split, bootstrap CI |
 
 ## What has actually run
 
-* S1 collection started 18:13:27: **13 of 60** questions done, no errors, ~60 s/question.
-  Partial scoring: 8/13 correct (Wilson 95% CI 35.5%-82.3%). These are **training**
-  questions, not validation, so this is not a method result.
-* One semantic-capture smoke (2 questions) verified the four tool kinds parse.
+* **S1 collection**: 60 of 60 training questions; 18 usable traces selected for distillation.
+* **Skill v0**: 17 skills distilled from 18 traces, 0 rejected; every skill maps its
+  capability to a real tool.
+* **Retrieval relevance test** (29 frozen validation questions): without the on-topic
+  filter 5 of 29 injections were about a different finding; with it, **1 of 29**, with no
+  question left without an injection.
+* **Dataset**: `figures.zip` (822,949,819 bytes, 20,713 members, CRC clean) extracted to
+  6,267 images; all 2,500 benchmark questions now have every referenced image on disk.
+* **S2 fixed validation set**: 60 questions from 82 never-used validation cases, one per
+  case, round-robin over the official `categories` label (12 per type). Rule and excluded
+  case ids in `runs/v4_validation60/manifest.json`.
+* **S0 pilot (2026-10-29 18:56–19:07)**: A/B/C on 5 questions, 5/5 terminals each, skill
+  injection verified 5/5 by rebuild. Details and caveats:
+  `reports/v4-s0-pilot-2026-10-29.md`. **Not a method result.**
+* **S2 (2026-10-29 19:09:47, running)**: 3 rounds x arms A/B/C x 60 questions = 9 arm-runs,
+  detached from the session. Input `runs/v4_validation60/inputs.jsonl`.
 
 ## Not run, and why
 
-1. **Skill v0 distillation** — blocked by the provider ledger lock: the collection process
-   holds it and `ProviderLedger` correctly refuses a second writer. Distillation must
-   follow the collection, not overlap it. The same applies to S4's 120 replays.
-2. **S0 pilot (5 cases A/B/C)** — needs skill v0, so it follows distillation.
-3. **S2 fixed 60-case validation — blocked by missing images.** The server has exactly
-   **100 images / 100 case dirs** (the frozen 60-train + 40-validation subset) and no
-   benchmark archive. `data/prepared_v2/validation.inputs.jsonl` lists 490 questions over
-   121 cases but their images are not on this machine; only 39 image-backed validation
-   questions exist and 29 of them were already used for development. The plan forbids
-   presenting those as final evidence. Options are with the user: transfer
-   `figures.921e604.zip` (823 MB; 13 GB free), or accept a development-only comparison
-   labelled as such.
-4. **S3 (D_branch / D_roi) and S4 execution** — `skill_policy.decide` and
-   `roi_reinspect.review_region` are written, but wiring them into the agent loop needs a
-   continuation runner: start from an explicit prefix (question, prior observations, active
-   skill, remaining budget), take a policy-chosen action, continue. That runner does not
-   exist, so the stages refuse rather than approximating.
-5. **S5 heldout** — deliberately disabled in the config until the user authorises it.
+1. **S2 results** — the nine arm-runs are in progress; each is 60 questions at roughly
+   65 s/question, about 10 hours for all nine. The comparison table is produced by
+   `analyze_skill_s2.py` from the nine `*_scored/score.json` sidecars.
+2. **S3 (D_branch / D_roi) and S4 (E step credit)** — `skill_policy.decide`,
+   `roi_reinspect.review_region` and `skill_branch_runner` exist and are unit-tested, but
+   the runner is still only wired to fake tools and a fake model. Whether it is worth
+   wiring to the real runtime is a decision S2 is supposed to inform: if C is not better
+   than B, the semantic representation itself needs rethinking before more experiments.
+3. **S5 heldout** — deliberately disabled in the config until the user authorises it.
 
 ## Cost
 
-Ledger `api_budget_qwen_100cny_v8.json`: about **68.9 CNY** committed across the session
-(conservative internal bound, not the provider bill). V4 itself has cost roughly 1 CNY.
+Ledger `api_budget_qwen_100cny_v8.json`: **73.35 CNY** committed at 19:18 CST (a
+conservative internal bound at assumed prices, not the provider bill). S0 cost about
+1.55 CNY for 15 question-runs. At the observed 0.12–0.13 CNY per question, the nine S2
+arm-runs are projected to add roughly 65–70 CNY, taking the ledger to about 140 CNY.
 
 ## Honest summary
 
-The infrastructure is complete and tested wherever pure logic can be tested, and semantic
-capture is proven on real runs. **No A/B/C/D/E comparison in the plan's terms exists yet.**
-The two obstacles are not code quality: (a) the collection is still running, and (b) the
-image archive needed for a genuinely new validation set is not on this machine.
+S0 proves the pipeline: the arms run, C injects the filtered skill block that the log
+says it does, and observations/answers/cost land on disk. It says nothing about which
+arm is better, because n=5.
+
+The one methodological caveat already visible: C's block is at its 1400-char cap while
+B's block is 554–1126 chars, so a B→C difference in S2 would mix representation with
+prompt length until the `B_length_control` ablation runs.
+
+The S0 raw run directories are intact under `runs/s0_A`, `runs/s0_B`, `runs/s0_C`
+(renamed before S2 needed the `v4_*` names), and `reports/v4_s0_recovered.json` holds a
+compact extract of the same run from the orchestrator log.
