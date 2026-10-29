@@ -39,6 +39,32 @@ def tokenize(text):
     return [w for w in words if w not in STOPWORDS and len(w) > 1]
 
 
+# Concrete findings a question or a skill can be about. Used only to decide
+# whether a skill is on-topic; it is not a label, it is read from visible text.
+TOPICS = {
+    "effusion": ("effusion", "pleural fluid"),
+    "pneumothorax": ("pneumothorax",),
+    "consolidation": ("consolidation", "consolidative"),
+    "atelectasis": ("atelectasis", "collapse"),
+    "nodule": ("nodule", "nodules", "nodular"),
+    "mass": ("mass", "masses"),
+    "opacity": ("opacity", "opacities", "infiltrate", "infiltration"),
+    "cardiomegaly": ("cardiomegaly", "enlarged heart", "cardiac enlargement"),
+    "edema": ("edema",),
+    "fibrosis": ("fibrosis", "fibrotic"),
+    "pneumonia": ("pneumonia",),
+    "fracture": ("fracture",),
+    "hernia": ("hernia",),
+    "emphysema": ("emphysema", "hyperinflation"),
+    "catheter_or_device": ("catheter", "pacemaker", "stent", "line", "tube", "device"),
+}
+
+
+def _topic_tags(text):
+    lowered = (text or "").lower()
+    return {name for name, variants in TOPICS.items() if any(v in lowered for v in variants)}
+
+
 def _skill_text(skill):
     parts = [str(skill.get("trigger") or "")]
     parts += [str(x) for x in (skill.get("required_information") or [])]
@@ -65,13 +91,27 @@ class SkillIndex:
             for word in set(doc):
                 self._df[word] += 1
 
-    def search(self, question, top_k=3, min_score=0.0):
+    def search(self, question, top_k=3, min_score=0.0, topic_filter=False):
+        """Rank skills for a question.
+
+        `topic_filter=True` keeps only skills that share at least one concrete
+        finding with the question. Measured need: without it, 6 of 29 frozen
+        validation questions received a skill about a *different* finding
+        (e.g. a nodule question got an "atelectasis/consolidation" skill),
+        because BM25 matches the generic vocabulary in every trigger. A skill
+        about the wrong finding is worse than no skill, so the default for the
+        C arm should be to filter rather than to fill the slot.
+        """
         if not self.skills:
             return []
         query = set(tokenize(question))
+        question_topics = _topic_tags(question)
         n = len(self._docs)
         scored = []
         for skill, doc in zip(self.skills, self._docs):
+            if topic_filter:
+                if question_topics and not (question_topics & _topic_tags(_skill_text(skill))):
+                    continue
             counts = Counter(doc)
             score = 0.0
             for word in query:
