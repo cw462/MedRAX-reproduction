@@ -208,6 +208,8 @@ def main(argv=None):
     ap.add_argument("--request-timeout-seconds", type=float, default=120.0)
     ap.add_argument("--branch", choices=("do_action", "skip_action", "alternate_action"),
                     default="do_action")
+    ap.add_argument("--pair", action="store_true",
+                    help="run do_action and skip_action from the same checkpoint in one process")
     args = ap.parse_args(argv)
 
     checkpoint = load_checkpoint(args.run, args.input, args.question_index, args.checkpoint_index)
@@ -220,21 +222,27 @@ def main(argv=None):
         raise SystemExit("API key absent")
     from provider_profile import get_profile
     from provider_ledger import ProviderLedger
-    from skill_branch_runner import continue_from_checkpoint
+    from skill_branch_runner import continue_from_checkpoint, run_replay_pair
 
     profile = get_profile(args.profile)
     runtime = RealRuntime(args, profile, key)
     runtime.args = args
     runtime.set_checkpoint(checkpoint, args.images_root)
-    out = {"checkpoint": checkpoint, "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    out = {"checkpoint": checkpoint, "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+           "mode": "pair" if args.pair else args.branch}
     try:
         with ProviderLedger(args.ledger, profile, cap_cny=args.cap_cny,
                             inherit_ledger_path=args.inherit_ledger) as ledger:
             runtime.ledger = ledger
-            result = continue_from_checkpoint(checkpoint, call_tool=runtime.call_tool,
-                                              ask_model=runtime.ask_model, branch=args.branch,
-                                              remaining_tool_calls=2)
-            out["result"] = result.to_dict()
+            if args.pair:
+                out["pair"] = run_replay_pair(checkpoint, call_tool=runtime.call_tool,
+                                             ask_model=runtime.ask_model,
+                                             other_branch="skip_action")
+            else:
+                result = continue_from_checkpoint(checkpoint, call_tool=runtime.call_tool,
+                                                  ask_model=runtime.ask_model, branch=args.branch,
+                                                  remaining_tool_calls=2)
+                out["result"] = result.to_dict()
             out["money"] = {"settlements": runtime.settlements,
                             "remaining_cny": str(ledger.remaining)}
     finally:
@@ -244,11 +252,22 @@ def main(argv=None):
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(out, ensure_ascii=False, indent=1, default=str) + "\n",
                             encoding="utf-8")
-        print(json.dumps({"branch": out.get("result", {}).get("branch"),
-                          "stopped_reason": out.get("result", {}).get("stopped_reason"),
-                          "answer": (out.get("result", {}).get("answer") or "")[:200],
-                          "tool_calls": len(out["tool_calls"]),
-                          "out": str(args.out)}, ensure_ascii=False))
+        if args.pair:
+            pair = out.get("pair", {})
+            summary = {"checkpoint": checkpoint["checkpoint_id"],
+                       "do": {"answer": (pair.get("do_action", {}).get("answer") or "")[:160],
+                              "stopped_reason": pair.get("do_action", {}).get("stopped_reason")},
+                       "skip": {"answer": (pair.get("other", {}).get("answer") or "")[:160],
+                                "stopped_reason": pair.get("other", {}).get("stopped_reason")},
+                       "tool_calls": len(out["tool_calls"]),
+                       "out": str(args.out)}
+        else:
+            summary = {"branch": out.get("result", {}).get("branch"),
+                       "stopped_reason": out.get("result", {}).get("stopped_reason"),
+                       "answer": (out.get("result", {}).get("answer") or "")[:200],
+                       "tool_calls": len(out["tool_calls"]),
+                       "out": str(args.out)}
+        print(json.dumps(summary, ensure_ascii=False))
     return 0
 
 
