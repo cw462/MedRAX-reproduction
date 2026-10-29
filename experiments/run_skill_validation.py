@@ -109,14 +109,66 @@ def stage_distill(config, resume):
     return "ok" if code == 0 else f"failed with exit {code}"
 
 
-def stage_validate(config, resume):
+ARM_SPECS = {
+    "A": {"arm": "r0", "memory": False, "skills": False},
+    "B": {"arm": "r1", "memory": True, "skills": False},
+    "C": {"arm": "r0", "memory": False, "skills": True},
+}
+
+
+def _arm_command(letter, input_path, name, cases, skills_path, ledger, inherit):
+    spec = ARM_SPECS[letter]
+    pool = ROOT / "runs/memory_pool_v3/pool.json"
+    pool_sha = "2eba53f789ea3c175e18c41f2a842c0a6dba4d3d5e73397e9d4174497a2e4644"
+    train = ROOT / "data/memory_v1/inputs/memory_train_subset_v1.jsonl"
+    args = [str(CODE / "run_arm.sh"), spec["arm"], str(input_path), name, str(cases), "0"]
+    if spec["memory"]:
+        args += [str(pool), pool_sha, "3", "--recursion-limit", "40",
+                 "--text-retrieval", "--training-inputs", str(train), "--diverse-retrieval"]
+    else:
+        args += ["", "", "3", "--recursion-limit", "40"]
+        if spec["skills"]:
+            args += ["--skills", str(skills_path)]
+    env = (f"cat /tmp/.qwen_key | LEDGER={ledger} INHERIT={inherit} CAP=1000000 "
+           f"MAX_TOOL=12 MAX_MODEL=16 bash {' '.join(args)}")
+    return ["bash", "-lc", env]
+
+
+def stage_validate(config, resume, cases=None, rounds=None):
+    """Run A/B/C on a fixed case list. D and E are refused, not faked."""
     skills = RUNS / "skills_v0" / "skills.json"
     if not skills.exists():
-        return "blocked: no skills v0 yet"
-    # The validated arms need the multi-arm runner, which is not written yet; do not pretend.
-    return ("NOT IMPLEMENTED: the A/B/C validation runner for a fixed 60-case set is not written "
-            "yet. Existing per-arm shell entry points can run one arm at a time, but there is no "
-            "orchestrator that fixes the case list, randomises arm order and repeats 3 rounds.")
+        return "blocked: no skills v0 yet, so arm C has nothing to inject"
+    input_path = ROOT / "data/memory_v1/inputs/validation_subset_v2.jsonl"
+    wanted = int(cases or config.get("pilot_validation_cases") or 5)
+    n_rounds = int(rounds or config.get("validation_repeats") or 1)
+    ledger = REPORTS / "api_budget_qwen_100cny_v8.json"
+    inherit = REPORTS / "api_budget_qwen_100cny_v7.json"
+    log = ROOT / "logs/v4_orchestrator.log"
+    done = []
+    for rnd in range(1, n_rounds + 1):
+        order = list(ARM_SPECS)                      # randomised per round below
+        import random
+        random.Random(20261029 + rnd).shuffle(order)
+        for letter in order:
+            name = f"v4_{letter}_r{rnd}"
+            if resume and (RUNS / name / "summary.json").exists():
+                done.append(f"{name}:skipped")
+                continue
+            code = run(_arm_command(letter, input_path, name, wanted, skills, ledger, inherit),
+                       log, f"validate {name}")
+            if code != 0:
+                return f"failed at {name} (exit {code})"
+            run([str(ROOT / ".venv/bin/python"), str(EXPERIMENTS / "score_memory_runs.py"),
+                 "--run", str(RUNS / name), "--splits", str(ROOT / "data/prepared_v2"),
+                 "--labels", str(ROOT / "data/prepared_v2/validation.labels.jsonl"),
+                 "--outcomes", str(RUNS / f"{name}_scored/outcomes.json"),
+                 "--report", str(RUNS / f"{name}_scored/score.json"),
+                 "--expected-split", "validation"], log, f"score {name}")
+            done.append(f"{name}:ok")
+    note = (" ran A/B/C only; D (conditional branches) and E (step credit) need the "
+            "continuation runner that is not written, so they are not reported")
+    return f"completed {len(done)} arm-runs ({', '.join(done[:6])}...){note}"
 
 
 def stage_replay(config, resume):
@@ -183,6 +235,8 @@ def main(argv=None):
     ap.add_argument("--stage", default="all",
                     choices=["all"] + [name for name, _ in STAGES])
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--cases", type=int)
+    ap.add_argument("--rounds", type=int)
     args = ap.parse_args(argv)
 
     config = load_flat_yaml(args.config)
@@ -193,7 +247,10 @@ def main(argv=None):
     results = {}
     for name, fn in chosen:
         try:
-            results[name] = fn(config, args.resume)
+            if name == "validate":
+                results[name] = fn(config, args.resume, args.cases, args.rounds)
+            else:
+                results[name] = fn(config, args.resume)
         except Exception as exc:                      # record, never swallow silently
             results[name] = f"error: {type(exc).__name__}: {exc}"
         print(f"[{name}] {results[name]}")
