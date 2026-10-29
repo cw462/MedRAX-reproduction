@@ -447,7 +447,7 @@ def run_arm(runtime, ledger, profile, row, paths, arm, start, run_id, args, trac
             final = None
             for step in agent.workflow.stream({'messages': batch},
                                               {'configurable': {'thread_id': start['thread_id']},
-                                               'recursion_limit': 12}):
+                                               'recursion_limit': args.recursion_limit}):
                 for node, values in step.items():
                     for message in values.get('messages', []):
                         if node == 'process' and not (getattr(message, 'tool_calls', None) or []):
@@ -574,7 +574,7 @@ def build_plan(args, rows, records, runtime, profile, prompt, policy, protocol_s
         'image_detail': args.image_detail,
         'request_timeout_seconds': args.request_timeout_seconds,
         'max_case_seconds': args.max_case_seconds,
-        'recursion_limit': 12,
+        'recursion_limit': args.recursion_limit,
         'device': args.device,
         'source_sha256': {name: diag.smoke.classifier_utils.sha256_file(path)
                           for name, path in files.items()},
@@ -664,6 +664,9 @@ def main(argv=None):
     parser.add_argument('--top-p', type=float, default=0.95)
     parser.add_argument('--plan-only', action='store_true',
                         help='Build inputs/runtime/protocol, print them and exit without a journal or API call')
+    parser.add_argument('--recursion-limit', type=int, default=12,
+                        help='LangGraph super-step ceiling. Must be raised when the call '
+                             'budget is released, otherwise the graph is cut off first.')
     parser.add_argument('--max-consecutive-failures', type=int, default=3,
                         help='Stop a resumable run after this many consecutive model/tool failures')
     parser.add_argument('--cap-cny', default='1000000',

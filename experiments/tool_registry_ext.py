@@ -175,15 +175,28 @@ def build_tools(repo: Path, *, cache_dir: Path, classifier_checkpoint: Path,
         client.start()
         audit_path = temp_dir / "grounding_audit.jsonl"
 
-        def _ground(image_path: str, phrase: str, max_new_tokens: int = 300) -> str:
+        def _ground(image_path: str, phrase: str, max_new_tokens: int = 300):
+            # The upstream tool returns (output, metadata) and the runner's
+            # observe() contract reads metadata["analysis_status"]; returning a
+            # JSON string here made every grounding call count as a failed return
+            # and still consume the per-case tool budget.
             result = client.ground(image_path, phrase, max_new_tokens)
             with open(audit_path, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(result, ensure_ascii=False) + "\n")
             boxes = result.get("predictions", [])
-            return json.dumps({"analysis_status": result["analysis_status"],
-                               "phrase": result["phrase"],
-                               "n_boxes": len(boxes),
-                               "boxes": [b["image"] for b in boxes]}, ensure_ascii=False)
+            output = {"predictions": [{"phrase": b["phrase"],
+                                       "bounding_boxes": {"model_coordinates": [b["model"]],
+                                                          "image_coordinates": [b["image"]]}}
+                                      for b in boxes],
+                      "visualization_path": None}
+            metadata = {"image_path": image_path,
+                        "analysis_status": result["analysis_status"],
+                        "phrase": result["phrase"],
+                        "n_boxes": len(boxes),
+                        "tool_version": result.get("tool_version"),
+                        "clinical_evidence": "unknown",
+                        "step_credit": None}
+            return output, metadata
 
         tool = StructuredTool.from_function(
             func=_ground, name="xray_phrase_grounding",
