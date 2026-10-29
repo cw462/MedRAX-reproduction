@@ -608,6 +608,9 @@ def build_plan(args, rows, records, runtime, profile, prompt, policy, protocol_s
                    'training_inputs': str(args.training_inputs) if args.training_inputs else None,
                    'diverse_retrieval': args.diverse_retrieval,
                    'diversity_threshold': args.diversity_threshold,
+                   'skills': str(args.skills) if args.skills else None,
+                   'skill_top_k': args.skill_top_k,
+                   'skill_max_chars': args.skill_max_chars,
                    'injection_template': 'memory_pipeline.injection.build_memory_block'},
         'images_root': str(args.images_root.resolve()),
         'upstream_repo_path': str(args.repo),
@@ -665,6 +668,11 @@ def main(argv=None):
     parser.add_argument('--heldout-queries', action='store_true',
                         help='Permit retrieval for heldout_test questions through the separate '
                              'locked evaluation adapter (heldout_retrieval.py).')
+    parser.add_argument('--skills', type=Path,
+                        help='V4 arm C: inject distilled semantic skills instead of structural '
+                             'memory. Takes the skills.json written by skill_distill.py.')
+    parser.add_argument('--skill-top-k', type=int, default=3)
+    parser.add_argument('--skill-max-chars', type=int, default=1400)
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--max-cases', type=int, default=0)
     parser.add_argument('--max-tool-calls', type=int, default=3)
@@ -765,6 +773,13 @@ def main(argv=None):
                 from memory_capacity import DiversePool
                 pool = DiversePool(pool, pool.payload()['records'],
                                    threshold=args.diversity_threshold)
+        skill_index = None
+        if args.skills is not None:
+            # Arm C: same injection point and character budget as the memory block,
+            # only the representation changes (semantic skill vs structural memory).
+            from skill_policy import SkillIndex
+            skill_payload = json.loads(Path(args.skills).read_text(encoding='utf-8'))
+            skill_index = SkillIndex(skill_payload['skills'])
         if args.plan_only:
             print(json.dumps({'protocol_sha256': protocol,
                               'questions': len(rows),
@@ -797,7 +812,15 @@ def main(argv=None):
                         'arm': args.arm, 'pool_sha256': args.pool_sha256, 'pool_loaded': pool is not None,
                         'queried': pool is not None, 'returned': 0, 'memory_ids': [], 'scores': [],
                         'injected_chars': 0, 'injected_sha256': None}
-                    if pool is not None:
+                    if skill_index is not None:
+                        from skill_render import render_block as _render_skills
+                        skill_hits = skill_index.search(row['question'], top_k=args.skill_top_k)
+                        block = _render_skills(skill_hits, max_chars=args.skill_max_chars)
+                        memory_ids = [h.get('skill_id') for h in skill_hits]
+                        retrieval_record.update({'skills': memory_ids, 'returned': len(skill_hits),
+                                                 'skill_chars': len(block)})
+                        diag.durable_line(retrieval, retrieval_record)
+                    elif pool is not None:
                         from memory_pipeline.injection import build_memory_block
                         query = {'question_id': qid, 'question': row['question'], 'images': row['images'],
                                  'available_tools': plan['available_tool_versions'],
