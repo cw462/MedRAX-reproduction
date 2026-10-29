@@ -24,6 +24,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]          # .../MedRAX_reproduction_20261027
@@ -109,6 +110,21 @@ def stage_distill(config, resume):
     return "ok" if code == 0 else f"failed with exit {code}"
 
 
+def _run_complete(run_dir):
+    """A finished arm, not merely a directory that the journal has touched."""
+    summary_path = Path(run_dir) / "summary.json"
+    if not summary_path.exists():
+        return False
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+    planned = summary.get("planned_question_count") or 0
+    finished = len(summary.get("question_results") or [])
+    return (summary.get("stop_reason") == "complete" and planned > 0
+            and finished >= planned)
+
+
 ARM_SPECS = {
     "A": {"arm": "r0", "memory": False, "skills": False},
     "B": {"arm": "r1", "memory": True, "skills": False},
@@ -121,12 +137,14 @@ def _arm_command(letter, input_path, name, cases, skills_path, ledger, inherit):
     pool = ROOT / "runs/memory_pool_v3/pool.json"
     pool_sha = "2eba53f789ea3c175e18c41f2a842c0a6dba4d3d5e73397e9d4174497a2e4644"
     train = ROOT / "data/memory_v1/inputs/memory_train_subset_v1.jsonl"
+    # empty positional slots must survive the shell: an unquoted "" collapses and
+    # shifts $6/$7, which made run_arm.sh exit 2 on the no-memory arms.
     args = [str(CODE / "run_arm.sh"), spec["arm"], str(input_path), name, str(cases), "0"]
     if spec["memory"]:
         args += [str(pool), pool_sha, "3", "--recursion-limit", "40",
                  "--text-retrieval", "--training-inputs", str(train), "--diverse-retrieval"]
     else:
-        args += ["", "", "3", "--recursion-limit", "40"]
+        args += ["''", "''", "3", "--recursion-limit", "40"]
         if spec["skills"]:
             args += ["--skills", str(skills_path)]
     env = (f"cat /tmp/.qwen_key | LEDGER={ledger} INHERIT={inherit} CAP=1000000 "
@@ -134,12 +152,20 @@ def _arm_command(letter, input_path, name, cases, skills_path, ledger, inherit):
     return ["bash", "-lc", env]
 
 
-def stage_validate(config, resume, cases=None, rounds=None):
+def stage_validate(config, resume, cases=None, rounds=None, input_path=None, tag=""):
     """Run A/B/C on a fixed case list. D and E are refused, not faked."""
     skills = RUNS / "skills_v0" / "skills.json"
     if not skills.exists():
         return "blocked: no skills v0 yet, so arm C has nothing to inject"
-    input_path = ROOT / "data/memory_v1/inputs/validation_subset_v2.jsonl"
+    if input_path is None:
+        input_path = ROOT / str(config.get("validation_input",
+                                           "data/memory_v1/inputs/validation_subset_v2.jsonl"))
+    # run_arm.sh cds into code/, so a relative input path would not resolve there.
+    input_path = Path(input_path).resolve()
+    if not input_path.exists():
+        return f"blocked: validation input not found: {input_path}"
+    if tag:
+        tag = "_" + tag.strip("_") if not tag.startswith("_") else tag
     wanted = int(cases or config.get("pilot_validation_cases") or 5)
     n_rounds = int(rounds or config.get("validation_repeats") or 1)
     ledger = REPORTS / "api_budget_qwen_100cny_v8.json"
@@ -151,10 +177,18 @@ def stage_validate(config, resume, cases=None, rounds=None):
         import random
         random.Random(20261029 + rnd).shuffle(order)
         for letter in order:
-            name = f"v4_{letter}_r{rnd}"
-            if resume and (RUNS / name / "summary.json").exists():
+            name = f"v4{tag}_{letter}_r{rnd}"
+            if resume and _run_complete(RUNS / name):
                 done.append(f"{name}:skipped")
                 continue
+            if (RUNS / name).exists():
+                # Used to abort the stage with FileExistsError inside the eval.
+                # Move it aside (never delete) so the arm restarts from zero.
+                if not resume:
+                    return f"refusing to overwrite runs/{name}: pass --resume to set it aside"
+                stale = (RUNS / name).with_name(name + ".stale-" + time.strftime("%Y%m%dT%H%M%S"))
+                (RUNS / name).rename(stale)
+                done.append(f"{name}:stale->{stale.name}")
             code = run(_arm_command(letter, input_path, name, wanted, skills, ledger, inherit),
                        log, f"validate {name}")
             if code != 0:
@@ -168,7 +202,8 @@ def stage_validate(config, resume, cases=None, rounds=None):
             done.append(f"{name}:ok")
     note = (" ran A/B/C only; D (conditional branches) and E (step credit) need the "
             "continuation runner that is not written, so they are not reported")
-    return f"completed {len(done)} arm-runs ({', '.join(done[:6])}...){note}"
+    return (f"completed {len(done)} arm-runs on {wanted} questions from {input_path.name} "
+            f"({', '.join(done[:6])}...){note}")
 
 
 def stage_replay(config, resume):
@@ -237,6 +272,11 @@ def main(argv=None):
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--cases", type=int)
     ap.add_argument("--rounds", type=int)
+    ap.add_argument("--input", type=Path,
+                    help="question JSONL; default is the config's validation_input")
+    ap.add_argument("--tag", default="",
+                    help="prefix inserted into run names, so a new stage cannot collide "
+                         "with an earlier one (e.g. --tag s2 -> runs/v4_s2_A_r1)")
     args = ap.parse_args(argv)
 
     config = load_flat_yaml(args.config)
@@ -248,7 +288,8 @@ def main(argv=None):
     for name, fn in chosen:
         try:
             if name == "validate":
-                results[name] = fn(config, args.resume, args.cases, args.rounds)
+                results[name] = fn(config, args.resume, args.cases, args.rounds,
+                                   args.input, args.tag)
             else:
                 results[name] = fn(config, args.resume)
         except Exception as exc:                      # record, never swallow silently

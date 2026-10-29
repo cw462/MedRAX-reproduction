@@ -611,6 +611,7 @@ def build_plan(args, rows, records, runtime, profile, prompt, policy, protocol_s
                    'skills': str(args.skills) if args.skills else None,
                    'skill_top_k': args.skill_top_k,
                    'skill_max_chars': args.skill_max_chars,
+                   'skill_topic_filter': not args.skill_no_topic_filter,
                    'injection_template': 'memory_pipeline.injection.build_memory_block'},
         'images_root': str(args.images_root.resolve()),
         'upstream_repo_path': str(args.repo),
@@ -673,6 +674,9 @@ def main(argv=None):
                              'memory. Takes the skills.json written by skill_distill.py.')
     parser.add_argument('--skill-top-k', type=int, default=3)
     parser.add_argument('--skill-max-chars', type=int, default=1400)
+    parser.add_argument('--skill-no-topic-filter', action='store_true',
+                        help='Disable the on-topic filter. Measured without it: 5 of 29 '
+                             'validation questions received a skill about a different finding.')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--max-cases', type=int, default=0)
     parser.add_argument('--max-tool-calls', type=int, default=3)
@@ -814,7 +818,8 @@ def main(argv=None):
                         'injected_chars': 0, 'injected_sha256': None}
                     if skill_index is not None:
                         from skill_render import render_block as _render_skills
-                        skill_hits = skill_index.search(row['question'], top_k=args.skill_top_k)
+                        skill_hits = skill_index.search(row['question'], top_k=args.skill_top_k,
+                                                        topic_filter=not args.skill_no_topic_filter)
                         block = _render_skills(skill_hits, max_chars=args.skill_max_chars)
                         memory_ids = [h.get('skill_id') for h in skill_hits]
                         retrieval_record.update({'skills': memory_ids, 'returned': len(skill_hits),
