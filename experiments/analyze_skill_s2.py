@@ -50,7 +50,12 @@ def load_types(metadata_path):
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         if not line.strip():
             continue
-        row = json.loads(line)
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            # the downloaded metadata has a few truncated lines; a type label is
+            # not worth failing the whole analysis over
+            continue
         qid = str(row.get("full_question_id") or row.get("question_id") or "")
         parts = qid.split("_")
         if len(parts) == 3:
@@ -134,7 +139,18 @@ def main(argv=None):
     if not collected:
         raise SystemExit("no scored arm-runs found")
     means = per_question_means(collected, args.rounds)
-    types = load_types(args.metadata)
+    # The raw download truncates a few metadata lines; the repaired copy is the
+    # one that labels all 2,500 questions, so prefer whichever covers more of the
+    # questions this analysis actually has.
+    candidates = [args.metadata, args.metadata.with_name(args.metadata.name + ".new")]
+    types = {}
+    for path in candidates:
+        if not path.exists():
+            continue
+        loaded = load_types(path)
+        if sum(1 for arm in ARMS for q in means[arm] if q in loaded) > \
+                sum(1 for arm in ARMS for q in means[arm] if q in types):
+            types = loaded
     qids = sorted({q for arm in ARMS for q in means[arm]})
 
     report = {"rounds": args.rounds, "questions_with_results": len(qids), "runs": {},
