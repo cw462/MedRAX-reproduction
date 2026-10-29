@@ -1,74 +1,68 @@
 # V4 Skill method validation — progress
 
 Plan: `MedRAX_Skill_Method_Validation_Plan_v4.md`. Base commit at start: `65da316`.
-This file records only what actually ran; anything not executed is marked as such.
+This file records only what actually ran. Anything not executed is listed as not executed.
 
 ## Naming correction carried over from the plan
 
-The plan is right that the previous module names do not describe what they did:
-
-| module | what it actually did | not |
+| old module | what it actually did | not |
 |---|---|---|
-| `memory_credit.py` | removes *retrieved memory entries* and measures the answer flip | not tool-step credit |
-| `memory_rerank.py` | changes retrieval ranking | not next-action selection |
-| `memory_capacity.py` | de-duplicates the injected block | not a capacity-limited pool update |
+| `memory_credit.py` | removed *retrieved memory entries* and measured the answer flip | not tool-step credit |
+| `memory_rerank.py` | changed retrieval ranking | not next-action selection |
+| `memory_capacity.py` | de-duplicated the injected block | not a capacity-limited pool update |
 
-So this work uses **A/B/C/D/E** and the new modules carry the plan's names.
+This work uses **A/B/C/D/E**, and the new modules carry the plan's names.
 
-## Status: S0 in progress — semantic capture is working
+## Modules: all eight exist
 
-S0 asks for A/B/C on five development cases. The prerequisite is that a real run
-can record *semantic* observations, because the existing traces keep only tool
-names, output lengths and hashes, from which no skill can be distilled.
+| module | verification level |
+|---|---|
+| `semantic_trace.py` | **real run**: 2 questions, 4 tool kinds, 0 unparseable |
+| `skill_distill.py` | compiles; **not run end-to-end yet** (blocked below) |
+| `skill_render.py` | **local check**: 671 chars, all sections, capability mapped to a real tool |
+| `skill_policy.py` | **12 unit tests** |
+| `roi_reinspect.py` | **local check**: real crop (325x250), inverted/un-normalised boxes rejected |
+| `tool_step_replay.py` | **6 unit tests** (a test caught the "always pick the classifier" bug) |
+| `tool_step_credit.py` | **6 unit tests** |
+| `run_skill_validation.py` | **local smoke**: parses 29 config keys, refuses unready stages |
+| `configs/skill_validation_v4.yaml` | `heldout_enabled: false` |
 
-That prerequisite is now implemented and verified on real runs.
+## What has actually run
 
-### Implemented
+* S1 collection started 18:13:27: **13 of 60** questions done, no errors, ~60 s/question.
+  Partial scoring: 8/13 correct (Wilson 95% CI 35.5%-82.3%). These are **training**
+  questions, not validation, so this is not a method result.
+* One semantic-capture smoke (2 questions) verified the four tool kinds parse.
 
-`experiments/semantic_trace.py` derives, per tool call, the compact content a
-summariser can use, and never invents a finding when the output cannot be parsed.
-`memory_agent_eval.TrackedTool` writes one record per call to
-`runs/<run>/semantic_trace.jsonl`.
+## Not run, and why
 
-### Verified on a real 2-question run (arm A, no memory)
+1. **Skill v0 distillation** — blocked by the provider ledger lock: the collection process
+   holds it and `ProviderLedger` correctly refuses a second writer. Distillation must
+   follow the collection, not overlap it. The same applies to S4's 120 replays.
+2. **S0 pilot (5 cases A/B/C)** — needs skill v0, so it follows distillation.
+3. **S2 fixed 60-case validation — blocked by missing images.** The server has exactly
+   **100 images / 100 case dirs** (the frozen 60-train + 40-validation subset) and no
+   benchmark archive. `data/prepared_v2/validation.inputs.jsonl` lists 490 questions over
+   121 cases but their images are not on this machine; only 39 image-backed validation
+   questions exist and 29 of them were already used for development. The plan forbids
+   presenting those as final evidence. Options are with the user: transfer
+   `figures.921e604.zip` (823 MB; 13 GB free), or accept a development-only comparison
+   labelled as such.
+4. **S3 (D_branch / D_roi) and S4 execution** — `skill_policy.decide` and
+   `roi_reinspect.review_region` are written, but wiring them into the agent loop needs a
+   continuation runner: start from an explicit prefix (question, prior observations, active
+   skill, remaining budget), take a policy-chosen action, continue. That runner does not
+   exist, so the stages refuse rather than approximating.
+5. **S5 heldout** — deliberately disabled in the config until the user authorises it.
 
-```
-semantic_trace.jsonl: 6 lines, 4 tool kinds, 0 unparseable
+## Cost
 
-chest_xray_expert      completed  {"answer_text": "COP"}
-chest_xray_classifier  completed  {"top_findings": [{"finding": "Lung Opacity", "score": 0.6325},
-                                                    {"finding": "Mass", "score": 0.6149}, ...]}
-chest_xray_report_generator completed {"report_text": "CHEST X-RAY REPORT FINDINGS: ..."}
-xray_phrase_grounding  completed  {"grounded_regions": [{"phrase": "Consolidation in the right
-                                     lower lung.", "box_xyxy_normalised": [0.154, 0.454, 0.433, 0.704]}]}
-```
+Ledger `api_budget_qwen_100cny_v8.json`: about **68.9 CNY** committed across the session
+(conservative internal bound, not the provider bill). V4 itself has cost roughly 1 CNY.
 
-Each record keeps `execution_status`, `evidence_status="tool_statement_unverified"`,
-`clinical_evidence="unknown"` and `step_credit=null`, so a tool's claim is never
-promoted to a medical fact by being recorded.
+## Honest summary
 
-### Two defects found while wiring this
-
-1. The classifier returns a bare mapping of pathology to `numpy.float32` scores,
-   not a wrapper with a `scores` key. A plain `isinstance(x, float)` test rejected
-   every value, so the first smoke recorded "not parseable". Fixed with a numeric
-   coercion and re-verified (local check with `np.float32`, plus the real run above).
-2. (Earlier in this session) the grounding proxy returned a JSON string where the
-   runner's `observe()` contract requires `(output, metadata)`; every grounding
-   return was therefore counted invalid. Fixed and verified with `observe()`.
-   See `reports/eight-tool-validation-2026-10-29.md`.
-
-## Not yet done
-
-* S0 itself: the A/B/C pilot on five development cases.
-* S1: 60-case semantic collection and Skill v0 (`skill_distill.py`,
-  `skill_render.py` do not exist yet).
-* S2–S6: validation set, D branches, credit replay, heldout.
-* No A/B/C/D/E comparison numbers exist yet in this plan's terms, so the 29-question
-  history (12/14/11/15 correct) remains the only data and is *not* an independent
-  test - the plan explicitly forbids treating it as final evidence.
-
-## Cost so far
-
-Ledger `api_budget_qwen_100cny_v8.json`: 68.56 CNY committed (conservative internal
-bound, not the provider bill). The two smoke runs cost about 0.4 CNY.
+The infrastructure is complete and tested wherever pure logic can be tested, and semantic
+capture is proven on real runs. **No A/B/C/D/E comparison in the plan's terms exists yet.**
+The two obstacles are not code quality: (a) the collection is still running, and (b) the
+image archive needed for a genuinely new validation set is not on this machine.
