@@ -75,6 +75,17 @@ def main(argv=None):
         lines.append(f"| {LABEL[arm]} | {row['n']} | {row['correct']} | {fmt(row['accuracy'])} | "
                      f"{row['wilson']} |")
     lines.append("")
+    odd = {arm: runs[f"{arm}_r1"].get("outcome_counts") or {}
+           for arm in ARMS if runs.get(f"{arm}_r1")}
+    odd = {arm: counts for arm, counts in odd.items()
+           if set(counts) - {"correct", "incorrect"}}
+    if odd:
+        lines.append("Outcome counts other than correct/incorrect (these are run failures, not "
+                     "wrong answers, and the graded accuracy excludes them):")
+        lines.append("")
+        for arm, counts in odd.items():
+            lines.append(f"* {LABEL[arm]}: {counts}")
+        lines.append("")
     lines.append("## Paired comparisons")
     lines.append("")
     lines.append("Same questions in every arm, so the comparison is within-question. The interval "
@@ -98,6 +109,8 @@ def main(argv=None):
     lines.append(f"* A→B (does structural memory help?): {verdict(paired.get('A->B'), 'B', 'A')}")
     lines.append(f"* B→C (does the semantic representation beat structural memory?): "
                  f"{verdict(paired.get('B->C'), 'C', 'B')}")
+    lines.append(f"* A→C (the two representations against the no-memory baseline): "
+                 f"{verdict(paired.get('A->C'), 'C', 'A')}")
     lines.append("")
     if by_type:
         lines.append("## By official question type")
@@ -135,6 +148,27 @@ def main(argv=None):
             lines.append("")
             lines.append(args.ledger_note)
         lines.append("")
+    lines.append("## What this round says")
+    lines.append("")
+    bc = paired.get("B->C") or {}
+    ab = paired.get("A->B") or {}
+    if ab.get("ci95") and ab["ci95"][1] is not None:
+        lines.append(f"* The data exclude a **B gain over A larger than {ab['ci95'][1] * 100:+.0f} "
+                     f"accuracy points**; the point estimate is {ab['mean_diff'] * 100:+.1f}.")
+    if bc.get("ci95") and bc["ci95"][1] is not None:
+        lines.append(f"* The data exclude a **C gain over B larger than {bc['ci95'][1] * 100:+.0f} "
+                     f"accuracy points**; the point estimate is {bc['mean_diff'] * 100:+.1f}.")
+        if bc["ci95"][1] <= 0.01:
+            lines.append("* In other words: this is not evidence that the semantic representation "
+                         "helps. If it helps at all, it is by less than the interval allows, and the "
+                         "point estimate is against it.")
+    lines.append("* No arm separates from the no-memory baseline, and the two representations cost "
+                 "0.119–0.134 CNY per question without buying accuracy in this round.")
+    lines.append("")
+    lines.append("Per the rule agreed before the run (if C is not clearly better than B, redesign the "
+                 "representation and injection instead of adding arms), rounds 2–3 stay cancelled "
+                 "and the next step is a redesign, not more repeats of this one.")
+    lines.append("")
     lines.append("## What this round cannot settle")
     lines.append("")
     half = None
@@ -154,9 +188,10 @@ def main(argv=None):
     lines.append("")
     lines.append("## Pipeline integrity")
     lines.append("")
-    lines.append("Every terminal below is a real tool-using episode: the scorer reads only the run's "
-                 "`results.jsonl` and the labels, and the ledger's per-call settlements are recorded "
-                 "in each terminal.")
+    lines.append("Every terminal in these runs is a real tool-using episode: the scorer reads only "
+                 "the run's `results.jsonl` and the labels, and the ledger's per-call settlements "
+                 "are recorded in each terminal. The per-question letter matrix and the full "
+                 "type table are in `reports/s2_round1_table.md`.")
     if args.faults:
         lines.append("")
         lines.append(f"The run survived {args.faults} ledger-guard faults; {args.lost_questions} "
