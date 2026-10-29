@@ -126,6 +126,42 @@ def fmt(x, nd=3):
     return "n/a" if x is None else f"{x:.{nd}f}"
 
 
+def collect_effort(runs_root, rounds):
+    """Per arm-run cost and call counts, read from the eval's terminal records."""
+    effort = {}
+    for arm in ARMS:
+        for rnd in rounds:
+            run = Path(runs_root) / f"v4_{arm}_r{rnd}"
+            results = run / "results.jsonl"
+            if not results.exists():
+                continue
+            terminals = []
+            for line in results.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if row.get("record_type") == "terminal":
+                    terminals.append(row)
+            if not terminals:
+                continue
+            charged = sum(float(s.get("charged_cny") or 0)
+                          for t in terminals for s in (t.get("ledger_settlements") or []))
+            effort[f"{arm}_r{rnd}"] = {
+                "n": len(terminals),
+                "mean_tool_calls": round(sum(t.get("actual_tool_attempts") or 0
+                                             for t in terminals) / len(terminals), 2),
+                "mean_model_calls": round(sum(t.get("actual_model_calls") or 0
+                                              for t in terminals) / len(terminals), 2),
+                "charged_cny": round(charged, 4),
+                "cny_per_question": round(charged / len(terminals), 4),
+            }
+    return effort
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--runs", type=Path, required=True)
@@ -191,9 +227,19 @@ def main(argv=None):
             entry[f"{a}->{b}"] = bootstrap_diff(means[a], means[b], group)
         report["by_type"][label] = entry
 
+    effort = collect_effort(args.runs, args.rounds)
+    report["effort"] = effort
+    letters = {}
+    for (arm, rnd), rows in collected.items():
+        for qid, row in rows.items():
+            letters[(arm, qid)] = row.get("letter") or row.get("status") or "?"
+
     # --- markdown
     lines = ["# S2 paired comparison", ""]
     lines.append(f"Rounds analysed: {args.rounds}. Questions with at least one result: {len(qids)}.")
+    if len(args.rounds) == 1:
+        lines.append("One round only, so the paired test below is McNemar's exact test on the "
+                     "discordant questions.")
     lines.append("")
     lines.append("## Per arm-run")
     lines.append("")
@@ -222,6 +268,31 @@ def main(argv=None):
         lines.append(f"| {label} | {entry['questions']} | {fmt(a)} | {fmt(b)} | {fmt(c)} | "
                      f"{fmt(ab['mean_diff'])} {ab['ci95']} | {fmt(bc['mean_diff'])} {bc['ci95']} |")
     lines.append("")
+    if effort:
+        lines.append("## Cost and effort per arm-run (from the terminal records)")
+        lines.append("")
+        lines.append("| run | n | tool calls / q | model calls / q | charged CNY | CNY / q |")
+        lines.append("|---|---:|---:|---:|---:|---:|")
+        for name, row in effort.items():
+            lines.append(f"| {name} | {row['n']} | {row['mean_tool_calls']} | "
+                         f"{row['mean_model_calls']} | {row['charged_cny']} | "
+                         f"{row['cny_per_question']} |")
+        lines.append("")
+    if letters:
+        short = {}
+        for i, label in enumerate(sorted(report["by_type"]), 1):
+            short[label] = f"T{i}"
+        lines.append("## Per-question matrix")
+        lines.append("")
+        lines.append("Type codes: " + ", ".join(f"{code}={label}" for label, code in short.items()))
+        lines.append("")
+        lines.append("| question | type | A | B | C |")
+        lines.append("|---|---|---|---|---|")
+        for q in qids:
+            t = short.get(types.get(q, ""), "?")
+            cells = [letters.get((arm, q), "-") for arm in ARMS]
+            lines.append(f"| {q} | {t} | " + " | ".join(str(c) for c in cells) + " |")
+        lines.append("")
     text = "\n".join(lines) + "\n"
     print(text)
     if args.json_out:
