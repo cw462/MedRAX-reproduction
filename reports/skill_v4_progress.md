@@ -45,6 +45,15 @@ This work uses **A/B/C/D/E**, and the new modules carry the plan's names.
   `reports/v4-s0-pilot-2026-10-29.md`. **Not a method result.**
 * **S2 (2026-10-29 19:09:47, running)**: 3 rounds x arms A/B/C x 60 questions = 9 arm-runs,
   detached from the session. Input `runs/v4_validation60/inputs.jsonl`.
+  **Scope change at 19:35: only round 1 runs for now** (A/B/C on the fixed 60), so the
+  table can be reviewed before spending on repeats. The running orchestrator was armed
+  with `--rounds 3`, so a stop watch took it down after round 1.
+* **Ledger fault at 19:50**: B round 1 died at question 39 because the ledger path served
+  two different byte streams for the same inode; the guard poisoned itself rather than
+  commit onto an untrustworthy file. Repaired by rewriting the verified variant to a new
+  inode, resuming with `--resume` after removing the interrupted question's journal pair.
+  The 38 paid questions were kept. Evidence and repair:
+  `reports/v4-ledger-incident-2026-10-29.md`.
 
 ## Not run, and why
 
