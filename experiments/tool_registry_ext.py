@@ -22,7 +22,7 @@ import sys
 
 DEFAULT_TOOLS = ["chest_xray_classifier", "chest_xray_report_generator",
                  "chest_xray_segmentation", "chest_xray_expert", "llava_med_qa",
-                 "image_visualizer", "dicom_processor"]
+                 "xray_phrase_grounding", "image_visualizer", "dicom_processor"]
 
 KINDS = {
     "chest_xray_classifier": "classification",
@@ -30,6 +30,7 @@ KINDS = {
     "chest_xray_segmentation": "segmentation",
     "chest_xray_expert": "vqa",
     "llava_med_qa": "llava",
+    "xray_phrase_grounding": "grounding",
     "image_visualizer": "utility",
     "dicom_processor": "utility",
 }
@@ -88,7 +89,8 @@ def _snapshot(cache_dir: Path, repo_id: str) -> str:
 def build_tools(repo: Path, *, cache_dir: Path, classifier_checkpoint: Path,
                 report_cache: Path, segmentation_checkpoint: Path | None,
                 temp_dir: Path, tools=None,
-                device_main: str = "cuda:0", device_vqa: str = "cuda:1"):
+                device_main: str = "cuda:0", device_vqa: str = "cuda:1",
+                device_grounding: str = "cuda:1"):
     """Return (tools, provenance) for the requested subset of DEFAULT_TOOLS."""
     repo = Path(repo).resolve()
     cache_dir = Path(cache_dir).resolve()
@@ -142,6 +144,56 @@ def build_tools(repo: Path, *, cache_dir: Path, classifier_checkpoint: Path,
         provenance[tool.name] = _provenance(tool, "llava", repo, "llava_med.py",
                                             "microsoft/llava-med-v1.5-mistral-7b", snap,
                                             "bfloat16", device_main)
+
+    if "xray_phrase_grounding" in wanted:
+        # MAIRA-2 needs transformers>=4.46 while the main environment is pinned to
+        # 4.45.2 for the report tool, and it must load in bf16 (fp32 needs ~31 GB).
+        # So the model runs in its own interpreter behind a JSONL worker; the Agent
+        # only ever sees the official tool name, description and argument schema.
+        import importlib.util
+        import json
+
+        from langchain_core.tools import StructuredTool
+
+        import maira_client as maira
+
+        source = repo / "medrax" / "tools" / "grounding.py"
+        spec = importlib.util.spec_from_file_location("_grounding_schema_only", source)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        snapshot = _snapshot(cache_dir, "microsoft/maira-2")
+        executable = os.environ.get(
+            "MEDRAX_MAIRA_PYTHON",
+            str(repo.parent.parent / ".venv-maira" / "bin" / "python"))
+        if not Path(executable).exists():
+            raise ValueError(f"MAIRA worker interpreter not found: {executable}")
+        client = maira.MairaClient(
+            python_executable=executable, repo=repo, model_path=snapshot,
+            cache_dir=cache_dir / "hub", temp_dir=temp_dir / "maira",
+            device=device_grounding, log_path=temp_dir / "maira_worker.log")
+        client.start()
+        audit_path = temp_dir / "grounding_audit.jsonl"
+
+        def _ground(image_path: str, phrase: str, max_new_tokens: int = 300) -> str:
+            result = client.ground(image_path, phrase, max_new_tokens)
+            with open(audit_path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(result, ensure_ascii=False) + "\n")
+            boxes = result.get("predictions", [])
+            return json.dumps({"analysis_status": result["analysis_status"],
+                               "phrase": result["phrase"],
+                               "n_boxes": len(boxes),
+                               "boxes": [b["image"] for b in boxes]}, ensure_ascii=False)
+
+        tool = StructuredTool.from_function(
+            func=_ground, name="xray_phrase_grounding",
+            description=module.XRayPhraseGroundingTool.model_fields["description"].default,
+            args_schema=module.XRayPhraseGroundingInput)
+        built[tool.name] = tool
+        provenance[tool.name] = _provenance(tool, "grounding", repo, "grounding.py",
+                                            "microsoft/maira-2", snapshot,
+                                            "bfloat16", device_grounding)
+        provenance[tool.name]["worker"] = client.describe()
 
     if "image_visualizer" in wanted:
         from medrax.tools.utils import ImageVisualizerTool

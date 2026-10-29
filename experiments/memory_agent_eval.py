@@ -590,6 +590,8 @@ def build_plan(args, rows, records, runtime, profile, prompt, policy, protocol_s
                    'summary_mode': args.arm in ('r2', 'r3'),
                    'max_chars': args.memory_max_chars,
                    'drop_memory_rank': args.drop_memory_rank,
+                   'text_retrieval': args.text_retrieval,
+                   'training_inputs': str(args.training_inputs) if args.training_inputs else None,
                    'injection_template': 'memory_pipeline.injection.build_memory_block'},
         'images_root': str(args.images_root.resolve()),
         'upstream_repo_path': str(args.repo),
@@ -626,6 +628,11 @@ def main(argv=None):
     parser.add_argument('--drop-memory-rank', type=int, default=0,
                         help='Counterfactual ablation for memory credit: drop the N-th retrieved '
                              'memory (1-based) from every question before rendering. 0 disables it.')
+    parser.add_argument('--text-retrieval', action='store_true',
+                        help='R5 arm: rank memories by real question text (joined through '
+                             'source_question_id) instead of the coarse feature tags.')
+    parser.add_argument('--training-inputs', type=Path,
+                        help='Frozen memory_train inputs file; required by --text-retrieval.')
     parser.add_argument('--classifier-checkpoint', type=Path, required=True)
     parser.add_argument('--report-cache', type=Path, required=True)
     parser.add_argument('--segmentation-checkpoint', type=Path)
@@ -634,6 +641,9 @@ def main(argv=None):
     parser.add_argument('--tools', nargs='+',
                         help='Subset of the full registry; default is the seven available tools')
     parser.add_argument('--api-key-stdin', action='store_true')
+    parser.add_argument('--heldout-queries', action='store_true',
+                        help='Permit retrieval for heldout_test questions through the separate '
+                             'locked evaluation adapter (heldout_retrieval.py).')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--max-cases', type=int, default=0)
     parser.add_argument('--max-tool-calls', type=int, default=3)
@@ -665,6 +675,8 @@ def main(argv=None):
         parser.error('--drop-memory-rank requires a memory arm')
     if args.drop_memory_rank and not 1 <= args.drop_memory_rank <= args.top_k:
         parser.error('--drop-memory-rank must be within 1..top-k')
+    if args.text_retrieval and args.training_inputs is None:
+        parser.error('--text-retrieval requires --training-inputs')
     if any(not math.isfinite(x) or x <= 0 for x in (args.max_case_seconds, args.request_timeout_seconds)):
         parser.error('Timeouts must be finite and positive')
     if args.max_cases <= 0:
@@ -713,6 +725,15 @@ def main(argv=None):
         if args.pool is not None:
             from memory_pipeline.core import FrozenPool
             pool = FrozenPool.load(args.pool, expected_sha256=args.pool_sha256)
+            if args.text_retrieval:
+                # R5: replace only the ranking signal; the frozen guards still run.
+                from memory_rerank import TextRetrievalPool
+                pool = TextRetrievalPool(pool.payload(), args.training_inputs)
+            if args.heldout_queries:
+                # The frozen pool refuses heldout questions by design; the final
+                # locked evaluation uses this separate adapter to permit them.
+                from heldout_retrieval import permit_heldout_queries
+                pool = permit_heldout_queries(pool)
         if args.plan_only:
             print(json.dumps({'protocol_sha256': protocol,
                               'questions': len(rows),
