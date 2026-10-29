@@ -44,6 +44,7 @@ import tool_variants as variants  # noqa: E402
 from provider_ledger import BudgetExceeded as LedgerBudgetExceeded  # noqa: E402
 from provider_ledger import LedgerIntegrityError, ProviderLedger  # noqa: E402
 from provider_profile import get_profile  # noqa: E402
+from semantic_trace import SemanticTraceWriter  # noqa: E402
 from recorded_run_journal import RecordedRunJournal  # noqa: E402
 
 MODEL_KINDS = {'classification', 'report', 'segmentation'}
@@ -317,6 +318,18 @@ class TrackedTool:
             ctx['actual_tool_attempts'] += 1
             counts['attempted'] += 1
             result = self.wrapped.invoke(clean)
+            if ctx.get('semantic_writer') is not None:
+                # V4 section 5.2: keep the semantic content of the observation,
+                # not only its length and hash, so a skill can be distilled from it.
+                try:
+                    ctx['semantic_writer'].record(
+                        question_id=ctx['question_id'], tool_name=name,
+                        tool_version=self.version, arguments=clean, kind=self.kind,
+                        result=result,
+                        elapsed_ms=round((time.monotonic() - began) * 1000),
+                        phase=ctx.get('phase'))
+                except Exception:
+                    ctx['issues'].add('semantic_trace_write_failed')
             checked = observe(
                 self.kind, result,
                 **({'artifact_dir': self.wrapped.temp_dir} if self.kind == 'segmentation' else {}))
@@ -411,7 +424,7 @@ def validate_parameters(tool, kind, params, allowed_images):
 
 # ------------------------------------------------------------------------ runs
 def run_arm(runtime, ledger, profile, row, paths, arm, start, run_id, args, trace,
-            memory=None, memory_ids=()):
+            memory=None, memory_ids=(), semantic=None):
     ctx = {'question_id': row['question_id'], 'arm': 'agent', 'thread_id': start['thread_id'],
            'run_id': run_id, 'phase': 0, 'issues': set(), 'usage_records': [],
            'ledger_settlements': [], 'actual_model_calls': 0, 'actual_tool_attempts': 0,
@@ -423,6 +436,7 @@ def run_arm(runtime, ledger, profile, row, paths, arm, start, run_id, args, trac
                                       failed_returns=0, exceptions=0, repeated=0)
                            for name in runtime.tools}}
     ctx['trace'] = diag.TaggedTrace(trace, ctx)
+    ctx['semantic_writer'] = semantic
     ctx['budget'] = diag.smoke.CaseBudget(args.max_tool_calls, args.max_model_calls,
                                           args.max_case_seconds, ctx['trace'])
     ctx['budget'].case_hash = diag.hash_value(row['question_id'])
@@ -769,7 +783,9 @@ def main(argv=None):
         try:
             journal.summary('initializing', diag.ledger_summary(ledger))
             retrieval_handle = (journal.output / 'retrieval.jsonl').open('a', encoding='utf-8')
-            with retrieval_handle as retrieval, (journal.output / 'trace.jsonl').open('a', encoding='utf-8') as trace:
+            with retrieval_handle as retrieval, \
+                    (journal.output / 'trace.jsonl').open('a', encoding='utf-8') as trace, \
+                    SemanticTraceWriter(journal.output / 'semantic_trace.jsonl') as semantic:
                 for item in plan['schedule']:
                     qid = item['question_id']
                     if (qid, 'agent') in journal.terminals:
@@ -806,7 +822,8 @@ def main(argv=None):
                     with open(os.devnull, 'w') as sink, redirect_stdout(sink), redirect_stderr(sink):
                         result = run_arm(runtime, ledger, profile, row, paths, args.arm, start,
                                          journal.manifest['run_id'], args, trace,
-                                         memory=block or None, memory_ids=memory_ids)
+                                         memory=block or None, memory_ids=memory_ids,
+                                         semantic=semantic)
                     journal.finish(result)
                     money = diag.ledger_summary(ledger)
                     print(json.dumps({'qid': qid, 'arm': args.arm, 'status': result['status'],
