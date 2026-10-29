@@ -63,6 +63,34 @@ The resumed run completed `3686_8353801520174` normally and continued from quest
 The 38 questions already paid for were **not** re-run. Cost of the incident: one
 question's worth of calls, roughly 0.15 CNY.
 
+## Recurrence (20:26–20:30), and the operational fix
+
+The rewrite fixed the file for idle reads but not the fault. A round 1 died the same
+way at question 6 (`11858_8353800664572`, terminal status `monetary_guard_error`). The
+pattern is now clear: **the file reads consistently while idle (60/60 identical hashes)
+and tears only under a running arm**, after a few hundred commits.
+
+Decision: do not weaken the guard's check. It is the component that stops the accounting
+from being written onto an unknown state, and a retry there would trade that safety for
+liveness on a filesystem that is already suspect.
+
+Operational mitigation instead:
+
+1. **A fresh ledger, `api_budget_qwen_100cny_v9.json`**, created with
+   `inherit_ledger_path = v8` so the committed total (79.900292) carries over without
+   recomputation. B's 38/60 is unaffected: scoring reads the run's `results.jsonl`, not
+   the ledger.
+2. **A supervisor around each arm** (`run_round1_v9.sh`): if the eval exits without
+   `stop_reason == "complete"`, it drops the single `monetary_*` journal pair with
+   `repair_journal.py` and resumes the same arm, up to eight attempts. Every real
+   completion is kept; at most one question is lost per fault.
+3. The half-finished A arm built against v8's monetary policy cannot resume on v9 (the
+   policy digest is part of the plan hash), so it was set aside as
+   `runs/v4_A_r1.pre-v9-*` and A restarted clean on v9.
+
+Cost of the two faults so far: about two questions' worth of calls (≈0.3 CNY) plus the
+five A questions that had to be restarted (≈0.6 CNY).
+
 ## Lessons for the next paid run
 
 * `Ledger is closed or untrusted` does not imply a second writer; check whether the file
