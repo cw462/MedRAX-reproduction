@@ -105,5 +105,28 @@ class DecideTest(unittest.TestCase):
         self.assertEqual(with_box, "local_reinspection")
 
 
+class ContinuationTest(unittest.TestCase):
+    PREFIX = [{"tool": "chest_xray_classifier", "execution_status": "completed",
+               "facts": {"top_findings": [{"finding": "Effusion", "score": 0.62}]}}]
+
+    def test_prefix_is_rendered_in_order(self):
+        text = sp.render_prefix(self.PREFIX)
+        self.assertIn("chest_xray_classifier", text)
+        self.assertIn("Effusion", text)
+
+    def test_empty_prefix_says_so(self):
+        self.assertIn("no tool observation", sp.render_prefix([]))
+
+    def test_do_branch_includes_the_observation(self):
+        messages = sp.branch_messages("Where is it?", self.PREFIX,
+                                      branch_observation={"tool": "report", "facts": {"a": 1}})
+        self.assertIn("NEW OBSERVATION", messages[0]["content"])
+
+    def test_skip_branch_never_fabricates_an_observation(self):
+        messages = sp.branch_messages("Where is it?", self.PREFIX)
+        self.assertNotIn("NEW OBSERVATION", messages[0]["content"])
+        self.assertIn("chest_xray_classifier", messages[0]["content"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

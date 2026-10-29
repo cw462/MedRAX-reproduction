@@ -23,6 +23,7 @@ Honesty notes:
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections import Counter
@@ -164,3 +165,45 @@ def _first_unused(state, capability_actions):
         if tool not in used:
             return capability
     return None
+
+
+# ------------------------------------------------------- continuation prefix
+PREFIX_HEADER = (
+    "You are resuming a chest X-ray tool-using episode at a fixed point. "
+    "Below are the observations already obtained in this episode, in order. "
+    "Treat them as facts you observed yourself. Continue from here."
+)
+
+
+def render_prefix(prefix_observations, facts_chars=280):
+    """The visible prefix as an ordered, quotable transcript."""
+    lines = []
+    for index, obs in enumerate(prefix_observations or [], 1):
+        facts = json.dumps(obs.get("facts"), ensure_ascii=False, default=str)
+        status = obs.get("execution_status")
+        lines.append(f"{index}. {obs.get('tool')} [{status}] {facts[:facts_chars]}")
+    return "\n".join(lines) if lines else "(no tool observation has been obtained yet)"
+
+
+def branch_messages(question, prefix_observations, *, skill_block=None,
+                    branch_observation=None, branch_note=None):
+    """Chat messages for a replay continuation.
+
+    `branch_observation` is the observation produced by the branch under test -
+    present for do_action, absent for skip_action. It is appended, never
+    invented: a branch that did not execute must not receive a fabricated
+    observation.
+    """
+    sections = [PREFIX_HEADER, "", f"QUESTION: {question}", "",
+                "OBSERVATIONS SO FAR:", render_prefix(prefix_observations)]
+    if branch_observation is not None:
+        sections += ["", "NEW OBSERVATION:",
+                     f"{branch_observation.get('tool')} -> "
+                     f"{json.dumps(branch_observation.get('facts'), ensure_ascii=False, default=str)[:400]}"]
+    if branch_note:
+        sections += ["", f"NOTE: {branch_note}"]
+    if skill_block:
+        sections += ["", skill_block]
+    sections += ["", "Give your best answer to the question now, or say plainly what is still "
+                     "unknown if the observations do not settle it."]
+    return [{"role": "user", "content": "\n".join(sections)}]
