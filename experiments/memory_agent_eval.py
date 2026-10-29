@@ -592,6 +592,8 @@ def build_plan(args, rows, records, runtime, profile, prompt, policy, protocol_s
                    'drop_memory_rank': args.drop_memory_rank,
                    'text_retrieval': args.text_retrieval,
                    'training_inputs': str(args.training_inputs) if args.training_inputs else None,
+                   'diverse_retrieval': args.diverse_retrieval,
+                   'diversity_threshold': args.diversity_threshold,
                    'injection_template': 'memory_pipeline.injection.build_memory_block'},
         'images_root': str(args.images_root.resolve()),
         'upstream_repo_path': str(args.repo),
@@ -633,6 +635,11 @@ def main(argv=None):
                              'source_question_id) instead of the coarse feature tags.')
     parser.add_argument('--training-inputs', type=Path,
                         help='Frozen memory_train inputs file; required by --text-retrieval.')
+    parser.add_argument('--diverse-retrieval', action='store_true',
+                        help='R7 arm: drop retrieved memories whose structural signature '
+                             'near-duplicates one already in the block.')
+    parser.add_argument('--diversity-threshold', type=float, default=0.85,
+                        help='Jaccard threshold for treating two memories as duplicates.')
     parser.add_argument('--classifier-checkpoint', type=Path, required=True)
     parser.add_argument('--report-cache', type=Path, required=True)
     parser.add_argument('--segmentation-checkpoint', type=Path)
@@ -677,6 +684,8 @@ def main(argv=None):
         parser.error('--drop-memory-rank must be within 1..top-k')
     if args.text_retrieval and args.training_inputs is None:
         parser.error('--text-retrieval requires --training-inputs')
+    if args.diverse_retrieval and not 0.0 < args.diversity_threshold <= 1.0:
+        parser.error('--diversity-threshold must be in (0, 1]')
     if any(not math.isfinite(x) or x <= 0 for x in (args.max_case_seconds, args.request_timeout_seconds)):
         parser.error('Timeouts must be finite and positive')
     if args.max_cases <= 0:
@@ -734,6 +743,11 @@ def main(argv=None):
                 # locked evaluation uses this separate adapter to permit them.
                 from heldout_retrieval import permit_heldout_queries
                 pool = permit_heldout_queries(pool)
+            if args.diverse_retrieval:
+                # R7: collapse near-duplicate memories after ranking, never during it.
+                from memory_capacity import DiversePool
+                pool = DiversePool(pool, pool.payload()['records'],
+                                   threshold=args.diversity_threshold)
         if args.plan_only:
             print(json.dumps({'protocol_sha256': protocol,
                               'questions': len(rows),
