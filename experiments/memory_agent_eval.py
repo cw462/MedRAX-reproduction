@@ -589,6 +589,7 @@ def build_plan(args, rows, records, runtime, profile, prompt, policy, protocol_s
                    'min_score': args.min_score, 'include_failures': args.arm == 'r3',
                    'summary_mode': args.arm in ('r2', 'r3'),
                    'max_chars': args.memory_max_chars,
+                   'drop_memory_rank': args.drop_memory_rank,
                    'injection_template': 'memory_pipeline.injection.build_memory_block'},
         'images_root': str(args.images_root.resolve()),
         'upstream_repo_path': str(args.repo),
@@ -622,6 +623,9 @@ def main(argv=None):
     parser.add_argument('--top-k', type=int, default=3)
     parser.add_argument('--min-score', type=float, default=0.0)
     parser.add_argument('--memory-max-chars', type=int, default=1400)
+    parser.add_argument('--drop-memory-rank', type=int, default=0,
+                        help='Counterfactual ablation for memory credit: drop the N-th retrieved '
+                             'memory (1-based) from every question before rendering. 0 disables it.')
     parser.add_argument('--classifier-checkpoint', type=Path, required=True)
     parser.add_argument('--report-cache', type=Path, required=True)
     parser.add_argument('--segmentation-checkpoint', type=Path)
@@ -657,6 +661,10 @@ def main(argv=None):
         parser.error('Memory arms require --pool and --pool-sha256')
     if args.top_k not in (1, 3, 5):
         parser.error('top-k must be one of the calibrated values 1, 3, 5')
+    if args.drop_memory_rank and args.arm == 'r0':
+        parser.error('--drop-memory-rank requires a memory arm')
+    if args.drop_memory_rank and not 1 <= args.drop_memory_rank <= args.top_k:
+        parser.error('--drop-memory-rank must be within 1..top-k')
     if any(not math.isfinite(x) or x <= 0 for x in (args.max_case_seconds, args.request_timeout_seconds)):
         parser.error('Timeouts must be finite and positive')
     if args.max_cases <= 0:
@@ -743,9 +751,18 @@ def main(argv=None):
                         hits = pool.search(query, top_k=args.top_k, min_score=args.min_score,
                                            include_failures=args.arm == 'r3',
                                            summary_mode=args.arm in ('r2', 'r3'))
+                        # Counterfactual ablation: remove exactly one retrieved memory so the
+                        # paired replay isolates that memory's causal contribution.
+                        dropped_memory_id = None
+                        if args.drop_memory_rank and len(hits) >= args.drop_memory_rank:
+                            dropped_memory_id = hits[args.drop_memory_rank - 1]['memory_id']
+                            hits = [h for i, h in enumerate(hits)
+                                    if i != args.drop_memory_rank - 1]
                         block, audit = build_memory_block(hits, max_chars=args.memory_max_chars)
                         memory_ids = [hit['memory_id'] for hit in hits]
                         retrieval_record.update(audit, returned=len(hits), memory_ids=memory_ids,
+                                                drop_rank=args.drop_memory_rank,
+                                                dropped_memory_id=dropped_memory_id,
                                                 scores=[round(hit['score'], 6) for hit in hits])
                         diag.durable_line(retrieval, retrieval_record)
                     with open(os.devnull, 'w') as sink, redirect_stdout(sink), redirect_stderr(sink):
