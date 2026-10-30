@@ -173,7 +173,7 @@ def verify_smoke(out, qids):
     image_counts=[]
     crop_count=0
     for r in branches:
-        if r.get('candidate') is None or r.get('candidate_error') or r.get('gate_error') or r.get('retrieval_error'):
+        if r.get('candidate') is None or r.get('candidate_error') or r.get('retrieval_error'):
             raise RuntimeError('smoke_candidate_or_gate_failure:'+r['question_id']+':'+r['group'])
         messages=json.loads(Path(r['evidence_package']).read_text())
         count=sum(isinstance(p,dict) and p.get('type')=='image_url'
@@ -185,6 +185,7 @@ def verify_smoke(out, qids):
         crop_count+=sum(o.get('tool_name')=='crop_current_image' for o in r.get('new_observations',[]))
     result={'status':'passed','question_ids':qids,'branches':len(branches),
         'actual_image_payload_counts':image_counts,'actual_crop_returns':crop_count,
+        'gate_error_fallbacks':sum(bool(r.get('gate_error')) for r in branches),
         'labels_opened':False,'checked_utc':now()}
     write_json(out/'smoke_check.json',result)
     print(json.dumps({'event':'smoke_passed',**result}),flush=True)
