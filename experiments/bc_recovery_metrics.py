@@ -123,15 +123,26 @@ def main(argv=None):
 
     changed = {}
     for name in ("P1", "PB", "PC"):
-        n = changed_count = 0
+        n = changed_count = verified = mentioned = 0
         for rec in records.values():
             letters = rec.get("letters") or {}
+            branch = (rec.get("branches") or {}).get(name) or {}
             if rec.get("status") != "ok" or not letters.get(name) or not letters.get("P0"):
                 continue
             n += 1
             changed_count += letters[name] != letters["P0"]
+            verified += (branch.get("tool_calls") or 0) > 0
+            text = (branch.get("reasoning") or "").lower()
+            if name in ("PB", "PC"):
+                # Crude engagement test: does the branch's own reasoning refer to the block?
+                mentioned += any(key in text for key in
+                                 ("skill", "experience", "trajector", "operating"))
         changed[name] = {"n": n, "changed": changed_count,
-                         "rate": round(changed_count / n, 3) if n else None}
+                         "rate": round(changed_count / n, 3) if n else None,
+                         "verified": verified,
+                         "verification_rate": round(verified / n, 3) if n else None,
+                         "mentions_block": mentioned,
+                         "mentions_rate": round(mentioned / n, 3) if n else None}
 
     payload = {"questions_in_file": total, "scored": total - len(skipped),
                "skipped": skipped, "variants": rows, "paired_vs_p0": {k: dict(v) for k, v in pairs.items()},
@@ -169,10 +180,15 @@ def main(argv=None):
     lines.append("")
     lines.append("## How often a branch changed the letter")
     lines.append("")
-    lines.append("| branch | n | changed | rate |")
-    lines.append("|---|---:|---:|---:|")
+    lines.append("| branch | n | changed | rate | verified (>=1 tool call) | mentions the block |")
+    lines.append("|---|---:|---:|---|---:|---:|")
     for name, s in changed.items():
-        lines.append(f"| {name} | {s['n']} | {s['changed']} | {s['rate']} |")
+        lines.append(f"| {name} | {s['n']} | {s['changed']} | {s['rate']} | "
+                     f"{s['verified']} ({s['verification_rate']}) | "
+                     f"{s['mentions_block']} ({s['mentions_rate']}) |")
+    lines.append("")
+    lines.append("'Mentions the block' is a keyword test on the branch's own reasoning; it is a")
+    lines.append("crude engagement check, not proof that the branch used the experience.")
     lines.append("")
     text = "\n".join(lines) + "\n"
     print(text)
