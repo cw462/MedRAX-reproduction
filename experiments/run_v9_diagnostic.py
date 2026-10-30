@@ -533,7 +533,8 @@ def main(argv=None):
         max_chars=cfg['experience_max_chars'], top_k=cfg['knowledge_top_k'])
     utils = diag.smoke.module_from_file('_v9_utils', args.repo/'medrax/utils/utils.py')
     prompt = utils.load_prompts_from_file(str(args.repo/'medrax/docs/system_prompts.txt'))['MEDICAL_ASSISTANT']
-    runtime = mae.build_runtime(args, get_profile(cfg['model']), key, prompt, out/'artifacts')
+    runtime = mae.build_runtime(args, get_profile(cfg['model']), key, prompt,
+                                out/'artifacts'/('runtime_'+uuid.uuid4().hex))
     write_json(out/'runtime_tools.json', runtime.tool_provenance)
     p0s = {r['question_id']: r for r in read_jsonl(out/'p0_results.jsonl')}
     completed = {(r['question_id'], r['group']) for r in read_jsonl(out/'candidate_results.jsonl')}
