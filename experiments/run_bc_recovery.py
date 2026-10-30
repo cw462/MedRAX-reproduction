@@ -137,7 +137,17 @@ P1_PROMPT = (
     "Before you finalize: re-examine the single finding your answer depends on most. "
     "You may make at most {tool_budget} tool call(s) to check it on this case's images. "
     "Then give your final answer letter again. If the new evidence does not settle it, "
-    "keep your earlier answer 鈥?do not change it just to change it."
+    "keep your earlier answer; do not change it just to change it."
+)
+
+# Same willingness to name a candidate as PROPOSE_PROMPT, so P1 and PB/PC differ only in
+# whether the experience is present.
+PROPOSE_P1 = (
+    "Before you finalize: re-examine the single finding your answer depends on most. You may "
+    "make at most {tool_budget} tool call(s) to check it on this case's images. Then state the "
+    "single option letter you would answer if that re-check is right, even when it differs "
+    "from your earlier answer. If nothing new is visible, keep your earlier answer. End with "
+    "the letter alone."
 )
 
 MEMORY_PROMPT = (
@@ -146,6 +156,19 @@ MEMORY_PROMPT = (
     "at most {tool_budget} targeted check(s) on this case's images, then give your final "
     "answer letter. You may ignore it; if the new evidence does not settle the answer, "
     "keep your earlier answer.\n\n{block}"
+)
+
+# The conservative prompt above asks the model to keep its answer unless the new evidence
+# settles the question, so the branch is a weak intervention. This variant asks for an
+# explicit candidate instead: the model must say whether the experience points at a
+# different option, and the gate - not the model - decides whether to take it.
+PROPOSE_PROMPT = (
+    "Operating experience from other training cases is below. It is not evidence about "
+    "this patient. Use it only to decide what to check: you may make at most {tool_budget} "
+    "tool call(s) on this case's images.\n\n{block}\n\n"
+    "After checking, state the single option letter you would answer if this experience is "
+    "right, even when it differs from your earlier answer. If the experience does not apply "
+    "to this case, say so and keep your earlier answer. End with the letter alone."
 )
 
 GATE_PROMPT = (
@@ -331,10 +354,13 @@ def main(argv=None):
             stage["c_block"] = c_meta
 
             branches = {}
+            style = cfg.get("branch_style", "keep")
+            mem_prompt = PROPOSE_PROMPT if style == "propose" else MEMORY_PROMPT
+            p1_prompt = PROPOSE_P1 if style == "propose" else P1_PROMPT
             for name, prompt, block in (
-                    ("P1", P1_PROMPT.format(tool_budget=args.tool_budget), None),
-                    ("PB", MEMORY_PROMPT.format(tool_budget=args.tool_budget, block=b_block), b_block),
-                    ("PC", MEMORY_PROMPT.format(tool_budget=args.tool_budget, block=c_block), c_block)):
+                    ("P1", p1_prompt.format(tool_budget=args.tool_budget), None),
+                    ("PB", mem_prompt.format(tool_budget=args.tool_budget, block=b_block), b_block),
+                    ("PC", mem_prompt.format(tool_budget=args.tool_budget, block=c_block), c_block)):
                 thread = str(uuid.uuid4())
                 ctx = new_ctx(qid, thread, paths, runtime, args, trace,
                               args.tool_budget, args.model_budget)
