@@ -424,7 +424,7 @@ def validate_parameters(tool, kind, params, allowed_images):
 
 # ------------------------------------------------------------------------ runs
 def run_arm(runtime, ledger, profile, row, paths, arm, start, run_id, args, trace,
-            memory=None, memory_ids=(), semantic=None):
+            memory=None, memory_ids=(), semantic=None, checkpoint_callback=None):
     ctx = {'question_id': row['question_id'], 'arm': 'agent', 'thread_id': start['thread_id'],
            'run_id': run_id, 'phase': 0, 'issues': set(), 'usage_records': [],
            'ledger_settlements': [], 'actual_model_calls': 0, 'actual_tool_attempts': 0,
@@ -448,6 +448,7 @@ def run_arm(runtime, ledger, profile, row, paths, arm, start, run_id, args, trac
               'memory_chars': len(memory or ''), 'tools_forced': False,
               'clinical_evidence': 'unknown', 'step_credit': None}
     began, final = time.monotonic(), None
+    agent = None
     try:
         messages = initial_messages(row, paths, args.image_detail, memory)
         agent = runtime.Agent(runtime.model, tools=list(runtime.tools.values()),
@@ -515,6 +516,10 @@ def run_arm(runtime, ledger, profile, row, paths, arm, start, run_id, args, trac
     report['api_error'] = ctx.get('api_error', False)
     report['api_error_type'] = ctx.get('api_error_type')
     report['api_status_code'] = ctx.get('api_status_code')
+    if checkpoint_callback is not None:
+        snapshot = (agent.workflow.get_state({'configurable': {'thread_id': start['thread_id']}})
+                    if agent is not None else None)
+        checkpoint_callback(list(snapshot.values.get('messages', [])) if snapshot else [], ctx, report)
     return report
 
 
