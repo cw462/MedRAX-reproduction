@@ -1,8 +1,9 @@
-# V7: mechanism grading for the six common-harm cases
+# V7: mechanism grading for the 28 changed questions
 
 Companion to `bc_error_forensics.md` (mechanical evidence) — this file adds the grading the
-plan asks for: `confirmed / supported / unknown`. It covers the first priority group, the
-6 questions where both B and C changed A's correct answer.
+plan asks for: `confirmed / supported / unknown`. It covers all 28 questions where A/B/C
+disagree, in the plan's order: the 6 common harms, the 8 C-only harms, the 3 B-only harms,
+then the 11 corrections.
 
 **What counts as evidence here.** The injected text is rebuilt from the frozen pool / skill
 library and matches the run's logged length and sha256 (60/60 for both arms). The "own
@@ -10,7 +11,7 @@ observations" are the facts the arm's own tool calls returned, from `semantic_tr
 A keyword test is a *proxy*: "the word does not appear in the visible context" is weaker
 than "the attribute was not visible", but it is checkable and reproducible.
 
-## The pattern
+## The pattern in the six common harms
 
 In 5 of the 6 cases, the answer's decisive attribute does **not** appear in either the
 injected block or the arm's own observations. The model asserted it.
@@ -62,6 +63,71 @@ positive of the keyword test, not evidence. The size comparison is unsupported.
 none of the discriminating vocabulary. So the change follows what the tools reported; the
 block is not implicated. Whether the tools were right is a separate question.
 
+## The other 22 cases
+
+Ordered as the plan asks: C-only harms, B-only harms, then the corrections. "Source" says
+where the decisive attribute first appears in that arm's visible context — its own tool
+facts, the injected block, both, or neither.
+
+### C-only harms (8)
+
+| question | std / C | what C changed | source of the changed attribute | grade |
+|---|---|---|---|---|
+| 12721_8353800681884 | B / none | no answer at all (`case_budget_exceeded`) | — | **confirmed**: completion failure, not a judgement |
+| 13238_8353800603808 | B / A | dorsolateral + 3rd rib → "central mediastinal, trachea left" | both: facts contain trachea/mediastinal; block mentions "trachea, aortic arch, carina" | supported (block vocabulary + observation) |
+| 16663_8353800455763 | C / B | "equally distributed" → "more extensive right + bacterial superinfection" | block: skill text says "extensive right lung pneumonia ... laterality" | supported (block vocabulary); item is flagged ambiguous |
+| 1678_8353802279918 | C / A | "no air bronchogram" → "confirmed air bronchogram" | neither ("presence" only) | supported: negation flipped without support |
+| 3397_8353801520783 | C / B | bibasal peripheral reticulation → "upper lobe cavitations, TB" | facts: "Upper lobe" present | supported (observation) |
+| 3561_8353801511489 | B / F | Bochdalek hernia → "pseudotumor, atelectasis" | facts: pseudotumor + atelectasis both present | supported (observation) |
+| 3686_8353801520174 | B / F | metastatic leiomyoma → bronchiectasis | neither | unknown; the item is flagged `input_missing_context` |
+| 3834_8353801523222 | C / A | diffuse GGO + reticulation → reticulation + focal honeycombing | facts: honeycombing present | supported (observation) |
+
+### B-only harms (3)
+
+| question | std / B | what B changed | source | grade |
+|---|---|---|---|---|
+| 18202_8143559000122 | A / C | wedge-shaped pleural opacity → "focal peripheral hyperlucency" | facts contain both clauses; B chose the hyperlucency one | supported (observation, clause selection) |
+| 4118_8353801523564 | B / E | two-sided bullae → "left bulla + pneumothorax" | facts: pneumothorax present | supported (observation) |
+| 5533_8353801540251 | B / A | (options did not parse from the metadata text) | tool path differs at the first call | unknown |
+
+### Corrections (11)
+
+| question | A→std | correcting arm(s) | decisive evidence in that arm's context | grade |
+|---|---|---|---|---|
+| 15189_8353800545058 | E→A | B, C | standard words absent from both; C dropped a grounding call | unknown (no visible support either way) |
+| 3436_8353801521068 | D→B | B, C | difference is "7th vs 8th intercostal"; no ordinal in facts | unknown (fine-grained) |
+| 5369_8353801533158 | F→A | B, C | C facts contain paracardiac/Morgagni/hernia; B only "large" | supported (C observation) |
+| 548_8353802023456 | C→D | B, C | C facts contain "presence"; both arms opened with image_visualizer instead of the classifier | supported partial |
+| 7738_8353800850751 | B→C | B, C | facts contain bilateral/consolidations; blocks contain ground/glass | supported (observation + block) |
+| 11858_8353800664572 | E→B | B only | standard words absent; B added one grounding call | unknown |
+| 13154_8353800587826 | F→C | B only | B facts have margins/right; C block has smooth/margins/lateral/posterior | supported (observation + block) |
+| 3359_8353801515597 | D→B | B only | facts contain anterior/mediastinal/mass | supported (observation) |
+| 11804_8353800651404 | F→D | C only | C block contains "right"; facts do not | weak (block only) |
+| 18780_8143559008557 | C→A | C only | C block has "presence"; C dropped a grounding call | unknown |
+| 3546_8353801521080 | B→A | C only | facts contain rounded/opacity/mass; block repeats them | supported (observation) |
+
+## What the 28 add up to
+
+| where the decisive attribute came from | harms (17) | corrections (11) |
+|---|---:|---:|
+| the arm's own tool observations | 8 | 3 |
+| the injected block (vocabulary or checklist) | 1 | 1 |
+| both observation and block | 1 | 3 |
+| neither (asserted without support) | 5 | 4 |
+| completion failure / unparsed options | 2 | 0 |
+
+Two things follow, and both cut against the way V7 was set up:
+
+1. **The largest single source of change is the arm's own tool observations** (8/17 harms,
+   3/11 corrections, plus the mixed cases where both are involved). The injected block is
+   the sole source in only 1 harm and 1 correction. Memory's own contribution is small
+   next to what the tools said — consistent with the full 60-question run, where post-hoc
+   blocks moved almost nothing and the branch that changed answers most (P1) had no memory.
+2. **"Neither" is common on both sides: 5 harms and 4 corrections.** An attribute can be
+   absent from everything the model was shown and still be right. That is the same
+   asymmetry that killed the keyword-traceability gate below, and it is why a rule of the
+   form "only accept a change whose attribute is in the context" cannot be the gate.
+
 ## The control that kills the obvious gate rule
 
 The tempting rule is: *accept a change only if every changed attribute appears in this
@@ -97,15 +163,15 @@ must not be shipped as the gate. It survives only as a diagnostic in this file.
    failure is at the observation layer (the positive finding never reached the model). A
    gate that only inspects the memory block would miss these, and a retrieval fix would not
    repair them.
-4. The remaining 22 questions have the same mechanical evidence extracted
-   (`runs/v7_forensics/bc_error_forensics.jsonl`) but are not yet graded. Next in the
-   plan's order: the 8 C-only harms, then 3 B-only harms, then the 11 corrections.
+4. All 28 cases are graded above. The full-run result (`reports/v7-recovery-round2-2026-10-30.md`)
+   points the same way from a different direction: post-hoc memory blocks produced 3 candidate
+   changes in 60 questions, the generic no-memory re-check produced 16 and was net −10.
 
 ## Caveats
 
 * Keyword absence is a proxy. A phrase can be supported by a differently-worded
   observation; the tool facts are summaries, not the raw model context. That weakness cuts
   both ways and is part of why the rule failed the control.
-* The 6 cases are the ones where both arms changed a correct answer; selecting on outcome
-  can make a pattern look more uniform than it is. The control group above is exactly the
-  guard against that.
+* These 28 cases are selected on outcome (they are the ones where the arms disagree), so
+  the source shares describe *the changes*, not all questions. The full-run comparison,
+  where every question is counted, is the guard against that selection.
