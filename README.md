@@ -1,8 +1,10 @@
 # MedRAX reproduction and research extensions
 
-This repository contains independent evaluation adapters, data preparation utilities and an initial structured-memory module for [MedRAX](https://github.com/bowang-lab/MedRAX). It does not include images, benchmark labels, credentials, model weights or raw run logs. Reviewed aggregate run observations are documented separately.
+This repository contains independent evaluation adapters, data preparation utilities and an initial structured-memory module for [MedRAX](https://github.com/bowang-lab/MedRAX). It does not include images, original benchmark label files, credentials, model weights or raw run logs. Reviewed aggregate and filtered per-question observations are documented separately; predictions and correctness flags can reveal some reference answers.
 
-**Status (2026-10-29, seven-tool memory run):** the agent now runs with **seven tools**
+**Latest result (2026-10-30, V9):** the fixed 20-question diagnostic is complete. P0/D/DK/DKB/DKC scored **14/13/14/14/13 out of 20**. No initially wrong answer was corrected, so the prespecified rule does not support expansion to 60 yet. DK's one-question advantage over D comes from avoiding one harmful change, not improvement over P0. See the [completed report](reports/v9-diagnostic20-2026-10-30.md) and [detailed public results index](reports/v9/README.md) for configurations, per-question outcomes, retrieval records, evidence inventories, timing and failure counts.
+
+**Earlier status (2026-10-29, seven-tool memory run):** the agent ran with **seven tools**
 (classifier, report generator, segmentation, CheXagent VQA, LLaVA-Med, image visualizer, DICOM
 processor) and `qwen3-vl-plus` as the central model. A 60-question training pool produced a
 frozen pool of 60 trajectories; the same 29 validation questions were then run four times
