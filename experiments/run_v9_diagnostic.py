@@ -550,7 +550,8 @@ def main(argv=None):
                 completed.add((qid, group))
     write_json(out/'status.json', {'status': 'running', 'started_utc': now(), 'planned_n': selection['planned_n']})
     profile = get_profile(cfg['model'])
-    with ProviderLedger(root/cfg['ledger'], profile, cap_cny=cfg['cap_cny']) as ledger, \
+    with ProviderLedger(root/cfg['ledger'], profile, cap_cny=cfg['cap_cny'],
+                        inherit_ledger_path=root/cfg['inherit_ledger']) as ledger, \
             (out/'execution.trace.jsonl').open('a', encoding='utf-8') as trace:
         for index, selected in enumerate(selection['rows']):
             if a.max_questions and index >= a.max_questions:
