@@ -141,13 +141,14 @@ P1_PROMPT = (
 )
 
 # Same willingness to name a candidate as PROPOSE_PROMPT, so P1 and PB/PC differ only in
-# whether the experience is present.
+# whether the experience is present. "At least one check" is deliberate: the plan's branch
+# is a verification pass, and without it the model just re-reads its own answer.
 PROPOSE_P1 = (
-    "Before you finalize: re-examine the single finding your answer depends on most. You may "
-    "make at most {tool_budget} tool call(s) to check it on this case's images. Then state the "
-    "single option letter you would answer if that re-check is right, even when it differs "
-    "from your earlier answer. If nothing new is visible, keep your earlier answer. End with "
-    "the letter alone."
+    "Before you finalize: re-examine the single finding your answer depends on most. Make at "
+    "least one and at most {tool_budget} tool call(s) to check it on this case's images. Then "
+    "state the single option letter you would answer if that re-check is right, even when it "
+    "differs from your earlier answer. If nothing new is visible, keep your earlier answer. "
+    "End with the letter alone."
 )
 
 MEMORY_PROMPT = (
@@ -164,8 +165,9 @@ MEMORY_PROMPT = (
 # different option, and the gate - not the model - decides whether to take it.
 PROPOSE_PROMPT = (
     "Operating experience from other training cases is below. It is not evidence about "
-    "this patient. Use it only to decide what to check: you may make at most {tool_budget} "
-    "tool call(s) on this case's images.\n\n{block}\n\n"
+    "this patient; it names attributes worth verifying. Use it to choose the attribute(s) "
+    "to check, then make at least one and at most {tool_budget} tool call(s) on this case's "
+    "images.\n\n{block}\n\n"
     "After checking, state the single option letter you would answer if this experience is "
     "right, even when it differs from your earlier answer. If the experience does not apply "
     "to this case, say so and keep your earlier answer. End with the letter alone."
@@ -367,9 +369,10 @@ def main(argv=None):
                 agent_b = make_agent(runtime, ledger, ctx, profile)
                 branch_events = []
                 exceeded = None
+                reasoning = None
                 try:
-                    stream_once(agent_b, ctx, prefix + [HumanMessage(content=prompt)],
-                                thread, args.recursion_limit, branch_events)
+                    reasoning = stream_once(agent_b, ctx, prefix + [HumanMessage(content=prompt)],
+                                            thread, args.recursion_limit, branch_events)
                 except Exception as exc:
                     # A branch that runs out of its tool budget is not a lost case: it still
                     # has to answer from what it saw. Recorded, not hidden.
@@ -385,6 +388,7 @@ def main(argv=None):
                                       "tool_names": [e["tool_name"] for e in branch_events if e.get("tool_name")],
                                       "issues": sorted(ctx["issues"]),
                                       "budget_exceeded": exceeded,
+                                      "reasoning": (reasoning or "")[:600],
                                       "answer_text": (final or "")[:400]}
                 except Exception as exc:
                     branches[name] = {"letter": None, "error": f"{type(exc).__name__}: {exc}",
