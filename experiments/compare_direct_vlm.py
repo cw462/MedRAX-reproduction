@@ -56,6 +56,11 @@ def counts(predictions, labels, qids):
     return {'correct': correct, 'planned_n': len(qids), 'accuracy': correct/len(qids), 'valid': valid, 'missing': len(qids)-valid}
 
 
+def observed(value):
+    value=value.get('sum_observed') if isinstance(value,dict) else value
+    return int(value) if isinstance(value,float) and value.is_integer() else value
+
+
 def resource_summary(records):
     attempts = [a for r in records for a in r['attempts']]
     costs = [a.get('settlement', {}).get('charged_cny') for a in attempts if a.get('settlement')]
@@ -159,7 +164,19 @@ def generate(run, v12, p0_path, out):
                                   'shared_cost_note': 'Shared initial counted once for entire V12; arm resources are incremental, not new D0 costs.'}
     action_counts={g:Counter(a['action']['kind'] for r in read_lines(v12/'branch_results.jsonl') if r['group']==g for a in r.get('tool_attempts',[])) for g in ('A','B')}
     resources['historical_V12']['actions_by_kind']=action_counts
-    resources['historical_P0'] = {'model_calls': None, 'cost_cny': None, 'note': 'Not present in the public per-question outcome cache; not imputed.'}
+    p0_metrics=p0_path.parent/'paired-metrics.json'
+    resources['historical_P0'] = read(p0_metrics)['p0_resources'] if p0_metrics.exists() else {'model_calls':None,'logical_cost_cny':None,'note':'Saved historical resources missing; not imputed.'}
+    p0_raw=p0_path.parent/'p0-results.json'
+    if p0_raw.exists():
+        by_name=Counter()
+        for record in read(p0_raw):
+            for name,value in record.get('report',{}).get('tool_counts',{}).items():by_name[name]+=value.get('attempted',0)
+        resources['historical_P0']['tool_attempts_by_name']=by_name
+        resources['historical_P0']['medical_tool_attempts']=sum(v for n,v in by_name.items() if n not in {'image_visualizer','dicom_processor'})
+        resources['historical_P0']['visualizer_tool_attempts']=by_name.get('image_visualizer',0)
+        resources['historical_P0']['crop_calls']=None
+        resources['historical_P0']['visual_rereads']=None
+        resources['historical_P0']['visualizer_note']='image_visualizer calls are listed by tool name; crop operations and independent visual rereads are not separately coded in this historical protocol.'
     write(out/'cost_timing.json',resources); write(out/'metrics.json',{'status':'completed','totals':totals,'source_cache_commit':protocol['historical_cache_commit']})
     write(out/'asset-references.json',list(assets.manifest.values()))
     # One next intervention, selected by the observed diagnostic contrast.
@@ -174,15 +191,23 @@ def generate(run, v12, p0_path, out):
         v=totals[name]
         if name.startswith('D0'):calls=str(resources['model_requests'])+('（同次输出）' if name=='D0_derived' else '');cost=resources['saved_settlement_cny'];acts='0 / 0 / 0'
         elif name=='V12_initial':
-            x=metrics['initial_resources'];calls=str(x['model_calls']);cost=str(x['logical_cost_cny']);acts='0 / 0 / 0'
+            x=metrics['initial_resources'];calls=str(observed(x['model_calls']));cost=str(observed(x['logical_cost_cny']));acts='0 / 0 / 0'
         elif name in ('V12_A_final','V12_B_final'):
-            g=name[4];x=metrics['groups'][g]['resources'];calls=f"{x['model_calls']} + 共享首读60";cost=f"{x['logical_cost_cny']} + 共享首读{metrics['initial_resources']['logical_cost_cny']}";c=action_counts[g];acts=f"{c['tool']} / {c['crop']} / {c['visual']}"
-        else:calls='缺失';cost='缺失';acts='缺失'
+            g=name[4];x=metrics['groups'][g]['resources'];calls=f"{observed(x['model_calls'])} + 共享首读60";cost=f"{observed(x['logical_cost_cny'])} + 共享首读{observed(metrics['initial_resources']['logical_cost_cny'])}";c=action_counts[g];acts=f"{c['tool']} / {c['crop']} / {c['visual']}"
+        else:
+            x=resources['historical_P0'];calls=str(observed(x.get('model_calls'))) if x.get('model_calls') is not None else '缺失';cost=str(observed(x.get('logical_cost_cny'))) if x.get('logical_cost_cny') is not None else '缺失';acts=f"{x.get('medical_tool_attempts','缺失')} / 未分码 / 未分码（visualizer另{x.get('visualizer_tool_attempts','缺失')}次）"
         table.append(f"| {name} | {v['correct']}/60 | {v['accuracy']:.1%} | {v['valid']} | {v['missing']} | {calls} | {cost} | {acts} |")
     text = '# D0 无工具直接作答对照\n\n'+headline+'\n\n'+'\n'.join(table)+'\n\n'
     text += f"D0 实际请求 {resources['model_requests']} 次，技术额外请求 {resources['technical_extra_requests']} 次，医学工具调用 **0** 次；输入/输出 tokens 为 {resources['input_tokens']}/{resources['output_tokens']}。保存结算费用 {resources['saved_settlement_cny']} CNY，账本本轮增量 {resources['ledger_saved_summary']['run_increment_cny']} CNY；均为既有计价假设，不是供应商账单。墙钟耗时 {resources['wall_elapsed_s']:.1f} 秒。\n\n"
     text += '**下一轮唯一最高优先级改动：**'+next_step+'\n\n'
     text += '该优先级依据另列的 D0_derived 诊断结果与V12缓存阶段变化；D0_derived 是后置解析敏感性分析，不是新实验组，不混入原主成绩。解析修订在未读取D0参考正确性之前依据原回复的格式问题确定；两种口径都保留。表中A/B共享首读成本各表示单条路径成本，汇总整个实验时共享部分只计一次。\n\n'
+    invalid=[q for q in qids if direct[q]['status']=='invalid_answer']
+    parsed_correct=sum(views['D0_derived'][q]==labels[q] for q in invalid)
+    text += f'[生成期间预先记录的解析修订](parser-amendment.md)说明原解析过严及固定派生规则。原{len(invalid)}个invalid_answer中，{parsed_correct}个同次输出经派生解析对应正确选项、{len(invalid)-parsed_correct}个仍未答对；这是解析损失，不是额外模型推理收益。\n\n'
+    text += '| 相对V12首答，完整60分母 | 合法错答→正确 | 正确→合法错答 | 缺答→正确 | 正确→缺答 | 净变化 |\n|---|---:|---:|---:|---:|---:|\n'
+    for name in ('D0','D0_derived'):
+        t=transitions['V12_initial_to_'+name];text+=f"| {name} | {t['legal_wrong_to_correct']} | {t['correct_to_legal_wrong']} | {t['missing_to_correct']} | {t['correct_to_missing']} | {t['net']:+d} |\n"
+    text+=f"\nD0派生解析比A最终多对{transitions['V12_A_final_to_D0_derived']['net']}题，比B最终多对{transitions['V12_B_final_to_D0_derived']['net']}题。其{len(derived_sets['D0_derived_correct_initial_not'])}个首答新正确答案中，{len(derived_sets['D0_derived_new_common_error_recovery'])}题是P0、首答、A、B全部未答对的共同错答；各路径仍有互补，不能将D0视为全面替代。P0各工具的原始调用计数见cost_timing.json，历史记录没有将crop与纯视觉重读单独编码，因此不按新协议臆造分类。\n\n"
     text += '[协议](protocol.json) · [完整逐题对照](per_question.md) · [四项转换与差异集合](transitions.json) · [失败分析](failure_analysis.md) · [调用与费用](cost_timing.json) · [原始预测](predictions.jsonl)\n\n'
     text += '生成进程不读取参考答案或旧预测，评分仅在全部60个终态完成后执行。固定旧缓存提交为 `'+protocol['historical_cache_commit']+'`。V12 候选、真实求解器与控制器采用答案分别列出，回退不能算作模型新解对。D0 与 V12 首答比较仍同时改变了提示与输出要求，不能唯一归因为减少结构化字段；D0 与 P0 只是不同图像/提示协议下的历史参考。该60题为多轮使用开发集，单次非随机对照不能证明泛化或唯一因果。\n\n'
     text += '运行：`python experiments/run_direct_vlm.py --config configs/direct_qwen60.json --out runs/direct_qwen60 --resume --api-key-stdin`。评分/导出：`python experiments/compare_direct_vlm.py --run local_assets/direct_qwen60 --v12-public reports/v12/results --p0-public reports/v10/per-question-outcomes.json --out reports/direct_qwen60`。\n'
