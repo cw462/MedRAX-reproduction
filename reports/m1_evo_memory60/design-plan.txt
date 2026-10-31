@@ -1,0 +1,190 @@
+MedRAX M1：Evo式病例记忆与规则更新｜Codex可执行实验计划
+日期：2026-10-31
+仓库：https://github.com/cw462/MedRAX-reproduction
+已核对远端：f31d63225d776ddc4063c33c82b350a721dc4b4d
+
+给实验机器上的Codex：请实现并执行本计划，完成后评分、解释并上传GitHub。不要只回复另一份计划。模型凭据和数据使用实验机器已有配置；正常实现、运行与发布无需反复确认。真实认证/额度/数据阻塞据实报告。不要宣称已经跑出附件里尚未执行的结果。
+
+一、主目标与本轮边界
+
+目标是同一个qwen3-vl-plus的Agent超过同模型直接作答。当前固定60题D0明确Answer成绩42/60=70%。至少45/60=75%才达到净增5个百分点，争取48/60=80%、净增10个百分点。
+方法主线：历史病例多模态反思→形成病例经验E和操作规则S→Top-K选择相关经验→当前病例作答→该题预测落盘后反馈正确答案→更新记忆供后续病例使用。
+本轮属于“有历史标签预热＋顺序答案反馈”的免参数训练实验。不是无反馈盲测；报告必须标明反馈条件，不能把结果混为无监督部署准确率。
+Evo原文未明确具体K、检索器、全部更新细节；下面的K/打分/容量是冻结的工程适配，不宣称逐参数复现作者代码，也不保证复制其涨幅。
+本轮不换模型，不增加裁决/投票/强制工具链。这是记忆Agent实验，外部医学工具为0，不能宣传工具库、工具治理或步骤信用分配带来收益。后续工具规划可在本轮有效后接入。
+若R2尚未开始，以本计划作为下一轮主实验，保留R2方案但暂不启动；若R2已经开始，完成原冻结运行，勿中途改提示/结果，然后再运行M1，避免同时抢同一账本或GPU资源。
+
+二、三个组与公平比较
+
+D0：已完成的无记忆直接作答，42/60。读取原始回复的明确Answer，不重新跑，不用旧过严解析的17/60空值。
+M1-E：病例经验Top-K；每题先检索再调用Qwen一次作答，随后用反馈进行一次反思，更新本组E。
+M1-ES：病例经验Top-K＋操作规则；同样每题一次作答、一次反思，更新本组E和S。
+
+两组同一主模型、原图/题干/完整选项、题序、作答提示、采样参数；唯一主差异为是否注入并更新S。E/S两组的E在各自输出反馈后独立演化，不能把一组学到的记忆偷偷同步给另一组。
+二者从同一份预热E开始，ES另有由同一批预热历史形成的S。正式60题的反馈规则相同。
+主推ES，E是机制对照。两组都必须完整跑完后再汇总评分；不能中途看到某组不涨就改K、筛规则、调提示或跳过难题。
+复用D0只节省重复付费。报告注明基线来自此前同配置缓存；当前两组是新请求，供应商服务时间差异没有被消除。
+
+三、可复用路径与必须新增的模块
+
+实验服务器根目录参考 /home/imss/cw/MedRAX_reproduction_20261027，以实际现有配置为准。
+评测输入：runs/v4_validation60/inputs.jsonl
+原图根：data/memory_v1/images
+D0原始回复：runs/direct_qwen60（公开备用：reports/direct_qwen60/responses/）
+预热候选：既有memory_train输入、标签及已完成生成轨迹。优先读取data/prepared_v2/和已完成memory训练运行的manifest，定位真实路径，不编造文件名。
+旧池：runs/memory_pool_v3/pool.json、reports/history/assets/experience_pool.json等只用于找到历史来源；不是直接将旧文本作为新E。
+
+现有memory_pipeline主要保存工具执行轨迹：不读取参考答案、部分入口要求实际工具调用、摘要不含医学原文。这不等同本轮有反馈的病例记忆。
+新增独立模块evo_memory/和独立命名空间runs/m1_evo_memory60；不要放松、移除或绕开旧memory_pipeline的数据边界，不修改旧训练池，不将validation轨迹伪装成memory_train。
+明确区分：seed_train_memory仅来自独立训练病例；online_memory仅来自本轮已经完成预测并被允许反馈的过去病例。online_memory不能在本轮结束后自动变成盲测训练池。
+
+可复用接口：
+- experiments/v12_evidence.py：question_parts、build_images、multimodal_content。
+- experiments/r1_evidence.py：explicit_answer，接受Answer字母后带选项正文。
+- experiments/provider_profile.py：get_profile。
+- experiments/v12_ledger.py及provider_ledger.py：继承已有费用额度/锁/身份保护。
+- experiments/run_direct_vlm.py：简洁模型客户端及请求落盘方式。
+不要调用memory_agent_eval.build_runtime(args.tools=[])来构造无工具模型；其空列表会启用默认工具。直接构造ChatOpenAI，不创建Agent工具实例、不bind_tools。
+
+四、先构建独立历史记忆，避免60题完全冷启动
+
+固定选取最多60个现成memory_train病例。按训练输入原始顺序取合格病例，不按它们能否修复当前60题挑选。
+同一原始case只取一题；排除评测60题所有case_id（包括同病例的其他问题），使用既有case映射确认，不能只比较question_id。
+优先复用该病例已经保存的合法原始预测/回复；没有合法预测时，允许同一Qwen按D0提示补一次历史直接作答，再给予该历史病例答案反馈。最多补60次，不重跑已有有效预测。
+如果独立历史病例不足60，使用实际可用合格数，冻结Nseed；若为0，停止报告缺什么，不能用评测题事先构建seed或偷偷变成冷启动协议。不要因达到不足60而无限扩充新数据。
+每个历史病例用一次多模态反思：完整历史原图＋题干选项＋该例原始回复＋该例正确答案全文＋原始参考解释（确有时才提供）。由同一个Qwen输出一条E和最多一条规则补丁。
+本步骤允许读取这些独立历史病例的标签；不读取评测60题未来反馈。
+冻结seed_E.jsonl、seed_S.json与来源清单，M1-E/M1-ES共同复用本次预热，不为两组重复付费建seed。
+
+五、E必须存什么，不能退化为通用提醒
+
+一条E的最少结构：
+{
+ "id":"...", "source_case_id":"内部可追溯", "source_question_id":"...",
+ "source_phase":"seed_train|past_stream", "available_after_step":0,
+ "task":"诊断/比较/定位等，可多标签", "modality":"CXR|CT|other|unknown",
+ "case_pattern":"具体病变分布/临床情境，只写有依据内容",
+ "previous_choice_text":"历史预测选项全文或明确缺答",
+ "correct_choice_text":"历史参考选项全文，不保存为可复制的A/B字母答案",
+ "error_or_success":"历史判断具体对/错在哪里",
+ "decisive_difference":"容易混淆的两种解释及决定性区别",
+ "inspection_action":"下一次该看哪一解剖结构/图号关系、问什么属性",
+ "evidence_basis":"原图/题干/参考解释分别支持什么",
+ "limitations":"仅图像不能确定的病因、尺度或时序等"
+}
+来源qid/case、真实参考和原始回复在内部保存；注入当前模型时去掉来源ID、选项字母和长轨迹，保留历史病名全文及有条件的区分经验。这是允许的历史反馈，不应继续沿用旧池“所有参考诊断全文都禁止进入记忆”的约束。
+禁止把参考诊断自动改写成原图可见征象。参考解释未提供、影像不足时，标明依据不足；不要让反思模型补造“本图已证实脂肪密度”等患者事实。
+不能只输出“注意左右/谨慎判断/多看图”；必须保留具体混淆、检查动作及适用条件。合法但不含具体动作的病例记录可入档，标记non_actionable并不进入注入候选，不为此重新调用反思模型。
+
+六、S的格式、更新与容量
+
+S是可操作规则，不是医学百科；每条含id、condition、action、limitation、priority、source_ids、n_selected、n_correct_when_selected。
+反思调用最多提出一个add/revise/retire补丁；修改既有规则时提供已有ID，不允许生成无来源新ID来假装替换成功。
+同一condition和action标准化后相同的规则合并来源；不同规则不可仅因都提到“胸腔积液”就合并。采用确定性的字符串标准化/去重即可，不开发复杂记忆管理框架。
+容量固定24条；满时优先替换未使用、低优先级且最早的规则，规则删除/修改留更新日志。当前题刚生成的补丁要在下一题才能检索。
+规则“被选中时当前题答对”只更新相关使用统计，不等同该规则造成正确，不伪称因果信用分配。步骤信用分配本轮不生成虚构分数。
+
+七、Top-K如何落地：这轮固定一个实现
+
+默认E Top-K=3，S Top-K=2，总注入上下文上限约1600 tokens（预算按现有分词器估计）；无相关项时允许少于K，不用无关记忆凑数。
+用轻量BM25实现，不下载新向量模型、不训练检索器。已有依赖可用则复用；否则用小型本地实现。不要同时再跑多种检索器消融。
+当前查询主文本为原题干；完整选项用于识别竞争概念与属性，权重较低，不包含当前正确答案、旧D0/R1预测或已评分分析。
+E索引文本：case_pattern＋decisive_difference＋inspection_action。不要把source_id、选项字母或整段参考解释作为检索捷径。
+冻结打分：score_E=BM25(题干,文档)+0.25*BM25(全部选项去字母,文档)。至少有有效非停用词重合且score>0才入候选；同分按固定ID排序。该正分条件是检索相关性条件，不是答案置信门槛。
+相同已知模态才跨病例类比；当前模态在题干不明确时保持unknown，不根据题干“胸片”以外想象出CT信息。训练E modality来自历史原图反思，可能出错，记录为模型报告；没有可靠当前模态时不硬排除潜在相关记忆。
+S相关性使用相同检索文本和词项规则；候选内按0.8*归一化相关性+0.2*(n_correct_when_selected+1)/(n_selected+2)排序。n=0为平滑先验，不给无证据规则虚构成功率。
+每题记录检索query、候选分数、实际注入ID和文本。检索不能访问当前或未来reference/正确性列。
+没有额外的当前图像描述调用；当前像素留给最终作答模型读取。论文没有规定本实现的BM25或权重，应报告这是适配版检索，不能称作者原配置。
+
+八、正式流：严格先作答、再反馈、再更新
+
+固定使用当前60题原顺序；先确认是否每个case只出现一次。如同case有多题，将同case作为一个反馈批次：该case所有题、两个组均完成预测后再揭晓这些答案，避免同患者其他题的标签先进入推理。
+准备时只做一次输入/病例映射检查，不开展长篇审计。题目仍是question_id、question、images三字段白名单。
+为E和ES分别复制seed快照，之后独立维护状态。第i题执行：
+1. 从本组M_(i-1)检索E；ES另检索S。未来病例及当前case全部不可见。
+2. 发送相同BASE_SYSTEM、当前完整原图/题干/选项，以及MEMORY_CONTEXT；E/ES只因S和已演化记忆不同。每组只调用一次作答模型，输出Answer+短Reason，立即落盘。
+3. 同一反馈批次两个组都已提交预测后，feedback broker仅释放已完成批次的正确答案/可用解释。当前答案绝不能在步骤1/2出现。
+4. 用各组本次原始回复及原图分别反思一次，写入本组E；ES同时应用S补丁，更新已选规则的使用统计。
+5. 新记忆标记available_after_step=i，仅允许后续步骤使用；不得重新作答当前题或更新当前已保存预测。
+最后一批之后不再反思，因为本轮没有后续题可受益。反馈批次多题时反思每题，但在该批次结束后才发布到下一批次。
+反思失败保留本次答案和旧记忆，记录memory_update_failed；下一题继续。不得为修复格式反复付费生成规则。
+
+feedback broker与answer client使用分离接口。broker可持有标签源，但answer client仅接收允许的历史memory projection。每条记忆有source_case与available_after_step，检索据此排除当前/未来case。
+这不是旧“全组生成完才可揭晓任何标签”的协议：为了检验论文顺序学习，允许已完成病例的反馈进入未来记忆；汇总评分和实验比较仍在流结束后进行，不能边看累计成绩边调方法。
+在线反馈轨迹存入本轮online_memory，不进入既有严格独立训练池，不关闭旧泄漏检查冒充合法训练数据。
+
+九、固定作答提示与反思提示
+
+BASE_SYSTEM（E/ES完全相同；不使用大段属性JSON）：
+You answer medical image multiple-choice questions. Inspect all supplied original images and the complete question and options. The memory context contains historical experiences and conditional inspection rules; use them to decide which visible distinctions to examine in THIS case. Historical diagnoses and findings are not facts about the current patient. Check whether each retrieved lesson applies before using it. Prefer current pixels and explicit question facts over an analogy. Respect figure identity and only the chronology supplied in the question. Choose the single best complete legal option even when details remain uncertain. Return two short lines:
+Answer: <one legal option letter; option text may follow>
+Reason: <one or two brief sentences about the decisive current-case evidence>
+
+MEMORY_CONTEXT短模板：
+Historical example <id>: pattern; earlier confusion; corrected interpretation; distinguishing observation/action; limitation.
+Conditional procedure <id>: when condition holds, inspect action; limitation.
+Current question and original images: <原文＋所有原图>
+
+只对比D0缓存时，报告BASE_SYSTEM增加了“如何使用记忆”的固定说明，因此与D0差值是整个记忆Agent的收益，不唯一归因某条规则。E与ES使用严格相同BASE_SYSTEM，可比较规则增量。
+
+REFLECT_SYSTEM（正确性反馈后、附原图，不输出隐含长推理）：
+Reflect on a COMPLETED historical case using its original images, full question/options, saved response, reference answer and any supplied reference explanation. Identify the specific successful distinction or error, and a reusable conditional inspection action for a different future patient. The reference diagnosis does not prove that every associated visual sign is visible. Separate image observations, explicit clinical facts and reference-only information. If the provided material cannot explain the answer, state the limitation rather than inventing an explanation. Write one concise episode and at most one conditional procedure patch. A procedure must specify when it applies, what to inspect, and an exception/limitation; avoid generic advice and patient-specific answer-letter rules. Return one compact JSON object with episode and procedure_patch. Do not revise the already submitted answer.
+
+反思最大输出2048 tokens，episode注入文本尽量不超过180英文词，规则不超过70词。超过长度按固定字段上限截断并记日志，不新增摘要调用。
+E组与ES组采用同一反思格式，E组不应用procedure_patch。反思时只提供当前已经允许的历史规则候选，不把未来规则或其他组的反思给它。
+
+十、调用预算、续跑与配置
+
+模型：qwen3-vl-plus；temperature=0.2、top_p=0.95、max_tokens=2048、timeout=120秒、SDK max_retries=0；原图detail=auto，同D0图像字节/顺序，不新加裁剪或工具派生图。
+若V=60、seed S=60且已有历史预测：seed反思60＋正式作答120＋在线反思至多118＝正常298次中央请求。
+若历史预测均缺失，最多另补60次，正常上限358。seed不足时使用实际S重算，但不能超出此上限。多题case批次可使在线反思少于118，按实际记录。
+全轮额外技术重试最多36次，总硬上限394；每个阶段最多额外一次。只重试瞬时网络/429/5xx，成功回复不因答案或格式不满意重跑。计数持久化，resume不得重置。
+沿用既有API费用账本，不清零或增额。开始前按当前profile、正常调用上限和已有余量估算是否可运行；额度不足明确报告，不能为了预留上限擅自提高额度，也不自动减少到另一协议。
+保存seed构建费、两组正式推理费、在线反思费，完整Agent成本不能只报最后一次作答费。模型未调权重仍会产生反思费用。
+每一步持久化prediction→feedback事件→reflection→memory版本。中断后先恢复上一步已保存响应，提交过的预测不得重答，应用过的补丁不得重复应用。固定输入/配置只在准备/恢复时检查，不增加运行中账本扫描。
+模型账号凭据只安全注入；不要写日志或提交Git。真实阻塞记not_run，与已请求失败分开，不伪造完成。
+
+十一、最小文件设计与实际命令
+
+新增：
+- evo_memory/store.py：E/S状态、时间可见性、病例排除、补丁应用。
+- evo_memory/retrieve.py：BM25及固定Top-K/容量选择。
+- evo_memory/prompts.py：上述冻结提示与短投影。
+- experiments/build_evo_seed.py：历史来源解析、预测复用、反思构建seed。
+- experiments/run_evo_memory.py：两个组按病例批次生成、反馈、更新、续跑。
+- experiments/score_evo_memory.py：流结束后完整分母对照、分类与费用导出。
+- configs/m1_evo_memory60.json：真实路径及全部参数。
+
+配置必须明确seed_input、seed_labels、seed_predictions_sources、eval_input、eval_labels_broker_source、image_root、d0_source、model、ledger、top_k_e=3、top_k_s=2、context_token_limit=1600、rule_capacity=24、arms=[E,ES]、max_normal_requests=358、max_requests=394。
+标签真实路径从现成准备数据/manifest确定；找不到时向用户报告确切缺失文件，不猜标准答案或拿模型预测当GT。
+
+待实现CLI接口：
+python experiments/build_evo_seed.py --config configs/m1_evo_memory60.json --out runs/m1_evo_memory60/seed --resume --api-key-stdin
+python experiments/run_evo_memory.py --config configs/m1_evo_memory60.json --seed runs/m1_evo_memory60/seed --out runs/m1_evo_memory60/stream --resume --api-key-stdin
+python experiments/score_evo_memory.py --run runs/m1_evo_memory60 --d0-public reports/direct_qwen60 --out reports/m1_evo_memory60
+
+实现完必须用实际命令执行并把命令写报告，不能只创建CLI占位符或用伪造fixture结果替代正式推理。
+新增必要小测试仅覆盖：先提交预测后放反馈、同case批次隔离、不可读未来记忆、E/ES状态独立、resume幂等、带全文Answer的解析。完成这些就推进实验，不跑全项目反复检查。
+
+十二、评分、归因与停止规则
+
+主表：D0无记忆、M1-E、M1-ES。完整60分母，缺答计错，技术失败单列；与D0逐题拆开合法纠正、误改、缺答恢复、正确变缺答。净增3题才达到75%，净增6题才达到80%。
+输出每12题累计准确率与最后三个区段的描述性结果，但只在整个运行后计算和发布；不能根据某区段好看改主分母。沿用当前五种题型组合统计，每组实际题量注明；七能力标签可重叠，不能加总成总分。
+同时报告：seed实际病例数、每题可见记忆数、检索ID/得分、应用规则与后续补丁、非通用的具体经验例子、过去正确答案何时反馈、是否出现从类比直接套诊断、全部费用和耗时。
+ES-E差值是本实现下规则机制的增量；不是每条规则的因果贡献。若只有E有效，就保留E路线，不强行宣称所有模块有效。
+若E/ES均不超过42，不再在同一60题上连续调K/提示重跑；交付真实失败，检查检索是否找到同类混淆、反思是否具体、当前图像是否足以区分。下一步再决定工具增强，不能改用更低的旧基线包装涨点。
+这轮为重复使用开发集、且有明确顺序反馈；若出现净提升，冻结方法后再用独立病例/固定记忆协议验证泛化。当前请求只启动本轮，不自动扩到多次随机顺序或大样本实验。
+原论文病例顺序存在影响，本轮仅一个冻结顺序，不能声称顺序鲁棒性。独立train seed的预热也是本计划的适配，与原文的具体初始记忆设置未必相同。
+
+十三、运行节奏与发布
+
+Codex应先读AGENTS.md、定位现有输入/历史预测/标签，做一次必要的数据角色检查，然后实现最小流程。不要先做数小时审计或重建旧历史报告。
+前两个seed的真实反思计入seed，前两个评测批次计入正式结果；只看流程、响应和落盘是否正常，不看正确性调方法，正常自动继续。
+每完成10个seed或10个评测题更新status/log：已完成量、调用量、时间、费用和下一阶段。正常运行无需用户逐批确认。
+这轮约300次请求，历史单次耗时推算为数十分钟的中央调用，再加反思长度、队列及代码实现时间；不是R2的几分钟规模。启动后记录实际开始时间与进度，不能保证具体结束时刻或保证75%。
+
+完成后按AGENTS.md主动发布GitHub。reports/m1_evo_memory60/包含协议、来源/题序、seed E/S、每题实际可见记忆快照、预测/反馈/反思/更新过程、完整逐题对照、五组合及七能力统计、费用耗时和失败分析。
+公开图像复用既有资产，原文选项和必要历史材料保留来源。只stage明确清单；不上传凭据、权重、无关数据。旧预测不改写。
+只有push成功并确认远端提交后才说上传完成，返回commit和报告链接。没有运行就不宣称跑完；没有达到目标就如实报告。
+
+参考依据：Evo-MedAgent原文§3.1、§3.2和Table 1。本文实现的是同模型、反馈驱动的病例经验学习；不能把未来反馈或当前题重答当作提分。
