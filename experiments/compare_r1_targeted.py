@@ -136,7 +136,10 @@ def generate(run,d0,v12,out):
                'historical':{name:views[name][q] for name in views if name not in {'D0_explicit_cache','R1_solver','R1_adopted'}},
                'original_images_and_V12':f'../../v12/results/cases/{q}.md','D0_raw_response':f'../../direct_qwen60/responses/{q}_1.json',
                'trace':f'../traces/{q}.json'}
-        write(out/'cases'/f'{q}.json',assets.clean(entry,folder));combined.append(assets.clean(entry))
+        write(out/'cases'/f'{q}.json',assets.clean(entry,folder))
+        root_entry=dict(entry,original_images_and_V12=f'../v12/results/cases/{q}.md',
+                        D0_raw_response=f'../direct_qwen60/responses/{q}_1.json',trace=f'traces/{q}.json')
+        combined.append(assets.clean(root_entry))
         text=f"# R1：{q}\n\n[全部题目](README.md) · [完整可观察记录](../traces/{q}.json) · [D0原回复](../../direct_qwen60/responses/{q}_1.json)\n\n"
         text+=f"D0明确Answer缓存 **{baseline[q]['answer']}**；R1观察求解 **{records[q]['solver_answer']}**；控制器采用 **{records[q]['answer']}**；参考 **{labels[q]}**；回退 **{records[q]['fallback_to_D0']}**。\n\n"
         text+='## 完整题干与选项\n\n```text\n'+row['question']+'\n```\n\n## 原图与本轮局部\n\n'
@@ -163,13 +166,19 @@ def generate(run,d0,v12,out):
     text='# R1：一次独立针对性取证结果\n\n'
     text+=f"**R1控制器采用 {totals['R1_adopted']['correct']}/60，独立观察求解器 {totals['R1_solver']['correct']}/60；D0明确Answer缓存 {totals['D0_explicit_cache']['correct']}/60，净变化 {t['net']:+d}。**\n\n"+'\n'.join(table)+'\n\n'
     text+=f"相对D0：合法错答纠正 {t['legal_wrong_to_correct']}，正确答误改 {t['correct_to_legal_wrong']}，缺答恢复 {t['missing_to_correct']}，正确答变缺答 {t['correct_to_missing']}。探索性精确McNemar p={p:.8g}。控制器回退 {execution['fallback_n']} 次，其中正确 {execution['fallback_correct_n']} 次，不能算模型新解对。\n\n"
+    text+='| 重叠任务类别 | N | D0缓存 | R1求解 | R1采用 | A候选 | B候选 | A最终 | B最终 |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n'
+    for name,value in categories.items():
+        text+=f"| {name} | {value['N']} | {value['D0_explicit_cache']} | {value['R1_solver']} | {value['R1_adopted']} | {value['V12_A_candidate']} | {value['V12_B_candidate']} | {value['V12_A_final']} | {value['V12_B_final']} |\n"
+    text+='\n类别有重叠，不可相加；总体始终每题计一次、完整60分母。\n\n'
     text+=f"实际中央模型请求 {resources['central_model_requests']}，技术额外重试 {resources['technical_extra_requests']}；医学工具尝试 {execution['medical_tool_attempts']}，crop {execution['crop_calls']}。请求/执行动作分布、工具名、目标属性和失败均见[执行明细](execution.json)。\n\n"
     text+=f"裁剪方向/框检查 {execution['crop_binding_checks']} 次，通过 {execution['crop_binding_allowed']} 次，拒绝原因 {dict(execution['crop_rejection_reasons'])}。拒绝只将动作退回原图，不对答案做置信度拦截。通过只证明模型报告的标记和框几何相符，不证明标记本身被读对；原图始终同屏，未翻转/旋转。\n\n"
     if not execution['crop_binding_checks']:text+='本轮未请求crop，因此这次真实实验没有覆盖裁剪侧别修正；相关修正只有事前合成像素/几何测试，不能据此归因成绩变化。\n\n'
     text+=f"保存结算费用 {resources['saved_settlement_cny']} CNY，原账本保存的本轮增量 {resources['ledger_saved_summary'].get('run_increment_cny')} CNY；不打开真实账本、不补写记录，计价假设不是供应商账单。墙钟耗时 {resources['wall_elapsed_s']:.1f} 秒；本地医学工具/GPU时间包含其中，未虚构货币费用。D0旧费用不重复加入本轮。\n\n"
     text+='[运行协议](protocol.md) · [机器协议](protocol.json) · [全部60题原图/局部/回复](cases/README.md) · [四项转换](transitions.json) · [逐题结构化对照](per_question.json) · [失败分析](failure_analysis.md) · [费用耗时](cost_timing.json)\n\n'
     text+='模型参数与D0一致。新推理覆盖全部60题，规划和观察均不接收D0答案、理由或旧观察；没有K/E、投票、置信度门槛或额外最终重答。采用全部合法独立观察答案，技术无答才由控制器回退D0。D0缓存使用已发布的明确Answer派生解析口径，旧原解析17/60记录仍保留，不能将本轮比较解释为改写旧成绩。该60题为反复使用开发集，本轮一个固定顺序/单次采样不能分离规划、裁剪、工具或模型随机性的因果贡献。\n\n'
-    text+=f"生成提交 `{protocol['implementation_commit']}`；旧缓存固定 `{protocol['source_cache_commit']}`。复现入口 `experiments/run_r1_targeted.py --config configs/r1_qwen60.json --out \"$R/runs/r1_qwen60\" --resume --api-key-stdin`，工作目录 `$R/code_r1`，Python `$R/.venv/bin/python`，R取配置root。后置评分：`python experiments/compare_r1_targeted.py --run local_assets/r1_qwen60 --d0-public reports/direct_qwen60 --v12-public reports/v12/results --out reports/r1_qwen60`。\n"
+    text+='这里的“独立”仅指会话与输入隔离，不代表不同模型家族，也不保证统计独立的判断错误。若动作主要为visual，新增的是选项差异导向的重新观察，并没有取得新的原始像素信息；不能将分数变化算作外部医学工具贡献。\n\n'
+    run_cli='experiments/run_r1_targeted.py --config configs/r1_qwen60.json --out "$R/runs/r1_qwen60" --resume --api-key-stdin'
+    text+=f"生成提交 `{protocol['implementation_commit']}`；旧缓存固定 `{protocol['source_cache_commit']}`。复现入口 `{run_cli}`，工作目录 `$R/code_r1`，Python `$R/.venv/bin/python`，R取配置root。后置评分：`python experiments/compare_r1_targeted.py --run local_assets/r1_qwen60 --d0-public reports/direct_qwen60 --v12-public reports/v12/results --out reports/r1_qwen60`。\n"
     (out/'README.md').write_text(text,encoding='utf-8')
     analysis='# R1 定向错误与互补分析\n\n'
     analysis+='主配对结果、全部差异ID见[transitions.json](transitions.json)；以下先保留定向阅读入口，人工分析只能依据保存输出，不能将模型解释当作已验证影像事实。\n\n'
