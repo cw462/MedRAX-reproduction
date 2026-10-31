@@ -56,8 +56,11 @@ line whitespace only; it does not change the wording, options or experiment inpu
   reports or reader interpretations. They are **not clinically validated facts**.
 - S2 action plans, resulting pixels and reader reports are linked together. S3
   blind-reader reports are stored alongside the subsequent selector outputs.
-- Parsed V10 candidate/gate and V11 selector outputs are included. Hidden reasoning
-  and full model conversation transcripts are not part of this export.
+- Parsed V10 candidate/gate and V11 selector outputs are included. The historical
+  supplement now also preserves all saved observable V11 conversation messages
+  in [180 stage/question trace archives](traces/README.md), from 563 JSON checkpoints.
+  Embedded images are replaced with byte-identical file references. No hidden
+  model reasoning is requested, reconstructed, or added.
 - Reference answers and correctness records are published after completed
   generation/scoring; they were not input to inference. See
   [per-question outcomes](per-question-outcomes.json) for the scoring provenance.

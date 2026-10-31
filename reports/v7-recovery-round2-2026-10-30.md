@@ -1,5 +1,7 @@
 # V7 recovery, full 60-question run: the candidate stage, not the gate
 
+> **Retrospective denominator correction (2026-10-31):** This original report mixed planned, scored and legal-answer denominators. On all 60 planned questions, P0/P1/PB/PC/GB/GC are **42/28/39/40/42/40**. P1's 51.85% below is 28/54 conditional on a legal answer, not 28/59 or 28/60. Its 2 legal corrections and 12 legal harms omit 4 correct-to-missing failures, making the full-denominator net **−14**, not −10. PC/GC have 2 correct-to-missing failures, hence net **−2** despite zero legal harms. Original predictions are unchanged. See [retained records and corrected interpretation](history/early-experiments.md) and [per-question denominator detail](history/early/v7-fixed-denominator.json). The historical text below is retained for comparison.
+
 Date: 2026-10-30. Run: `runs/v7_recovery/round2_verify.jsonl` (60 questions, 59 scored;
 `17621_8143559684844` failed in P0). Metrics: `reports/v7_round2_metrics.md` / `.json`.
 

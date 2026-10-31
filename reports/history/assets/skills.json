@@ -1,0 +1,1148 @@
+{
+  "skill_version": "v0",
+  "source_run": "v4_collect60",
+  "source_traces": 18,
+  "distilled": 17,
+  "rejected": 0,
+  "rejection_reasons": {},
+  "skills": [
+    {
+      "skill_id": "S001",
+      "task_types": [
+        "localization",
+        "characterization"
+      ],
+      "trigger": "The question asks to characterize a specific radiographic finding (air-space consolidation) in a defined anatomical region (left middle lung zone), but the initial classifier and report generator do not localize or describe that finding.",
+      "required_information": [
+        "Anatomical location of the consolidation (e.g., left middle lung zone)",
+        "Morphological features of the consolidation (e.g., margins, pattern, homogeneity)",
+        "Contextual clinical or imaging clues supporting a differential"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "visual_localization"
+      ],
+      "actions": [
+        {
+          "action_id": "a1",
+          "operation": "Use xray_phrase_grounding to extract bounding box for 'Consolidation in left middle lung zone'",
+          "capability": "visual_localization"
+        },
+        {
+          "action_id": "a2",
+          "operation": "Query chest_xray_expert with prompt: 'Describe the morphology (margins, density, extent) of the consolidation in the left middle lung zone, and list the top 3 differential diagnoses consistent with this appearance'",
+          "capability": "chest_xray_vqa"
+        }
+      ],
+      "checkpoints": [
+        "Bounding box from xray_phrase_grounding covers plausible left middle lung zone (approx. mid-lung field, lateral to hilum, below upper lobe)",
+        "Expert response includes morphological descriptors (e.g., ill-defined, patchy, homogeneous) and at least one plausible diagnosis matching the region and appearance",
+        "No contradiction between localization and description (e.g., expert does not describe right-sided finding)"
+      ],
+      "fallbacks": [
+        {
+          "when": "xray_phrase_grounding returns no grounding for 'consolidation'",
+          "operation": "Run chest_xray_classifier with higher sensitivity threshold (e.g., score > 0.4) and filter for 'consolidation' or 'pneumonia' findings; then use image_display_or_crop to visually inspect the left middle zone"
+        },
+        {
+          "when": "chest_xray_expert returns generic terms like 'pneumonia' without morphology",
+          "operation": "Re-prompt with: 'Is the consolidation well-defined or ill-defined? Is it lobar, segmental, or patchy? Are there air bronchograms, cavitation, or calcification?'"
+        }
+      ],
+      "stop_conditions": [
+        "Morphological description and anatomical localization are both confirmed and mutually consistent",
+        "At least one differential diagnosis is provided that aligns with the described features"
+      ],
+      "avoid": [
+        "Relying solely on top-findings from classifier when the finding is subtle or region-specific",
+        "Accepting a normal report (e.g., 'lungs are clear') without verifying localized findings",
+        "Using ungrounded expert answers without confirming spatial correspondence"
+      ],
+      "source_trace_ids": [
+        "10304_8353800814334"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "correct",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S002",
+      "task_types": [
+        "localization",
+        "characterization"
+      ],
+      "trigger": "The chest X-ray classifier returns multiple plausible findings (e.g., effusion, mass, opacity) with similar confidence scores (>0.5), and the initial report mentions both pleural effusion and possible underlying consolidation, creating ambiguity about lesion nature and location.",
+      "required_information": [
+        "Spatial location of the opacity relative to lung zones (apex/base/central) and fissures",
+        "Morphological features (e.g., pleural-based vs. parenchymal, calcifications, diaphragmatic involvement)",
+        "Whether the opacity is separable from overlying atelectasis or effusion"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "report_generation",
+        "visual_localization"
+      ],
+      "actions": [
+        {
+          "action_id": "a1",
+          "operation": "Run chest_xray_report_generator to extract structured clinical narrative including descriptors like 'pleural effusion', 'atelectasis', 'consolidation', and spatial modifiers (e.g., 'left', 'base', 'apex').",
+          "capability": "report_generation"
+        },
+        {
+          "action_id": "a2",
+          "operation": "Use xray_phrase_grounding on key phrases (e.g., 'pleural effusion', 'consolidation') to obtain normalized bounding boxes and verify spatial correspondence with suspected lesion region.",
+          "capability": "visual_localization"
+        },
+        {
+          "action_id": "a3",
+          "operation": "Query chest_xray_expert with a focused question: 'Is the opacity pleural-based or parenchymal?', to resolve ambiguity when report language is non-specific (e.g., 'underlying consolidation cannot be excluded').",
+          "capability": "chest_xray_vqa"
+        }
+      ],
+      "checkpoints": [
+        "Report explicitly states laterality (left/right) and zone (apex/base/central) for the opacity.",
+        "Grounded bounding box for 'pleural effusion' aligns with lower thoracic region (y > 0.5), supporting base location.",
+        "Expert response confirms 'pleural-based', ruling out parenchymal mass or lymphadenopathy."
+      ],
+      "fallbacks": [
+        {
+          "when": "xray_phrase_grounding returns low-confidence or inconsistent boxes (e.g., abdominal calcification phrase grounded in lung field)",
+          "operation": "Ignore that grounding; re-run grounding only on thoracic-relevant phrases from report, or skip grounding and rely on expert VQA + report semantics."
+        },
+        {
+          "when": "Expert answer is vague (e.g., 'uncertain')",
+          "operation": "Request refined expert query: 'Does the opacity have a broad pleural base? Is there evidence of calcification or diaphragmatic tenting?'"
+        }
+      ],
+      "stop_conditions": [
+        "A consistent localization (e.g., left lung base) and characterization (e.g., pleural-based, not mass-like) are confirmed by ≥2 independent tool outputs.",
+        "All candidate options can be definitively ruled in or out based on synthesized evidence."
+      ],
+      "avoid": [
+        "Assuming the highest-scoring classifier finding (effusion) is definitive without verifying spatial context",
+        "Interpreting abdominal calcification grounding as relevant to thoracic lesion",
+        "Treating 'consolidation cannot be excluded' as evidence for parenchymal mass without further disambiguation"
+      ],
+      "source_trace_ids": [
+        "10514_8353800724766"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "correct",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S003",
+      "task_types": [
+        "localization",
+        "diagnosis"
+      ],
+      "trigger": "The chest X-ray classifier returns moderate-confidence findings (e.g., pneumonia, lung opacity, mass) but the report generator and expert assessment contradict those by stating no acute process; grounding is then used to verify spatial presence of specific phrases from options.",
+      "required_information": [
+        "List of candidate radiographic findings from question options",
+        "Initial model-based finding scores (e.g., from classifier)",
+        "Radiologist-level interpretation (e.g., report or expert verdict)",
+        "Spatial localization of candidate findings in image"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "report_generation",
+        "visual_localization"
+      ],
+      "actions": [
+        {
+          "action_id": 1,
+          "operation": "Run chest_xray_classifier to obtain top differential findings and confidence scores",
+          "capability": "chest_xray_vqa"
+        },
+        {
+          "action_id": 2,
+          "operation": "Generate structured radiology report to assess clinical significance and rule out artifacts/limitations",
+          "capability": "report_generation"
+        },
+        {
+          "action_id": 3,
+          "operation": "Query chest_xray_expert for high-level diagnostic conclusion (e.g., 'no acute process')",
+          "capability": "chest_xray_vqa"
+        },
+        {
+          "action_id": 4,
+          "operation": "Use xray_phrase_grounding to localize specific phrases from answer options (e.g., 'pleural effusion', 'consolidation in right upper lobe near hilum')",
+          "capability": "visual_localization"
+        }
+      ],
+      "checkpoints": [
+        "Classifier score >0.5 for a finding does NOT imply clinical relevance if report/expert says otherwise",
+        "Grounded region must be visually inspectable and consistent with image features (e.g., density, margins)",
+        "Phrase grounding output must map to anatomically plausible location (e.g., right upper lobe near hilum ≠ left lung)"
+      ],
+      "fallbacks": [
+        {
+          "when": "Grounding returns low-confidence or implausible box (e.g., outside lung fields)",
+          "operation": "Re-run grounding with stricter phrase templates or request human-in-the-loop verification"
+        },
+        {
+          "when": "Report and classifier strongly disagree without expert resolution",
+          "operation": "Prioritize expert verdict and treat classifier as noise; re-evaluate using only report + grounding"
+        }
+      ],
+      "stop_conditions": [
+        "Expert says 'no acute cardiopulmonary process' AND grounding shows no valid region for any option",
+        "One grounded phrase aligns anatomically and visually with a high-scoring classifier finding AND expert does not refute it",
+        "All grounded regions are inconsistent with image appearance (e.g., normal lung parenchyma where consolidation is claimed)"
+      ],
+      "avoid": [
+        "Accepting classifier scores as diagnostic truth without verification",
+        "Using grounding boxes as definitive diagnosis without visual validation",
+        "Ignoring report limitations (e.g., low lung volumes, lordotic positioning) when interpreting findings"
+      ],
+      "source_trace_ids": [
+        "10520_8353800724874"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "correct",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S004",
+      "task_types": [
+        "localization",
+        "relationship",
+        "characterization"
+      ],
+      "trigger": "The question asks about spatial relationships (e.g., contact with mediastinum/vertebra) and morphological features (e.g., spiculated borders) of a specific opacity in the right upper lobe, but initial tool outputs do not provide precise anatomical context or border characteristics.",
+      "required_information": [
+        "Exact location and bounding box of the right upper lobe opacity",
+        "Proximity to adjacent structures (mediastinum, vertebra, pleura)",
+        "Border morphology (e.g., spiculated, smooth, ill-defined)",
+        "Size relative to contralateral lobe (if needed for comparison)"
+      ],
+      "required_capabilities": [
+        "visual_localization",
+        "chest_xray_vqa"
+      ],
+      "actions": [
+        {
+          "action_id": 1,
+          "operation": "Use xray_phrase_grounding to extract normalized bounding box for 'right upper lobe opacity'",
+          "capability": "visual_localization"
+        },
+        {
+          "action_id": 2,
+          "operation": "Use chest_xray_expert to refine localization and request description of borders and adjacency to mediastinum/vertebra",
+          "capability": "chest_xray_vqa"
+        }
+      ],
+      "checkpoints": [
+        "Bounding box from phrase grounding is non-empty and plausible (e.g., within right upper lung zone)",
+        "Expert response includes explicit mention of contact with mediastinum/vertebra or absence thereof",
+        "Expert response describes border characteristics (e.g., spiculated, lobulated, smooth)"
+      ],
+      "fallbacks": [
+        {
+          "when": "Phrase grounding returns empty or implausible box (e.g., outside lung fields)",
+          "operation": "Re-run xray_phrase_grounding with alternative phrasing: 'opacity in right upper lung zone' or 'RUL lesion'"
+        },
+        {
+          "when": "Expert response lacks border or adjacency info",
+          "operation": "Query chest_xray_expert again with explicit prompt: 'Does the opacity abut the mediastinum or spine? Are borders spiculated?'"
+        }
+      ],
+      "stop_conditions": [
+        "All required spatial and morphological details are confirmed",
+        "No further tool calls improve specificity beyond clinical plausibility threshold"
+      ],
+      "avoid": [
+        "Relying solely on classifier scores (e.g., 'Lung Opacity' score 0.6237) without localization",
+        "Assuming report text is complete when it explicitly states 'lungs are clear' despite known opacity (indicating report may be outdated or mismatched)",
+        "Using unverified model-generated boxes without cross-checking against expert interpretation"
+      ],
+      "source_trace_ids": [
+        "10608_8353800735751"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "correct",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S005",
+      "task_types": [
+        "characterization"
+      ],
+      "trigger": "The question asks to match a clinical diagnosis (Legionella pneumonia) to a specific radiological pattern among multiple detailed options, and the X-ray shows extensive right lung pneumonia with a small right pleural effusion but no explicit mention of air bronchogram or lobe-level detail in the initial report.",
+      "required_information": [
+        "Laterality (right vs left)",
+        "Lobar involvement (upper/middle/lower)",
+        "Presence/absence of air bronchogram",
+        "Pleural effusion side and size",
+        "Consolidation vs ground-glass opacities"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "report_generation",
+        "visual_localization"
+      ],
+      "actions": [
+        {
+          "action_id": 1,
+          "operation": "Run chest_xray_classifier to obtain top differential findings (e.g., consolidation, pneumonia, mass) and confidence scores.",
+          "capability": "image_classification"
+        },
+        {
+          "action_id": 2,
+          "operation": "Generate structured radiology report using chest_xray_report_generator to extract key descriptive phrases (e.g., 'extensive right lung pneumonia', 'small right pleural effusion').",
+          "capability": "report_generation"
+        },
+        {
+          "action_id": 3,
+          "operation": "Ground key diagnostic phrases (e.g., 'Consolidation', 'Pleural effusion') to image regions using xray_phrase_grounding to verify spatial correspondence and laterality.",
+          "capability": "visual_localization"
+        }
+      ],
+      "checkpoints": [
+        "Report explicitly states side (right/left) and extent (e.g., 'extensive right lung')",
+        "Phrase grounding confirms location aligns with report text (e.g., consolidation box is right-dominant)",
+        "No contradictory descriptors (e.g., 'bilateral' vs 'right-sided') appear across tools",
+        "Air bronchogram is either mentioned or confidently absent from report and grounding"
+      ],
+      "fallbacks": [
+        {
+          "when": "Report lacks lobar specificity (e.g., only says 'right lung' not 'upper/middle/lower')",
+          "operation": "Use visual_localization on known lobar anatomy landmarks (e.g., horizontal fissure, cardiac silhouette) to infer lobe involvement from grounded region coordinates."
+        },
+        {
+          "when": "Air bronchogram status is ambiguous in report and grounding",
+          "operation": "Re-query chest_xray_vqa with prompt: 'Does the consolidation show air bronchograms?'"
+        }
+      ],
+      "stop_conditions": [
+        "All required radiological features (laterality, lobe, effusion, air bronchogram, opacity type) are confirmed or ruled out",
+        "One option is uniquely consistent with all verified features"
+      ],
+      "avoid": [
+        "Assuming 'right lung pneumonia' implies lower lobe without verification",
+        "Ignoring pleural effusion side when multiple options differ only by side",
+        "Treating model-generated bounding boxes as diagnostic truth without cross-checking with report text"
+      ],
+      "source_trace_ids": [
+        "10665_8353800813947"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "correct",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S006",
+      "task_types": [
+        "diagnosis",
+        "characterization"
+      ],
+      "trigger": "Chest X-ray shows near-complete opacification of one hemithorax with ipsilateral mediastinal shift, and the agent must distinguish pleural mass vs. effusion vs. lung collapse based on contour, angle with chest wall, and absence/presence of meniscus sign",
+      "required_information": [
+        "Contour of the opacity (convex vs. concave)",
+        "Angle between opacity and thoracic wall (acute vs. obtuse)",
+        "Presence or absence of meniscus sign",
+        "Direction of mediastinal shift",
+        "Clinical context (e.g., asymptomatic, no asbestos exposure)"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "biomedical_vqa"
+      ],
+      "actions": [
+        {
+          "action_id": "a1",
+          "operation": "Use chest_xray_expert to confirm whether the opacity is a mass or fluid; request explicit assessment of contour, angle, and meniscus sign",
+          "capability": "chest_xray_vqa"
+        },
+        {
+          "action_id": "a2",
+          "operation": "Query llava_med_qa with focused prompt: 'Does the left hemithorax opacity have a convex contour? Does it form an obtuse angle with the chest wall? Is there a meniscus sign? What does mediastinal shift direction imply about volume effect?'",
+          "capability": "biomedical_vqa"
+        }
+      ],
+      "checkpoints": [
+        "Contour is explicitly labeled as convex or concave",
+        "Angle with chest wall is described as acute (<90°) or obtuse (>90°)",
+        "Meniscus sign is confirmed absent or present",
+        "Mediastinal shift direction is linked to mass effect (ipsilateral shift = volume loss; contralateral = space-occupying lesion)"
+      ],
+      "fallbacks": [
+        {
+          "when": "llava_med_qa returns ambiguous or incomplete morphologic descriptors",
+          "operation": "Re-prompt with image crop + phrase grounding output (e.g., 'Using region [x1,y1,x2,y2] from xray_phrase_grounding, describe the interface between opacity and chest wall')",
+          "capability": "chest_xray_vqa"
+        }
+      ],
+      "stop_conditions": [
+        "All three morphologic features (contour, angle, meniscus) are confidently assessed and consistent with a specific lesion type",
+        "Mediastinal shift direction is reconciled with volume effect hypothesis"
+      ],
+      "avoid": [
+        "Assuming opacity = pleural effusion without checking meniscus sign or angle",
+        "Ignoring mediastinal shift direction when inferring mass effect",
+        "Relying solely on top findings from classifier without morphologic validation"
+      ],
+      "source_trace_ids": [
+        "10698_8353800724943"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "correct",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S007",
+      "task_types": [
+        "localization",
+        "characterization"
+      ],
+      "trigger": "The question asks to identify a finding indicating recurrence in a specific anatomical region (right subclavicular fossa), and the model must distinguish between plausible findings (e.g., mass vs. effusion) and localize them precisely.",
+      "required_information": [
+        "Presence/absence of a mass in the right subclavicular fossa",
+        "Spatial relationship of any mass to the subclavicular region",
+        "Presence of calcifications or other morphological features relevant to ganglioneuroblastoma recurrence"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "visual_localization"
+      ],
+      "actions": [
+        {
+          "action_id": "A1",
+          "operation": "Run chest_xray_classifier to detect high-probability findings (e.g., 'Mass', 'Lung Opacity')",
+          "capability": "chest_xray_vqa"
+        },
+        {
+          "action_id": "A2",
+          "operation": "Use xray_phrase_grounding with phrase 'right subclavicular mass' to localize candidate regions",
+          "capability": "visual_localization"
+        },
+        {
+          "action_id": "A3",
+          "operation": "Use xray_phrase_grounding with phrase 'paravertebral mass' to rule out non-target locations",
+          "capability": "visual_localization"
+        }
+      ],
+      "checkpoints": [
+        "Classifier returns 'Mass' with score > 0.7",
+        "Phrase grounding for 'right subclavicular mass' yields a non-empty bounding box within expected anatomical region (upper thorax, medial to clavicle)",
+        "Phrase grounding for 'paravertebral mass' yields a box outside subclavicular region (e.g., near spine, lower thorax)"
+      ],
+      "fallbacks": [
+        {
+          "when": "No bounding box returned for 'right subclavicular mass'",
+          "operation": "Re-query grounding with synonyms: 'right supraclavicular mass', 'right apical mass'"
+        },
+        {
+          "when": "Classifier score for 'Mass' < 0.6",
+          "operation": "Run chest_xray_report_generator to check for textual mention of mass or opacity in impression"
+        }
+      ],
+      "stop_conditions": [
+        "A localized mass is confirmed in the right subclavicular fossa",
+        "All candidate phrases have been grounded and none match the target region",
+        "Report explicitly states 'no evidence of mass'"
+      ],
+      "avoid": [
+        "Assuming 'mass' implies recurrence without anatomical localization",
+        "Confusing paravertebral with subclavicular location",
+        "Using report text alone without verifying spatial correspondence"
+      ],
+      "source_trace_ids": [
+        "10822_8353800724955"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "correct",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S008",
+      "task_types": [
+        "characterization",
+        "localization"
+      ],
+      "trigger": "The question asks for radiographic features supporting a specific diagnosis (bronchial atresia), and the initial classifier returns high-probability findings (e.g., mass, nodule) that are ambiguous without spatial context or morphological descriptors.",
+      "required_information": [
+        "Presence and shape of opacity (e.g., tubular, nodular, round)",
+        "Location relative to hilum and lung zone",
+        "Associated parenchymal changes (e.g., hyperlucency)",
+        "Vascular markings in surrounding lung"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "visual_localization",
+        "report_generation"
+      ],
+      "actions": [
+        {
+          "action_id": 1,
+          "operation": "Run chest_xray_classifier to identify top differential findings (e.g., mass, nodule, emphysema).",
+          "capability": "image_classification"
+        },
+        {
+          "action_id": 2,
+          "operation": "Generate structured radiology report to extract descriptive phrases (e.g., 'hyperlucent lung', 'tubular opacity').",
+          "capability": "report_generation"
+        },
+        {
+          "action_id": 3,
+          "operation": "Ground key descriptive phrases (e.g., 'hyperlucent lung', 'tubular opacity') to image regions using phrase grounding.",
+          "capability": "visual_localization"
+        }
+      ],
+      "checkpoints": [
+        "Classifier output includes findings relevant to bronchial atresia (e.g., nodule/mass + emphysema-like hyperlucency).",
+        "Report contains spatially informative descriptors (e.g., 'tubular opacity in right lower lung field', 'hyperlucent lung').",
+        "Phrase grounding successfully maps descriptors to image regions (non-empty grounded_regions)."
+      ],
+      "fallbacks": [
+        {
+          "when": "Phrase grounding returns no regions (e.g., trace 4)",
+          "operation": "Re-run grounding with alternative phrasing (e.g., 'area of increased lucency' instead of 'hyperlucent lung') or use segmentation_or_measurement to manually isolate suspicious region."
+        },
+        {
+          "when": "Report lacks key descriptors (e.g., no mention of vascular markings or hilum relation)",
+          "operation": "Query chest_xray_expert with targeted prompt: 'Describe the opacity’s shape, relation to hilum, and surrounding lung texture/vasculature.'"
+        }
+      ],
+      "stop_conditions": [
+        "At least two spatially grounded descriptors matching classic bronchial atresia features (e.g., tubular/nodular opacity from hilum + distal hyperlucency with reduced vascularity) are confirmed."
+      ],
+      "avoid": [
+        "Relying solely on classifier scores without spatial or morphological context",
+        "Accepting grounded regions without verifying alignment with clinical expectations (e.g., hyperlucency should be distal to opacity in bronchial atresia)",
+        "Stopping after report generation if report is incomplete or generic (e.g., 'lungs are clear')"
+      ],
+      "source_trace_ids": [
+        "10974_8353800724898"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "correct",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S009",
+      "task_types": [
+        "diagnosis",
+        "characterization"
+      ],
+      "trigger": "Chest X-ray shows unilateral hyperlucency and reduced lung size, but automated report states 'no acute cardiopulmonary process' and classifier gives low scores for major pathologies",
+      "required_information": [
+        "Unilateral lung hyperlucency with volume loss",
+        "Absence of pneumothorax/effusion on report",
+        "Low-confidence findings from classifier (e.g., infiltration <0.36)",
+        "Normal cardiomediastinal silhouette and pleural surfaces"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "report_generation",
+        "image_classification"
+      ],
+      "actions": [
+        {
+          "action_id": "a1",
+          "operation": "Run chest_xray_classifier to obtain quantitative likelihoods of common findings",
+          "capability": "image_classification"
+        },
+        {
+          "action_id": "a2",
+          "operation": "Generate structured radiology report to confirm absence of acute pathology",
+          "capability": "report_generation"
+        },
+        {
+          "action_id": "a3",
+          "operation": "Use chest_xray_vqa to query whether vascular markings are reduced in the hyperlucent lung",
+          "capability": "chest_xray_vqa"
+        }
+      ],
+      "checkpoints": [
+        "Classifier scores for all findings <0.4 → suggests non-acute or chronic process",
+        "Report explicitly rules out pneumothorax, effusion, edema",
+        "Vascular marking reduction confirmed → supports Swyer-James-McLeod over emphysema or technical artifact"
+      ],
+      "fallbacks": [
+        {
+          "when": "Classifier scores are ambiguous (e.g., infiltration >0.4) or report is inconclusive",
+          "operation": "Request image_display_or_crop of left hemithorax to visually assess lung volume, vascular tapering, and fissure position"
+        }
+      ],
+      "stop_conditions": [
+        "Unilateral hyperlucency + volume loss + reduced vascularity + no acute findings → favors chronic obstructive bronchiolitis (Swyer-James)",
+        "Alternative explanation (e.g., post-mastectomy changes) ruled out by clinical history or wall contour assessment"
+      ],
+      "avoid": [
+        "Assuming hyperlucency always implies air (e.g., pneumothorax or emphysema) without checking volume and vascularity",
+        "Accepting automated report at face value without cross-checking with classifier outputs",
+        "Ignoring low-scoring but contextually relevant findings (e.g., fibrosis score 0.256 may hint at prior infection)"
+      ],
+      "source_trace_ids": [
+        "10994_8353800725018"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "correct",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S010",
+      "task_types": [
+        "diagnosis",
+        "characterization"
+      ],
+      "trigger": "The chest X-ray shows a homogeneous opacity lateral to the trachea, and the agent receives conflicting or incomplete characterization (e.g., 'well-defined borders' but no localization relative to mediastinal structures)",
+      "required_information": [
+        "Precise anatomic location of the opacity relative to midline structures (e.g., trachea, aortic arch, carina)",
+        "Interface characteristics (e.g., sharp vs. ill-defined, posterior vs. anterior)",
+        "Presence/absence of mass effect on adjacent structures (e.g., mediastinal shift, tracheal displacement)",
+        "Clinical context (e.g., age, symptoms) — though not available in this trace"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "visual_localization",
+        "biomedical_vqa"
+      ],
+      "actions": [
+        {
+          "action_id": "A1",
+          "operation": "Use visual localization to identify the opacity’s position relative to the trachea and assess if it lies anterior, posterior, or lateral—and whether it crosses the midline",
+          "capability": "visual_localization"
+        },
+        {
+          "action_id": "A2",
+          "operation": "Query chest X-ray expert with specific anatomical framing: 'Is the opacity anterior or posterior to the trachea? Does it displace the trachea or mediastinal line?'",
+          "capability": "chest_xray_vqa"
+        },
+        {
+          "action_id": "A3",
+          "operation": "If localization is ambiguous, request a lateral view or CT correlation (simulated via biomedical VQA: 'What imaging feature distinguishes bronchogenic cyst from thymoma on CXR?')",
+          "capability": "biomedical_vqa"
+        }
+      ],
+      "checkpoints": [
+        "Opacity is confirmed lateral *and* posterior to trachea → supports bronchogenic cyst (cervicothoracic sign)",
+        "Opacity displaces trachea medially or causes mediastinal shift → favors thyroid mass or teratoma",
+        "Well-defined border alone is insufficient; must be combined with location to narrow diagnosis"
+      ],
+      "fallbacks": [
+        {
+          "when": "xray_phrase_grounding returns no boxes (as in trace step 4)",
+          "operation": "Fall back to explicit spatial reasoning using report text + standard CXR anatomy: e.g., 'lateral to trachea' in supine AP view usually implies anterior mediastinum unless specified as posterior"
+        },
+        {
+          "when": "Expert response is noncommittal (e.g., 'further evaluation needed')",
+          "operation": "Re-query with binary choice: 'Is the mass more likely anterior or posterior based on silhouette sign?'"
+        }
+      ],
+      "stop_conditions": [
+        "Anatomic localization (anterior/posterior/midline) and interface characteristics are jointly established",
+        "At least one classic radiographic sign (e.g., cervicothoracic sign, silhouette sign) is identified and mapped to a differential"
+      ],
+      "avoid": [
+        "Relying solely on border definition (well-defined ≠ benign or specific diagnosis)",
+        "Assuming 'lateral to trachea' implies posterior without confirming projection (AP vs. lateral view)",
+        "Ignoring the need for spatial relationship reasoning beyond phrase grounding"
+      ],
+      "source_trace_ids": [
+        "1025_8353802159498"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "incorrect",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S011",
+      "task_types": [
+        "localization",
+        "characterization"
+      ],
+      "trigger": "The agent receives conflicting or incomplete localization/characterization from multiple tools (e.g., report_generator says 'left upper lobe nodular opacity', expert says 'left hilar opacity, right paratracheal opacity', phrase_grounding gives only one box, and VQA adds 'smooth margins, low density' without confirming lobe or anterior/posterior position)",
+      "required_information": [
+        "Anatomical lobe assignment for each opacity (e.g., left upper vs lower lobe)",
+        "Anterior/posterior depth (e.g., based on silhouette sign or lateral view inference)",
+        "Margin morphology (smooth, spiculated, irregular)",
+        "Density relative to surrounding lung (e.g., air-containing vs solid)",
+        "Correlation between reported location phrases and actual image regions"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "visual_localization",
+        "report_generation"
+      ],
+      "actions": [
+        {
+          "action_id": "A1",
+          "operation": "Use chest_xray_expert to list all opacities with anatomical descriptors (e.g., 'left hilar', 'right paratracheal') and request lobe-level mapping using standard radiographic landmarks (e.g., aortic knob, carina, diaphragm contour).",
+          "capability": "chest_xray_vqa"
+        },
+        {
+          "action_id": "A2",
+          "operation": "Run xray_phrase_grounding on *each* opacity phrase separately (e.g., 'left hilar opacity', 'right paratracheal opacity') to obtain normalized bounding boxes; verify overlap with expected lobar anatomy using known mediastinal landmarks.",
+          "capability": "visual_localization"
+        },
+        {
+          "action_id": "A3",
+          "operation": "Query llava_med_qa with a structured prompt: 'For the opacity in [region], is it anterior or posterior? Which lobe does it occupy? Describe margin and density. Justify using silhouette signs or adjacent structures.'",
+          "capability": "chest_xray_vqa"
+        }
+      ],
+      "checkpoints": [
+        "All opacities have assigned lobes (not just 'hilar' or 'paratracheal')",
+        "Anterior/posterior assignment is justified by anatomical reasoning (e.g., obscuring of aortic knob → anterior; obscuring of spine → posterior)",
+        "Margin and density descriptors are consistent across tools or explicitly reconciled",
+        "No ungrounded assertions (e.g., 'suggests malignancy') are used before localization is confirmed"
+      ],
+      "fallbacks": [
+        {
+          "when": "Phrase grounding returns only one region but expert mentions two opacities",
+          "operation": "Re-run xray_phrase_grounding with explicit separation: 'left hilar opacity' AND 'right paratracheal opacity' as two distinct queries."
+        },
+        {
+          "when": "VQA gives conflicting lobe assignment (e.g., 'left upper lobe' vs 'left lower lobe')",
+          "operation": "Request side-by-side comparison: 'Compare the location of the left opacity relative to the left main bronchus and left upper lobe bronchus on the PA view.'"
+        }
+      ],
+      "stop_conditions": [
+        "Each opacity has unambiguous lobe + depth + margin + density characterization supported by at least two independent tool outputs",
+        "All clinical implications (e.g., benign vs malignant) are deferred until characterization is complete"
+      ],
+      "avoid": [
+        "Assuming 'hilar' = 'upper lobe' without verification",
+        "Using report_generator's 'nodular opacity' to infer smooth margins without visual confirmation",
+        "Accepting a single VQA answer as definitive when other tools contradict lobar assignment",
+        "Skipping anterior/posterior determination despite its critical role in differential diagnosis"
+      ],
+      "source_trace_ids": [
+        "10416_8353800828856"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "incorrect",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S012",
+      "task_types": [
+        "diagnosis",
+        "characterization"
+      ],
+      "trigger": "Near-complete opacification of one hemithorax on post-op chest X-ray within 24 hours of lobectomy, with chest tube in place and reported volume loss",
+      "required_information": [
+        "Presence/absence of air bronchograms",
+        "Position and function of chest tube (e.g., tip location, drainage status)",
+        "Evidence of mediastinal shift",
+        "Subcutaneous emphysema distribution",
+        "Remaining lung volume and texture (e.g., hyperlucency vs. homogeneous opacity)",
+        "Timing relative to surgery"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "image_display_or_crop",
+        "report_generation"
+      ],
+      "actions": [
+        {
+          "action_id": "a1",
+          "operation": "Use chest_xray_vqa to query: 'Is there an air bronchogram in the left hemithorax?'",
+          "capability": "chest_xray_vqa"
+        },
+        {
+          "action_id": "a2",
+          "operation": "Use image_display_or_crop to zoom on left hemithorax and assess mediastinal shift and chest tube tip position relative to lung fields",
+          "capability": "image_display_or_crop"
+        },
+        {
+          "action_id": "a3",
+          "operation": "Use chest_xray_vqa to query: 'Is the left upper lobe collapsed or consolidated? Describe texture and volume'",
+          "capability": "chest_xray_vqa"
+        }
+      ],
+      "checkpoints": [
+        "Air bronchograms present → suggests consolidation (e.g., pneumonia, edema); absent → suggests atelectasis or effusion",
+        "Mediastinal shift toward left → supports atelectasis; away from left → suggests large effusion or tension pneumothorax",
+        "Chest tube tip in apex but no drainage → possible malposition or obstruction; if tube is functional and opacity persists, favors atelectasis over effusion",
+        "Volume loss + homogeneous opacity without air bronchograms → classic for post-op atelectasis"
+      ],
+      "fallbacks": [
+        {
+          "when": "Report generator omits key descriptors (e.g., air bronchograms, mediastinal shift)",
+          "operation": "Re-run chest_xray_vqa with explicit structured queries about those features"
+        },
+        {
+          "when": "Image display shows poor contrast or motion artifact obscuring left hemithorax",
+          "operation": "Request higher-resolution DICOM if available (but not in capability list, so fallback is to prioritize VQA over visual inspection)"
+        }
+      ],
+      "stop_conditions": [
+        "Air bronchograms absent + mediastinal shift toward left + chest tube in place + recent lobectomy → high confidence for atelectasis",
+        "Air bronchograms present + no shift + homogeneous opacity → consider pneumonia or edema",
+        "Mediastinal shift away + meniscus sign visible → pleural effusion"
+      ],
+      "avoid": [
+        "Relying solely on top findings from classifier (e.g., 'Mass' score 0.7033 is misleading here — no mass present)",
+        "Ignoring temporal context (12h post-lobectomy strongly favors atelectasis)",
+        "Assuming opacity = effusion without checking for air bronchograms or mediastinal shift"
+      ],
+      "source_trace_ids": [
+        "10494_8353800840205"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "incorrect",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S013",
+      "task_types": [
+        "detection",
+        "comparison",
+        "characterization"
+      ],
+      "trigger": "The chest X-ray classifier returns high scores for non-hilar findings (e.g., pneumonia, lung opacity), while the expert report explicitly states hilar contours are normal—but phrase grounding outputs bounding boxes labeled 'hilar enlargement' without clinical validation.",
+      "required_information": [
+        "Whether hilar opacifications are present",
+        "Whether they are bilateral or unilateral",
+        "Relative size asymmetry between left and right hila",
+        "Whether observed regions correspond to true anatomical hilar structures"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "visual_localization",
+        "segmentation_or_measurement"
+      ],
+      "actions": [
+        {
+          "action_id": 1,
+          "operation": "Use visual localization to identify hilar regions using anatomical landmarks (e.g., bronchovascular bundles at carina level) rather than relying on model-generated phrase-grounding boxes.",
+          "capability": "visual_localization"
+        },
+        {
+          "action_id": 2,
+          "operation": "Perform segmentation or measurement of hilar regions to quantify size and compare left vs. right (e.g., maximal transverse diameter).",
+          "capability": "segmentation_or_measurement"
+        },
+        {
+          "action_id": 3,
+          "operation": "Cross-validate with expert radiology interpretation (e.g., structured report or VQA) before accepting model-generated phrases as evidence.",
+          "capability": "chest_xray_vqa"
+        }
+      ],
+      "checkpoints": [
+        "Are the localized regions anatomically consistent with hila (i.e., near carina, medial to lungs, overlapping pulmonary arteries)?",
+        "Do measurements show statistically significant asymmetry (>10–15% difference in diameter)?",
+        "Does the expert report contradict the phrase-grounding output? If yes, prioritize expert assessment."
+      ],
+      "fallbacks": [
+        {
+          "when": "Phrase grounding produces boxes labeled 'hilar enlargement' but expert says 'normal hilar contours'",
+          "operation": "Reject phrase-grounding output as hallucinated; re-localize using anatomical priors and confirm with measurement."
+        },
+        {
+          "when": "Classifier scores suggest pathology but expert report denies it",
+          "operation": "Prioritize expert report over classifier when findings are conflicting and classifier lacks specificity for hilar structures."
+        }
+      ],
+      "stop_conditions": [
+        "Hilar asymmetry confirmed by measurement and expert consensus",
+        "Hilar normalcy confirmed by expert and anatomical localization",
+        "No reliable evidence of hilar opacification after cross-validation"
+      ],
+      "avoid": [
+        "Treating model-generated phrase-grounding boxes as diagnostic truth without anatomical verification",
+        "Relying on classification scores for findings that require spatial reasoning (e.g., asymmetry)",
+        "Ignoring expert report when it directly contradicts model outputs"
+      ],
+      "source_trace_ids": [
+        "10508_8353800725099"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "incorrect",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S014",
+      "task_types": [
+        "diagnosis",
+        "characterization"
+      ],
+      "trigger": "The chest_xray_classifier returns borderline scores for emphysema, fibrosis, and nodule (all ~0.51–0.53), and the report_generator yields a generic impression (e.g., 'mild pulmonary edema') that does not address structural asymmetry or vascular patterns critical for diagnosing Swyer-James-MacLeod Syndrome.",
+      "required_information": [
+        "Relative size of pulmonary hila (left vs. right)",
+        "Asymmetry in lung vascular markings (especially reduced vascularity on one side)",
+        "Lung volume discrepancy (hyperlucent, hypovascular, small-hilum side)",
+        "Absence of alternative explanations (e.g., prior resection, chronic collapse)"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "image_display_or_crop",
+        "segmentation_or_measurement",
+        "biomedical_vqa"
+      ],
+      "actions": [
+        {
+          "action_id": "a1",
+          "operation": "Use chest_xray_vqa to query: 'Is there asymmetry in pulmonary hilum size? If so, which side is smaller?'",
+          "capability": "chest_xray_vqa"
+        },
+        {
+          "action_id": "a2",
+          "operation": "Use image_display_or_crop to isolate left and right lung zones; visually compare vascular density and hilum size using side-by-side display.",
+          "capability": "image_display_or_crop"
+        },
+        {
+          "action_id": "a3",
+          "operation": "Use segmentation_or_measurement to estimate relative hilar cross-sectional area and vascular branch count per lung zone.",
+          "capability": "segmentation_or_measurement"
+        },
+        {
+          "action_id": "a4",
+          "operation": "Use biomedical_vqa to confirm: 'In Swyer-James-MacLeod syndrome, which lung side typically shows decreased hilum size and reduced vascular markings?'",
+          "capability": "biomedical_vqa"
+        }
+      ],
+      "checkpoints": [
+        "a1 returns a definitive left/right hilum size comparison (not 'uncertain' or missing)",
+        "a2 produces a side-by-side visual where vascular tapering or paucity is evident on one side",
+        "a3 yields quantitative asymmetry (e.g., >20% difference in hilar area or vessel count)",
+        "a4 confirms expected radiographic pattern (ipsilateral small hilum + oligemia)"
+      ],
+      "fallbacks": [
+        {
+          "when": "a1 returns ambiguous or no answer",
+          "operation": "Run chest_xray_vqa with more specific prompt: 'Measure the diameter of the right and left pulmonary arteries at the hilum on the X-ray.'"
+        },
+        {
+          "when": "a2 fails to show clear asymmetry visually",
+          "operation": "Apply contrast enhancement or edge-detection filter via image_display_or_crop before re-evaluating."
+        }
+      ],
+      "stop_conditions": [
+        "All four checkpoints are satisfied",
+        "A definitive diagnosis-relevant asymmetry pattern is confirmed (small hilum + reduced vasculature on one side)",
+        "Alternative diagnoses (e.g., post-pneumonectomy, chronic atelectasis) are ruled out via clinical context or additional VQA"
+      ],
+      "avoid": [
+        "Relying solely on classifier top-findings when scores are near threshold (~0.5)",
+        "Accepting a generic radiology impression (e.g., 'mild edema') without verifying structural features",
+        "Skipping direct visual comparison of bilateral hilar/vascular anatomy"
+      ],
+      "source_trace_ids": [
+        "10966_8353800724625"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "incorrect",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S015",
+      "task_types": [
+        "localization",
+        "characterization"
+      ],
+      "trigger": "The agent receives a chest X-ray classification output listing 'Nodule' with low confidence (0.5051) and is asked to characterize a specific lesion ('right basal mass') without first verifying its visual presence or boundaries in the image.",
+      "required_information": [
+        "Precise spatial location of the 'right basal mass' on the X-ray",
+        "Morphological features of the lesion (margin, density, calcification, contour)",
+        "Correlation between automated detection and human-verified region"
+      ],
+      "required_capabilities": [
+        "visual_localization",
+        "chest_xray_vqa"
+      ],
+      "actions": [
+        {
+          "action_id": "a1",
+          "operation": "Use xray_phrase_grounding to extract normalized bounding box for 'right basal mass'",
+          "capability": "visual_localization"
+        },
+        {
+          "action_id": "a2",
+          "operation": "Crop and display the grounded region (e.g., using image_display_or_crop) for visual inspection of margins, density, and calcification",
+          "capability": "image_display_or_crop"
+        },
+        {
+          "action_id": "a3",
+          "operation": "Query chest_xray_vqa with focused question: 'Is the right basal mass sharply demarcated, calcified, or irregularly margined?'",
+          "capability": "chest_xray_vqa"
+        }
+      ],
+      "checkpoints": [
+        "Grounded box lies within right lung base (not mediastinum or diaphragm artifact)",
+        "Cropped image shows a discrete opacity—not just atelectasis or pleural thickening",
+        "VQA response confirms presence/absence of calcification and margin definition"
+      ],
+      "fallbacks": [
+        {
+          "when": "xray_phrase_grounding returns low-confidence or implausible coordinates (e.g., outside lung fields)",
+          "operation": "Re-run phrase grounding with alternative phrasing: 'mass in right lower zone' or 'right basilar opacity'"
+        },
+        {
+          "when": "Cropped region is ambiguous (e.g., overlaps cardiac silhouette or diaphragm)",
+          "operation": "Request lateral view or compare with prior imaging if available (not in current capabilities; log as limitation)"
+        }
+      ],
+      "stop_conditions": [
+        "Morphological descriptors (margin, calcification, density) are confirmed via visual inspection + VQA",
+        "Lesion is ruled out as artifact or normal variant (e.g., nipple shadow, vessel)"
+      ],
+      "avoid": [
+        "Accepting low-confidence classifier output ('Nodule', 0.5051) as definitive evidence of a mass",
+        "Characterizing without visual verification of the lesion’s appearance",
+        "Assuming clinical correlation (e.g., venous anomaly) explains radiographic finding without imaging confirmation"
+      ],
+      "source_trace_ids": [
+        "11099_8353800736117"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "incorrect",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S016",
+      "task_types": [
+        "relationship",
+        "diagnosis"
+      ],
+      "trigger": "The agent receives conflicting or incomplete evidence about mediastinal shift cause: classifier reports lung opacity/mass/fibrosis, report generator states 'no focal consolidation/pleural effusion/pneumothorax', expert only outputs 'Mediastinal shift', and phrase grounding localizes 'Atelectasis of the right middle lobe'—but no integration occurs to infer volume loss vs. hyperexpansion.",
+      "required_information": [
+        "Laterality of volume loss (e.g., atelectasis/collapse) or hyperexpansion",
+        "Presence/absence of compensatory expansion in contralateral lung",
+        "Cardiac position (dextrocardia vs. levocardia)",
+        "Evidence for mass effect vs. parenchymal disease"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "biomedical_vqa",
+        "visual_localization"
+      ],
+      "actions": [
+        {
+          "action_id": "a1",
+          "operation": "Use visual_localization to ground phrases like 'atelectasis', 'hyperexpansion', 'mediastinal shift' with bounding boxes and side-specific coordinates",
+          "capability": "visual_localization"
+        },
+        {
+          "action_id": "a2",
+          "operation": "Query chest_xray_vqa with structured prompt: 'Is there volume loss in the right hemithorax? Is the left lung hyperexpanded? Is the heart on the left/right side?'",
+          "capability": "chest_xray_vqa"
+        },
+        {
+          "action_id": "a3",
+          "operation": "Use biomedical_vqa to reason: 'Given right middle lobe atelectasis, does this cause ipsilateral or contralateral mediastinal shift? What are typical compensatory changes?'",
+          "capability": "biomedical_vqa"
+        }
+      ],
+      "checkpoints": [
+        "Grounded region for atelectasis is in right middle lobe AND shows reduced volume (e.g., crowding of vessels, fissure displacement)",
+        "Contralateral lung shows increased lucency or rib spacing indicating hyperexpansion",
+        "Cardiac silhouette is left-sided (ruling out dextrocardia)",
+        "No mass or pleural effusion confirmed by both report and localization"
+      ],
+      "fallbacks": [
+        {
+          "when": "Phrase grounding returns only one finding (e.g., only atelectasis) without side confirmation",
+          "operation": "Run chest_xray_vqa with explicit laterality query: 'Which lung shows reduced volume?'"
+        },
+        {
+          "when": "Report generator contradicts classifier (e.g., 'no focal consolidation' vs. 'lung opacity' score >0.75)",
+          "operation": "Request segmentation_or_measurement of opacity extent and density to resolve discrepancy"
+        }
+      ],
+      "stop_conditions": [
+        "All required information is confirmed with consistent evidence across tools",
+        "Contradictory evidence persists after two fallback attempts"
+      ],
+      "avoid": [
+        "Accepting a single tool’s output (e.g., expert saying 'Mediastinal shift') without causal reasoning",
+        "Ignoring laterality in phrase grounding (e.g., not verifying 'right middle lobe' is indeed right-sided)",
+        "Assuming mass causes shift without ruling out volume loss first"
+      ],
+      "source_trace_ids": [
+        "11167_8353800750732"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "incorrect",
+      "skill_version": "v0"
+    },
+    {
+      "skill_id": "S017",
+      "task_types": [
+        "diagnosis",
+        "characterization"
+      ],
+      "trigger": "The chest X-ray classifier returns high scores for both 'Mass' (0.78) and 'Emphysema' (0.52), while the expert model outputs 'Giant bulla', but the independent task outcome is incorrect — suggesting misalignment between visual findings, clinical context (COPD + bullous emphysema), and diagnostic reasoning.",
+      "required_information": [
+        "Presence/absence of pleural line or visceral pleural edge indicating pneumothorax",
+        "Size and wall characteristics of lucent area (thin-walled vs thick-walled)",
+        "Mediastinal shift or lung collapse suggestive of tension physiology",
+        "Location relative to known bullous disease",
+        "Clinical signs of acute respiratory decompensation"
+      ],
+      "required_capabilities": [
+        "chest_xray_vqa",
+        "visual_localization",
+        "biomedical_vqa"
+      ],
+      "actions": [
+        {
+          "action_id": "A1",
+          "operation": "Use chest_xray_vqa to query: 'Is there a visible visceral pleural line separating a lucent area from lung parenchyma?'",
+          "capability": "chest_xray_vqa"
+        },
+        {
+          "action_id": "A2",
+          "operation": "Use visual_localization to ground phrases like 'large lucency without lung markings' and 'thin-walled cystic lesion' and compare bounding boxes with known bulla locations in prior imaging if available",
+          "capability": "visual_localization"
+        },
+        {
+          "action_id": "A3",
+          "operation": "Use biomedical_vqa to assess: 'Given COPD with bullous emphysema, does the lucent area show features more consistent with giant bulla (thin-walled, no pleural line) vs tension pneumothorax (mediastinal shift, contralateral hyperinflation, absent lung markings beyond visceral pleura)?'",
+          "capability": "biomedical_vqa"
+        }
+      ],
+      "checkpoints": [
+        "A1 output confirms or rules out pleural line → distinguishes bulla from pneumothorax",
+        "A2 grounding shows overlap with known bullous regions or displacement of mediastinum",
+        "A3 reasoning integrates clinical context (e.g., acute vs chronic presentation) and imaging features"
+      ],
+      "fallbacks": [
+        {
+          "when": "A1 is inconclusive due to poor image quality or portable view limitations",
+          "operation": "Request side-by-side comparison with prior chest X-ray (if available) using chest_xray_vqa to detect interval change in lucency size or mediastinal position"
+        },
+        {
+          "when": "Expert model outputs diagnosis without justification (as in trace step 3)",
+          "operation": "Reject ungrounded diagnosis; require visual localization + VQA validation before accepting"
+        }
+      ],
+      "stop_conditions": [
+        "Pleural line confirmed + mediastinal shift present → favors tension pneumothorax",
+        "Thin-walled lucency without pleural line, no mediastinal shift, matches prior bullae → favors giant bulla",
+        "Contradictory evidence persists after two fallback attempts → escalate to human review"
+      ],
+      "avoid": [
+        "Accepting a diagnosis from an expert model without verifying grounding or clinical plausibility",
+        "Ignoring the high 'Mass' score when it may reflect a collapsed lung or artifact rather than true mass",
+        "Failing to differentiate giant bulla (chronic, thin-walled) from tension bulla (rare, acute, compressive)"
+      ],
+      "source_trace_ids": [
+        "11239_8353800736225"
+      ],
+      "evidence_status": "unverified_clinical_contribution",
+      "step_credit": null,
+      "source_outcome": "incorrect",
+      "skill_version": "v0"
+    }
+  ]
+}

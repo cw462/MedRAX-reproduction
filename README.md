@@ -1,5 +1,7 @@
 # MedRAX reproduction and research extensions
 
+**Historical evidence completed (2026-10-31):** [历史实验总索引](reports/history/README.md) now connects the retained early runs, V4/V7, [V9](reports/v9/README.md), [V10](reports/v10/README.md) and [V11 full observable messages](reports/v11/traces/README.md). Start with [为什么连续几轮没有达到目标](reports/history/failure-synthesis.md) and the [same-60-question historical comparison](reports/history/cross-version-outcomes.md). This supplement publishes saved case inputs/images, actual model/tool messages where retained, frozen knowledge/experience assets and original plans. It also corrects V7 denominator mixing, distinguishes execution recovery from correction, and documents at least one prior input exposure in the fixed-60 selection. Missing early raw messages are explicitly marked rather than reconstructed. No new inference was run for publication. Older status paragraphs below are historical snapshots; the linked completion reports establish the actual completed scope.
+
 This repository contains independent evaluation adapters, data preparation utilities and an initial structured-memory module for [MedRAX](https://github.com/bowang-lab/MedRAX). The [V11 detailed review package](reports/v11/README.md) includes the selected public benchmark questions, options, relevant original and derived images, tool observations, model decisions and retrospective scoring, as explicitly requested for case-level error review. Credentials, model weights, unrelated private data and full raw execution logs are excluded. Published outcomes include answer information and are not suitable as a blind evaluation input.
 
 **Detailed failure review (2026-10-31):** [为什么 V11 没有达到目标](reports/v11/failure-analysis-2026-10-31.md) connects the completed scores to the actual decisions and images. In addition to corrections being offset by harmful changes, a specific parser defect was found: malformed outer JSON could preserve the selected option while silently losing observations and `needs_followup=true`. Two S1 cases consequently missed S2 follow-up. The original predictions and scores are preserved; this retrospective finding is not a rerun or a measured gain from fixing the parser. Start with the [case and evidence index](reports/v11/README.md).
@@ -60,7 +62,7 @@ The available ChestAgentBench metadata revision inspected was `921e60440927f9893
 - `experiments/`: real tool/Agent runners, budgeted paired diagnostics, offline scoring and output-cap follow-up; failures and invocation limits are logged.
 - `memory_core/`: frozen, structured-rule BM25 infrastructure with case exclusion and unknown evidence/credit.
 - `memory_pipeline/`: audited structured execution-trace ingestion and frozen retrieval preparation; no real success pool or Agent memory comparison has run.
-- `reports/`: reviewed aggregate observations and protocol limitations.
+- `reports/`: completed results, per-question inputs/images, saved observable execution records, historical comparisons and protocol limitations.
 - `third_party/`: upstream licensing notice.
 
 The adapter invokes the real upstream `initialize_agent` and its event stream, but has only been exercised with simulated objects. It assigns a separate thread to each question and uses one prompt; the authors' `experiments/benchmark_medrax.ipynb` retains one thread across a case's questions and uses a second letter-only request. This protocol difference must be reported rather than described as an exact reproduction. Tool status is not a medical correctness label.
@@ -87,7 +89,7 @@ Unit tests use fabricated inputs and simulated objects. Real GPU and provider ru
 python data_tools/prepare_splits.py /path/to/metadata.jsonl /path/to/new-output-directory --seed example-seed
 ```
 
-No dataset, output directory, weights, generated logs or credentials should be committed. Validate output permissions and data policies before real use.
+Only the explicitly authorized benchmark case/image and completed-experiment publication packages under `reports/` are committed. Credentials, model weights, unrelated private data and unrestricted raw run directories remain excluded. See [AGENTS.md](AGENTS.md) for the current publication scope and [historical completeness limits](reports/history/README.md).
 
 ## Next steps
 

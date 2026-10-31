@@ -1,5 +1,7 @@
 # V4 fixed validation set (S2)
 
+> **Historical exposure correction (2026-10-31):** Later retained-run comparison found that `13238_8353800603808` had already triggered model calls in `val30_r0_v1` and two early R1 attempts, all ending without a legal answer. It was absent from the later exclusion subset but included here. Thus any statement below that all selected inputs had never been used in development is too strong. The selection and original predictions remain unchanged; see [the source-linked historical review](history/early-experiments.md) and [this question's retained records](history/early/cases/13238_8353800603808.json).
+
 Status: built and verified on 2026-10-29. This is the case list the A/B/C/D/E
 comparison will use; it is fixed before any method result is produced.
 

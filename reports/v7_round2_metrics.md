@@ -1,5 +1,7 @@
 # V7 recovery: round 1 metrics
 
+> **2026-10-31 publication correction:** The title is a legacy scorer heading; this file accompanies the full `round2_verify` run. The old `accuracy` column below excludes missing answers despite the next sentence claiming planned-denominator scoring. Correct fixed-60 counts are P0/P1/PB/PC/GB/GC = **42/28/39/40/42/40**. [Corrected per-question supplement](history/early/v7-fixed-denominator.json) separately records legal harms and correct-to-missing failures. The original metric values remain below as historical output.
+
 Questions in file: 60; scored: 59. Denominator is every planned question, failures count as not correct.
 
 ## Accuracy by variant

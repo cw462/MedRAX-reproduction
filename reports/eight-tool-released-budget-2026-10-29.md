@@ -1,5 +1,7 @@
 # 8-tool validation comparison with the call budget released
 
+> **Retrospective causal clarification (2026-10-31):** The later run changed the tool/model/recursion limits and repaired a tool-return contract. The before/after comparison therefore cannot isolate budget as the sole cause; the absolute causal wording in Finding 1 below exceeds the evidence. Original scores are retained. See [retained configurations, failures and historical analysis](history/early-experiments.md).
+
 Date: 2026-10-29. Status: **single-seed development comparison on the 29 frozen
 validation questions; not a paper reproduction and not clinical validation.**
 
