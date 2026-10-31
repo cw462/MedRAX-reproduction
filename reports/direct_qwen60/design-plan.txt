@@ -1,0 +1,192 @@
+MedRAX：无工具直接作答对照实验｜Codex 执行计划
+日期：2026-10-31
+仓库：https://github.com/cw462/MedRAX-reproduction
+制定本计划时核对的远端 HEAD：5594a29e8a9ad7c253b50addb9fef23998909e7e
+
+请 Codex 按本计划实现并运行，不只回复方案。在有现成模型凭据和数据的实验机器执行；先完成 D0 全部 60 题，再统一评分并发布报告。正常实现、首批成功后的续跑和结果发布无需反复询问。遇到真实的数据、认证或既有预算阻塞时，报告具体阻塞和已完成部分，不擅自换模型或扩大预算。
+
+一、这轮只新增什么
+
+新增 D0：qwen3-vl-plus 无工具直接作答，固定当前同一批 60 题，每题独立会话，一次多图模型调用，输出选项和短依据。
+复用已有结果：V10 P0、V12 共享首答、V12-A、V12-B，以及 A/B 的取证后候选和最终答案。
+暂停扩跑当前 B；不重跑上述旧组，不修改旧预测。本轮默认不跑另一视觉模型 D1，也不增加裁决器、投票、知识检索或新工具。
+
+本轮要回答：
+1. 简洁直接作答相对复杂结构化首读，是否保住更多正确答案？
+2. 后续补证和最终作答分别救回或损失了哪些题？
+3. 下一轮应优先改首读、取证还是最终决策？
+
+这是定位提分方向的对照，结果未知，不能预设 D0 一定更好。D0 只作为对照或后续候选来源，研究主线仍是同模型下的医疗 Agent 改进。
+
+二、输入与现有代码复用
+
+优先使用实验服务器现有文件：
+- 题目：runs/v4_validation60/inputs.jsonl
+- 原图根目录：data/memory_v1/images
+- V12 缓存：runs/v12_ab60/initial_results.jsonl、branch_results.jsonl
+- P0 缓存：runs/v10_accuracy60
+
+公开仓库的备用入口：
+- 固定清单：reports/v12/results/selection.json（顶层 rows）
+- V12 评分：reports/v12/results/per_question.json（顶层 records）
+- P0 评分：reports/v10/per-question-outcomes.json
+- V12 请求和回复：reports/v12/results/traces/
+- 配置：reports/v12/results/effective_config.json
+
+生成输入采用显式白名单：question_id、question、images。原始题干和完整选项保持不变；相关原图全部提供，顺序、字节、图号和图像 detail 设置与 V12 首读对齐。图像标识只从原始文件映射得到，时点只使用题干明确提供的信息。不要把旧模型推断的病变、时点或图像类型补进 D0。
+优先复用已有无标签输入；若需从公开 selection 重建，仅映射上述三字段并解析原图路径。不要把 case 报告或逐题评分对象整体放入请求，它们含标准答案、解析和旧预测。
+
+可复用接口：
+- experiments/v12_evidence.py：question_parts、build_images、multimodal_content
+- experiments/provider_profile.py：get_profile
+- experiments/provider_ledger.py：ProviderLedger
+- experiments/memory_agent_eval.py：BudgetedModel（仅复用轻量请求/计费能力）
+- experiments/run_v10_accuracy.py：fixed_sixty（要求输入严格只有三字段）
+- experiments/v12_metrics.py：paired（核对所需转换口径后复用）
+
+关键实现要求：不要用 args.tools=[] 调用 memory_agent_eval.build_runtime()。现有实现把空列表解释为启用 DEFAULT_TOOLS。D0 应直接构造模型客户端，不创建 Agent、Retriever、工具实例，不 bind_tools，不发送工具 schema。图像读取、编码和日志写入是普通预处理，不属于医学工具调用。
+
+三、固定 D0 配置与提示
+
+沿用 V12：
+- model：qwen3-vl-plus
+- temperature：0.2
+- top_p：0.95
+- max_output_tokens：2048
+- request_timeout_seconds：120
+- SDK max_retries：0，由 runner 显式控制技术重试
+- 图像：全部相关原图；不新增裁剪、增强或工具派生图
+- 每题：一次独立多图请求，其他题的历史消息不带入
+- tools / retrieval / memory / judge：全部关闭
+
+保留 2048 输出上限是为了避免同时改变提示和截断条件；提示要求短答，不要求模型用满上限。继承现有供应商模式和请求选项，不顺带切换 reasoning/thinking 设置。
+
+固定英文 system 提示如下，不根据某题是否答错修改：
+
+You answer medical image multiple-choice questions. Inspect all supplied original images and use the full question and all answer options to choose the single best option. Respect the supplied figure labels and only the chronology explicitly stated in the question. Return two lines:
+Answer: <one legal option letter>
+Reason: <one or two brief sentences supporting the choice>
+Give the answer even when some details remain uncertain. Do not output a long reasoning trace.
+
+user 内容：原题干和全部选项，以及与 V12 一致的图像标识和原图像素。所有图像在同一请求中发送；不把图像拆成逐张问答。不得加入标准答案、参考解释、旧首答、P0 答案、历史报告、知识卡或经验卡。
+
+输出解析：
+- 优先从单独的 Answer: 行提取一个合法选项，允许空白、大小写和简单 Markdown 包裹。
+- 兼容回复全文只有一个合法字母的情况。
+- 若多个明确答案字段互相冲突，或答案非法，记 invalid_answer。
+- 不从 Reason 中出现的字母猜答案，不用另一个模型修复答案。
+- 选项合法但缺少短依据，仍保留有效选项，另记 reason_missing。
+- 原始回复原样保存；不能因答案错误或依据不满意重新生成择优。
+
+四、最小实现与运行顺序
+
+建议新增：
+1. experiments/run_direct_vlm.py：无工具请求、结果落盘、技术重试和断点续跑。
+2. experiments/compare_direct_vlm.py：生成完成后统一评分和逐题比较。
+3. configs/direct_qwen60.json：固定配置与输入路径。
+4. reports/direct_qwen60/：公开结果与结论。
+
+无需重构现有 Agent 框架。不要依赖旧 JSON 首读解析器；本轮输出只有答案和短依据。
+
+执行顺序：
+1. 读取项目 AGENTS.md；保留本地已有修改，使用独立分支或工作树实现。若 main 已更新，记录实际运行提交，并固定所比较的 V12/P0 缓存版本。
+2. 做一次必要的本地试构造：确认请求含全部图像和完整选项、没有标签或工具 schema；测试答案解析和四项净增益统计的关键情形即可，不跑旧项目全套检查。
+3. 按固定题序运行前两题，计入正式 60 题。只看请求、返回和保存是否正常，不查看正确性。成功后自动续跑剩余 58 题，不为首批再申请确认。
+4. 每题请求前保存输入与配置引用，响应后立即保存 raw response、解析答案、状态、usage 和耗时。中断后只续跑尚未完成的题，不覆盖已有合法回复或终态记录。
+5. 生成结束后，评分进程才读取标签与旧结果；生成进程不导入评分文件或标签对象。
+6. 输出对照和下一步结论，并按 AGENTS.md 发布 GitHub。
+
+正常新增模型请求为 60 次。仅对网络超时、429、5xx 等瞬时技术故障，每题最多额外重试 1 次，全组最多 6 次额外请求，总请求上限 66。记录每次请求及费用；取得成功响应后不再为格式或内容重试。认证/模型不存在等配置错误应停止修复，避免对 60 题重复失败。
+请求与重试上限贯穿整个运行，断点续跑从持久化记录累计，不能重新获得 66 次额度。恢复时一次性核对固定输入及配置是否与本轮一致；如有变化，报告冲突，不能把不同配置的结果混成同一 D0。
+继承现有费用账本和额度，不清零、不提高上限；失败请求或未知 usage 仍按原有保守方式记账。不承诺具体人民币费用，以实际 usage 和现有计价假设报告。
+预算、认证或数据阻塞导致尚未发出请求的题记 not_run，与 request_failed、invalid_answer 分开。此时报告已执行 n/60 和阻塞原因；若给出按 60 分母的临时值，注明是未完成运行的保守统计，不作为完整实验结论。不得为了凑满终态伪造执行记录。
+
+以下是待新 runner 实现的 CLI 接口，不是宣称仓库已经具备这些命令：
+
+python experiments/run_direct_vlm.py --config configs/direct_qwen60.json --out runs/direct_qwen60 --resume
+python experiments/compare_direct_vlm.py --run runs/direct_qwen60 --v12-public reports/v12/results --p0-public reports/v10/per-question-outcomes.json --out reports/direct_qwen60
+
+评分器明确读取参考答案；runner 不接受标签路径。CLI 的具体内部实现可按仓库习惯调整，但报告中必须留下实际可执行命令。
+
+五、如何比较，才能回答“问题在哪里”
+
+总表必须同时列：
+- D0 简洁直接作答（新增）
+- V12 共享首答（缓存，现有 39/60）
+- V12-A 最终（缓存，现有 39/60）
+- V12-B 最终（缓存，现有 36/60）
+- V10 P0（历史参考，现有 39/60）
+
+每组列正确数/60、准确率、有效回答数、缺答数；调用数和费用来自各自保存记录，缺失就标缺失。D0 医学工具调用必须为 0。旧组的共享首读成本注明包含或分摊方式，不能重复累计；视觉重读/裁剪与外部医学工具次数分列，不用一个总数混淆。
+
+逐题按 question_id 连接，至少保留：reference、D0 答案/状态、P0 答案/状态、V12 首答、A/B 候选、A/B 求解器答案、A/B 最终采用答案、fallback 标志及对应原文链接。
+
+比较分两层：
+A. D0 vs V12 共享首答：主要检验简化提示和输出要求的收益，另列解析缺答恢复。两者均不使用外部医学工具。
+B. V12 首答→取证后候选→最终采用答案：直接从缓存计算每一阶段增加或损失的正确答案，同时显示模型求解与控制器回退，定位继续取证或最终处理的实际得失。
+
+D0 vs A/B 是整体流程比较；D0 vs P0 只是历史参考。P0 的图像输入、提示及调用协议不同，不能将两者分差直接解释成纯工具增益。单次对照能缩小问题范围，不足以把原因唯一归给某个工具或模型能力。
+
+每项成对比较必须分开统计：
+1. 旧合法错答→新正确
+2. 旧正确→新合法错答
+3. 旧无效/缺答→新正确
+4. 旧正确→新无效/缺答
+
+正确数净变化 = 1 - 2 + 3 - 4。
+固定 60 题分母，缺答计错；不能只按两组均有合法答案的交集算主成绩。独立作答之间的“→”表示配对结果变化，不表示新模型看过并修改了旧答案。
+如果发现旧 raw response 有合法选择但旧 schema 解析失败，单列技术解析损失，不改写旧发布成绩。任何统一重新解析只能另列派生分析，不能混入原成绩。
+
+六、重点看哪些题，不再泛泛复盘
+
+只围绕以下集合阅读已保存材料，按数量和问题类型总结：
+1. D0 正确、V12 首答错误：简化首读后获得的新正确答案。
+2. V12 首答正确、A/B 最终错误：后续流程丢失的正确答案，并定位发生在候选还是最终阶段。
+3. D0 错误、A 或 B 正确：现有 Agent 仍有价值的互补题。
+4. P0、V12 首答、A、B 均未答对，而 D0 正确：本轮首次救回的共同错答。
+5. 所有组都未答对：后续新增视觉证据或适配工具应优先解决的题型。
+
+从差异集合各选有代表性的少量题，合计约 6–10 题，引用题干、图号和已有回复，说明是位置/数量/时点/完整选项匹配等哪类错误；本轮不再调用模型写长篇反思。
+不要仅凭模型的一句解释认定医学事实。遇到证据不充分的归因，写成待验证原因并给出下一轮具体观察动作。
+
+七、依据结果决定下一轮主改哪里
+
+情形 A：D0 高于共享首答，尤其净多对至少 3 题。
+优先把 Agent 的首读改成简洁独立答案，并减少强制结构化抽取；对确有选项分歧的题再规划取证。进一步提分仍需实际运行改进 Agent，不能把 D0 成绩算作工具或记忆的贡献。
+
+情形 B：共享首答或候选正确，但最终阶段反复改错。
+优先改最终证据整合与停止机制；不再默认追加一次完整重新作答。用可观察的新证据决定是否需要修改，不能用参考答案决定保留谁。本轮只提出一个具体后续实现，不扩成一串新实验。
+
+情形 C：D0 和 Agent 互有优势。
+保留两条路径各自解决的问题类型，下一轮设计按需工具取证。正确答案并集可以作为“候选覆盖潜力”单列，但它依赖标签，不能报成真实集成准确率或保证裁决器能达到的成绩。
+
+情形 D：各组共同错答仍多，D0 没有带来新正确答案。
+优先处理这些题缺少的视觉信息/适配工具，再考虑另一视觉模型 D1。不能据此断言当前模型已经到达能力上限，也不要重复堆叠同类长提示。
+
+D1 预留同一 runner 的模型配置接口，默认关闭。如后续启动，必须是账户实际可用、确认能接收多图的视觉模型，使用相同图像和提示。不要把文本裁决器 qwen3.8-max 或未验证的模型名直接当作视觉模型。D1 与 D0 的差值属于模型替换收益，不属于 Agent 改进收益。
+
+60 题中，净多对 3 题 = +5 个百分点，净多对 6 题 = +10 个百分点；75% 为 45/60，80% 为 48/60。以当前 39/60 为参照，到 75% 需要净增加 6 题，到 80% 需要净增加 9 题。该批是反复使用的开发集，最终泛化和主表结论需要在独立、同条件评测中确认；本轮先集中定位可提分环节。
+
+八、交付与完成标准
+
+reports/direct_qwen60/ 至少包含：
+- README.md：一张总表、一段结论、下一轮唯一最高优先级改动。
+- protocol.json：模型、提示、采样参数、图像设置、请求上限、输入及旧缓存来源。
+- predictions.jsonl：D0 原始选项、解析状态、请求引用、耗时和 usage。
+- per_question.json 与 per_question.md：完整 60 题对照，含候选/求解/回退区别。
+- transitions.json：相对各组的四项配对变化、净变化及差异题 ID。
+- failure_analysis.md：少量代表题与具体下一步；证据和原因假设分开。
+- requests/、responses/ 或等价归档：可追溯的请求与原始回复，图像引用复用已公开资产，避免重复复制。
+- cost_timing.json：实际模型请求、技术重试、工具调用为零、usage、费用假设与耗时。
+
+按仓库 AGENTS.md，在实验完成后主动提交并推送代码、配置和详细结果。只 stage 本次明确文件，复用既有图像链接；不上传凭据、权重或无关本地数据。发布前只做必要的本次内容检查，不为发布再跑推理或整套审计。推送成功并确认远端提交后，返回报告 URL 和 commit；如果推送阻塞，报告真实状态，不说已经上传。
+
+正常完成标准：固定 60 题全部执行并有成功或失败终态；所有新请求和输出保存；评分在生成后完成；四项配对净和对应总正确数差；报告明确回答首读简化是否有效、后续阶段在哪里得失、下一轮优先改哪个环节。代码完成但未跑、只跑两题、或只写汇总而没有逐题结果，都不算实验完成。真实阻塞时可以交付明确标注的部分结果，not_run 不冒充已执行的失败。
+
+参考入口：
+https://github.com/cw462/MedRAX-reproduction/blob/5594a29/reports/v12/results-analysis.md
+https://github.com/cw462/MedRAX-reproduction/blob/5594a29/reports/v12/results/effective_config.json
+https://github.com/bowang-lab/MedRAX/tree/main/experiments
+https://huggingface.co/datasets/wanglab/chest-agent-bench
+
+注：官方也公开了直接问答基线；本计划是适配当前 Qwen 与固定开发题集的对照，不宣称新的算法贡献或已超过原文 2,500 题成绩。
