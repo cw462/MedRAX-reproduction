@@ -2,6 +2,8 @@
 
 2026-10-31 已部署并启动 V12，代码目录为独立的 `code_v12`，运行目录为 `runs/v12_ab60`，监控任务 `medrax-v12-b-a` 已激活。12:40 第 6 个 B 分支因账本 raw-byte mismatch 停止；按用户明确要求移除该运行时字节一致性停机后，12:52 已由新进程 PID 3130741 恢复，12:53 共享首答为 7/60、正在 B7。原 6 个共享首读和 B 终态保留，B6 的失败回退不重跑。当前尚未评分，没有 V12 正确率或提升结论；后续实际进度以运行状态及终态记录为准。
 
+同日北京时间 14:36，A46 首次费用预留时报 `Invalid reservation schema`，模型和工具调用均为 0，保留首答回退。一次定位显示已落盘 reservation 字段完整、最后请求已 settled，本次报错的候选预留未落盘；进程内根因未知，不认定坏账或声称已修复根因。2026-10-31 14:39:44 已确认使用同一原接口和 `run_v12_resume.py` 恢复进入 A47，状态为 `running`、PID 为 3193115；前 106 个分支终态保留，费用及调用预算不变。历史 fatal/status/log/PID/exitcode 与 `recovery_note.json` 保存在 `recovery_history/02_reservation_schema/`，纳入完成后的明确发布范围。
+
 - [完整协议](protocol.md)：用户六项要求的实现、两组差异、调用上限、证据与答案隔离、失败回退、评分和发布规则。
 - [运行配置](../../configs/v12_ab60.json)：`qwen3-vl-plus`，完整 60 题，B 先于 A，共享首次读图 1 次，每组规划/针对性读图/最终求解各 1 次，每组最多 2 个动作。
 - [运行入口](../../experiments/run_v12_ab.py)、[证据解析](../../experiments/v12_evidence.py)、[鉴别检索](../../experiments/v12_retrieval.py)、[独立评分器](../../experiments/v12_metrics.py)。
