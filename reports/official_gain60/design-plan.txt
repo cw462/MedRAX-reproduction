@@ -1,0 +1,210 @@
+MedRAX：从官方论文与代码重新出发的提分实施计划
+日期：2026-11-01
+状态：源码分析与待实施方案；尚未运行本方案，尚无提分结果。
+目标：保持主模型不变，使 Agent 同时超过直接作答与官方 MedRAX 流程。
+优先目标：+5 个百分点；挑战目标：+10 个百分点。不是收益保证。
+
+一、起点与判断
+
+从 bowang-lab/MedRAX 官方代码出发，不继承 M1/V12 的记忆、门控或大规模结构化提示。
+已读取官方快照 dae30e2f136ef0b2a40885a4c335386e9ffad052，并于上述日期 fetch 确认 origin/main 仍为此版本。
+这是已核验的公开代码快照，不声称是作者跑出论文 Table 1 数字时的精确内部环境。
+官方源码：https://github.com/bowang-lab/MedRAX/tree/dae30e2f136ef0b2a40885a4c335386e9ffad052
+论文：https://arxiv.org/abs/2502.02673
+
+本次主攻：选项差异驱动的视觉取证。
+核心过程：发现尚未解决的选项差异 -> 调用适合的医学工具或局部/配对查看 -> 把真实视觉结果送回主模型 -> 根据当前病例证据重新选择完整选项。
+不把工具生成的诊断文本直接当作新事实，不把定位框直接当作病变存在的证据。
+不把工具数、回合数或更强主模型当作方法贡献。
+
+二、代码中已经确认的改进入口
+
+1. medrax/agent/agent.py
+execute_tools 把所有结果以 ToolMessage(content=str(result)) 送回模型。
+grounding.py 返回 visualization_path，segmentation.py 返回 segmentation_image_path；
+Agent 没有将这些新图像自动编码为 image_url/content 图像块。
+原始输入图像仍在上下文中，因此不是“模型完全没看图”；
+缺失的是工具结果和局部观察图像进入下一次视觉推理的通路。
+
+2. medrax/tools/segmentation.py
+当前 wrapper 提供左右肺、心脏、膈肌、纵隔等 14 个解剖结构。
+它可以提供空间参照，不能据此认为已实现任意结节/肿块的病灶分割。
+不能把肺掩膜面积当病灶面积，不能从未标定 JPEG 推导可靠绝对毫米值。
+
+3. medrax/tools/classification.py
+输出 18 个整图疾病分数，不直接回答侧别、数量、相对位置、变化方向。
+分数可作为对应常见征象的辅助意见；不作为六个答案的概率，也不等同本数据集上校准过的置信度。
+
+4. medrax/docs/system_prompts.txt 与官方 benchmark_medrax.ipynb
+依靠通用的自主工具选择与批判提示，没有明确实现“当前哪个可观察属性最能区分选项”。
+notebook 还提示优先相信自己的判断。拟用证据适配规则替代对任一来源的全局优先级。
+
+5. 工具数量
+main.py 注册 9 个工具接口，官方 benchmark_medrax.ipynb 的 get_tools() 实际返回 6 个分析工具：
+report、classification、segmentation、grounding、CheXagent、LLaVA-Med。
+因此不能将“补齐第 9 个工具”作为涨点依据。图像生成不提供本病例的新诊断证据。
+
+三、一次实施一个完整方法
+
+保留：
+- 相同主模型、相同模型版本与解码参数。
+- 官方 6 个分析工具及其权重，首轮不升级专家权重。
+- 同一题干、完整选项、同一原图文件。
+- 简短首答。
+
+增加三个互相配合的功能：
+
+A. 视觉结果回传（最高实施优先级）
+- 工具结果统一为 observation，保留 source_image_id、工具名、文本结果、坐标及 artifact 路径。
+- 保留符合 provider 要求的 tool_call_id 响应；所有同批工具响应完成后，再加入带来源说明的多模态观察消息。
+- 把有效图像路径读取、编码成真实图像输入，不把路径字符串当作模型已经看过。
+- 提供原图带位置框、无覆盖的原像素 ROI、必要的定位/分割示意图。
+- 分割色块不能遮住供诊断的唯一图像；始终保留无覆盖原图/ROI。
+- 坐标回到原图空间，ROI 保留周边上下文，记录裁剪范围；不做生成式补细节或超分伪造。
+- 原图与 crop 来自同一文件。低清原图裁剪只能改变注意分配，不能恢复不存在的细节。
+
+B. 选项差异驱动的动作选择（主要方法内容）
+先读完整题干与全部选项，找出尚未确定、可能改变答案的 1–2 个属性。
+题干已经明确提供的事实不重复询问工具；不要求全题大 JSON 或逐条展开所有医学知识。
+属性例：
+- 单侧/双侧 -> 分别观察左右对应区域；
+- 单发/多发 -> 保留全图覆盖后检查多个候选区域；
+- 肺内/胸膜/纵隔 -> 定位区域与解剖参照联合观察；
+- 增大/缩小/稳定 -> 同一对象在两个时点的配对观察；
+- 不同病因但相同位置 -> 观察边缘、分布、体积变化等真正有区分力的征象，而非重复问侧别。
+
+动作按实际图像与工具能力匹配：
+- 合适的正位 CXR + 病变局部/空间属性：MAIRA-2 定位候选区域 -> 原像素局部观察；必要时解剖分割作参照。
+- 常见征象是否存在：相应 classifier 分数 + CheXagent 中性描述，限制在实际支持的标签/问题。
+- 多时点/多图比较：固定图号和明确时点，输出单图观察及配对视图，再判断变化。
+- CT 等不适合 CXR 专用工具的图像：主 VLM 看原图/局部，或任务适配的现有通用视觉接口；不把 CXR 分类器强行用于 CT。
+- 缺乏可判别的视觉属性时，允许停止，不能为了执行动作而随意裁剪。
+
+上限：每题最多 2 次医学工具调用、最多 2 个额外 ROI/配对视图。
+优先使用不同功能互补，不让多个旧专家对整道题重复投票。
+若定位未返回候选框，允许一个由解剖区域确定的宽 ROI；不得据“无框”直接排除病变。
+
+C. 有针对性的观察与证据整合
+- 观察者看到原图 + 新视图 + 中性属性问题，不给首答选项字母或首答诊断理由。
+- 比较两个可能属性，避免只问“是否存在支持首答的征象”。
+- 输出限制为短观察：具体位置/图号、看到什么、看不清什么。
+- 最后同一主模型看原图、实际新视图、精简工具观察和全部选项，给出选项及短依据。
+- 最终答案允许来自首答与主要备选以外的任何合法选项。
+- 不用自报 confidence 阈值决定改答；不规定必须保住首答；不以专家多数票决定答案。
+- 未观察到/无法判断不自动等于不存在；“无法确认大小差异”不自动等于“大小相同”。
+- 工具执行失败且没有新观察时使用保存的首答作为故障回退；单独记录，不重新用正确答案修正。
+
+四、具体推理流程与预算
+
+每题最多 4 次主模型调用：
+1. 直接首答：原图 + 问题 + 全部选项，仅选项与短依据。与直接基线共享这一结果。
+2. 行动规划：基于原图/选项/首答，给出 1–2 个待判属性及最多 2 个动作。
+3. 观察：实际执行动作后，以原图和新视觉输入回答中性属性问题，不读取首答诊断理由。
+4. 最终选择：综合当前病例证据，匹配完整选项，输出答案与短依据。
+没有有效待判属性时可在规划后保留首答；不能仅凭“很有信心”跳过所有难例。
+缓存只复用同图、同工具、同参数的原始输出，不复用历史正确答案或人工整理的结论。
+温度、top_p、token 上限与主模型版本从首轮配置冻结，不能一边看评测答案一边修改。
+
+五、给实现者的简短提示模板（可直接作为初版，不进行提示词搜索）
+
+Planner:
+Identify at most two unresolved observable attributes that distinguish the complete answer options.
+Do not request facts already explicitly supplied by the question.
+Choose the smallest applicable action set: localize-and-inspect, anatomical reference, focused CXR expert observation, or paired-image comparison.
+For each action specify the image ID, target region or object, neutral observation question, and which possible observations would discriminate the alternatives.
+Use actual image modality. A proposed diagnosis is a hypothesis, not an observation.
+If no available action can address a relevant uncertainty, return no_action with a short reason.
+Return only a small action object; do not write a full diagnostic report.
+
+Observer:
+Inspect the original image and supplied derived views.
+Answer only the requested observable distinction, citing image IDs and regions.
+Describe positive findings and relevant contrary findings in short sentences.
+A box or mask is a proposed location or anatomical reference, not proof of a diagnosis.
+Separate absent, present, and not assessable. Do not infer stability merely from an unmeasurable difference.
+Do not choose an answer option.
+
+Final:
+Answer the original question using all complete options and the supplied images and observations.
+Treat expert model statements as fallible and use them only for the attributes they address.
+Check laterality, multiplicity, time point, and other qualifiers only when the options differ on them.
+A coherent new observation may change the initial answer; an unsupported alternative diagnosis alone is not new evidence.
+Any valid option may be selected.
+Return Answer: <letter>, followed by at most three short evidence sentences.
+
+六、代码落点
+
+在官方快照上创建隔离分支，例如 feat/option-guided-visual-evidence。
+保留官方 Agent 类作为对照，不覆盖其行为。
+建议文件：
+- medrax/agent/evidence_agent.py：首答、动作规划、观察、最终作答，预算和故障回退。
+- medrax/agent/observations.py：工具结果结构化、图像字节回传、来源绑定。
+- medrax/tools/visual_inspection.py：原像素 ROI、配对图、原图位置标识。
+- medrax/tools/grounding.py：可复用既有坐标输出，补稳定的 artifact/source 字段；不改权重。
+- medrax/tools/segmentation.py：暴露可用解剖 mask/box，保持预处理坐标对应；不冒充病灶分割。
+- experiments/run_official_gain.py：三组执行、每题落盘、续跑、独立评分。
+- configs/official_gain.json：模型、工具权重、数据列表、图像规则及调用上限。
+这些是待新增文件名，不是已经存在或可以立即调用的命令。
+
+最少的实施检查只围绕会使方法失效的事项：
+一次确认 API 请求实际含新图像字节；一次确认坐标对应原图；一次确认预测输入不含答案/解释。
+不扩大成持续审计项目。完成后直接开展首轮比较。
+
+七、首轮只跑三组
+
+D：同主模型直接作答。
+M：官方 MedRAX 原始 ReAct + 官方分析工具（设置并报告统一的主模型调用预算）。
+P：本方案，同主模型、同原始工具权重，新增视觉回传、差异驱动动作与整合。
+
+以 qwen3-vl-plus 跑这三组属于同骨干的方法比较，不称为严格复现论文 GPT-4o 的绝对数值。
+如果目标是声称超过论文原始 MedRAX，再在固定可用 GPT-4o 版本上补三组比较并注明版本差异。
+已有 D0 仅在原图输入、模型版本、提示及解码等一致时复用；否则重新产生匹配的 D。
+D 首答可供 P 使用。M 保留官方首轮自主决策，不硬塞 P 的规划提示。
+
+先在现有 60 题开发集跑完三组；不得只跑已知错题，也不得由标签决定是否调用工具。
+若完全兼容旧 D0 42/60：
+- 45/60 = 75%，需净增 3 题。
+- 48/60 = 80%，需净增 6 题。
+这是算术目标，不是预估实验结果。
+完整方法应同时超过 D 和 M，才称当前设置下 Agent 方法有收益。
+在 60 题上取得方向性收益后冻结实现，用独立患者的未调参样本（例如 200 题）检验外推，再做主表规模评测。
+反复看过的 60 题不作为最终泛化收益的唯一依据。
+
+只输出与提分有关的主要结果：
+准确率、相对 D/M 的纠正/误改/净增、真实工具/视觉输入使用次数、费用与耗时。
+保留每题输入引用、初答、动作、工具原文、观察与终答，供解释具体收益。
+首答和终答的正确并集可以帮助判断新证据有没有产生新正确答案；它不是实际可部署准确率。
+
+若 P 仍未超过 D：
+- 首先看真实新观察是否带来过首答没有的正确证据。
+- 若没有，暂停控制器/裁决提示微调，说明优先问题是视觉能力或工具能力，下一阶段再单独评估更强视觉专家。
+- 若已经产生有效观察而最终选择错，才单独修改整合步骤。
+不回到大规模记忆、无差别工具调用或反复加裁决器。
+
+八、论文贡献定位
+
+“把工具图像送回模型”本身属于必要的工程补全，不能单独包装为充分创新。
+可研究的方法是：根据完整选项的可区分属性选择视觉动作，在同一主模型和相同医学专家权重下，提高定位、比较、关系与特征描述等推理的准确率。
+主结果有收益后，再补两个消融：
+- 相同流程只回传文本，移除新视觉输入；
+- 同等预算使用固定观察动作，移除选项差异驱动的动作选择。
+需要时补同预算无工具重复推理对照，区分增加计算与真正视觉取证的贡献。
+
+九、相关文献只借鉴机制，不挪用涨幅
+
+V*: Guided Visual Search as a Core Mechanism in Multimodal LLMs，CVPR 2024：
+https://openaccess.thecvf.com/content/CVPR2024/html/Wu_V_Guided_Visual_Search_as_a_Core_Mechanism_in_Multimodal_CVPR_2024_paper.html
+借鉴：按问题主动搜索视觉区域，把全图与局部共同交给作答模型。
+该工作不是 ChestAgentBench 实验，其实现包含专门视觉搜索模型，不能称为本计划的现成免训练实现。
+
+Visual Sketchpad，NeurIPS 2024：
+https://proceedings.neurips.cc/paper_files/paper/2024/hash/fb82011040977c7712409fbdb5456647-Abstract-Conference.html
+借鉴：将检测框、分割等视觉中间结果真正纳入后续多模态推理。
+论文的通用视觉收益不能直接预测医疗数据集会提高多少。
+
+十、当前交付边界
+
+本文件是基于官方代码的实施规格，不是已实现代码，也不是实验结果。
+本轮没有启动付费推理、没有改变既有实验预测、没有向用户 GitHub 推送修改。
+后续执行者应在有原图、工具权重、GPU 和模型 API 的实验环境中实现并运行。
+
