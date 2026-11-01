@@ -127,6 +127,7 @@ def analyze(run, out):
     # case/id. Parameter counts target the concrete defects of this fixed run;
     # this is not a general JSON-schema validator or a new runtime safeguard.
     calls, messages, invalid, unknown = {}, {}, [], []
+    raw_schema_deviations, normalized_arguments = [], []
     for path in predictions.glob("*/M/calls/*/attempt_1/response.json"):
         qid = path.relative_to(predictions).parts[0]
         request = read(path.parent.parent / "request.json")
@@ -148,7 +149,18 @@ def analyze(run, out):
                     and isinstance(args.get("organs"), str)):
                 reasons.append("organs_string_instead_of_array")
             if reasons:
-                invalid.append({**item, "reasons": reasons})
+                deviation = {**item, "reasons": reasons}
+                raw_schema_deviations.append(deviation)
+                normalization_path = predictions / qid / "M" / "argument_normalizations.json"
+                saved = read(normalization_path) if normalization_path.exists() else []
+                matched = [n for n in saved if n.get("tool") == call["name"]
+                           and n.get("field") == "organs"
+                           and n.get("raw") == args.get("organs")
+                           and n.get("reason") == "strict_JSON_array_of_strings_format_only"]
+                if reasons == ["organs_string_instead_of_array"] and matched:
+                    normalized_arguments.append({**deviation, "saved_normalizations": matched})
+                else:
+                    invalid.append(deviation)
     for path in predictions.glob("*/M/calls/*/request.json"):
         qid = path.relative_to(predictions).parts[0]
         for message in read(path)["messages"]:
@@ -214,6 +226,8 @@ def analyze(run, out):
         "M_model_tool_call_count": len(calls),
         "M_model_tool_calls_by_name": dict(Counter(r["tool"] for r in calls.values())),
         "M_parameter_errors": invalid, "M_unknown_tool_calls": unknown,
+        "M_raw_schema_deviations": raw_schema_deviations,
+        "M_saved_format_normalizations": normalized_arguments,
         "M_saved_next_request_error_feedback_count": feedback,
         "M_budget_refusals_inferred_from_requested_minus_started":
             summary["M"]["terminal_requested"] - summary["M"]["new_execution_started"],
