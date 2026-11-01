@@ -8,7 +8,11 @@ def now():return datetime.now(timezone.utc).isoformat()
 def read(p):return json.loads(Path(p).read_text(encoding='utf-8-sig'))
 def write(p,v):
  p=Path(p);p.parent.mkdir(parents=True,exist_ok=True);t=p.with_suffix(p.suffix+'.tmp')
- with t.open('w',encoding='utf-8') as f:json.dump(v,f,ensure_ascii=False,indent=2,allow_nan=False);f.write('\n');f.flush();os.fsync(f.fileno())
+ def scalar(x):
+  if type(x).__module__.startswith('numpy'):
+   return x.tolist() if hasattr(x,'tolist') else x.item()
+  raise TypeError('unsupported_record_type:'+type(x).__name__)
+ with t.open('w',encoding='utf-8') as f:json.dump(v,f,ensure_ascii=False,indent=2,allow_nan=False,default=scalar);f.write('\n');f.flush();os.fsync(f.fileno())
  t.replace(p)
 def lines(p):return [json.loads(s) for s in Path(p).read_text(encoding='utf-8-sig').splitlines() if s.strip()]
 def answer(text,legal):
@@ -21,6 +25,29 @@ def answer(text,legal):
  return s.upper() if len(s)==1 and s.upper() in legal else None
 class StopRun(RuntimeError):pass
 class CaseBudget(RuntimeError):pass
+
+def encode_tool(value):
+ from experiments.worker_bridge import encode_value
+ def prepare(v):
+  if type(v).__module__.startswith('numpy'):
+   return {'__official_numpy__':str(v.dtype),'is_array':getattr(v,'ndim',0)>0,'value':v.tolist()}
+  if isinstance(v,tuple):return tuple(prepare(x) for x in v)
+  if isinstance(v,list):return [prepare(x) for x in v]
+  if isinstance(v,dict):return {k:prepare(x) for k,x in v.items()}
+  return v
+ return encode_value(prepare(value))
+
+def decode_tool(value):
+ from experiments.worker_bridge import decode_value
+ def restore(v):
+  if isinstance(v,dict) and set(v)=={'__official_numpy__','is_array','value'}:
+   import numpy as np
+   a=np.asarray(v['value'],dtype=v['__official_numpy__']);return a if v['is_array'] else a[()]
+  if isinstance(v,tuple):return tuple(restore(x) for x in v)
+  if isinstance(v,list):return [restore(x) for x in v]
+  if isinstance(v,dict):return {k:restore(x) for k,x in v.items()}
+  return v
+ return restore(decode_value(value))
 
 class Client:
  def __init__(self,cfg,out,key,status):

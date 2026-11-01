@@ -9,9 +9,9 @@ from .prompts import PLANNER,OBSERVER,FINAL
 class ToolSession:
  def __init__(self,tools,images,out,folder,arm):
   self.tools,self.images,self.out,self.folder,self.arm=tools,images,Path(out),Path(folder),arm
-  self.requested=0;self.actual=0;self.cache_hits=0;self.observations=[]
+  self.requested=0;self.actual=0;self.cache_hits=0;self.observations=[];self.unresolved_prior=0
  def execute(self,name,args,source=None):
-  from experiments.worker_bridge import encode_value,decode_value
+  from .runtime import encode_tool as encode_value,decode_tool as decode_value
   self.requested+=1
   if self.requested>4:return {'error':'experimental_four_medical_tool_budget_exhausted'}
   if name not in self.tools:return {'error':'unknown_tool'}
@@ -29,9 +29,11 @@ class ToolSession:
   # Paths are exact frozen originals; this cache stores only raw model outputs.
   key=hashlib.sha256(json.dumps({'tool':name,'args':args},sort_keys=True).encode()).hexdigest()
   p=self.out/'tool_cache'/(key+'.json');call=self.folder/'tools'/str(self.requested)
-  if (call/'result.json').exists():v=read(call/'result.json');result=decode_value(v['encoded_result'])
+  if (call/'result.json').exists():
+   v=read(call/'result.json');result=decode_value(v['encoded_result']);self.actual+=int((call/'started.json').exists())
   elif p.exists():result=decode_value(read(p)['encoded_result']);self.cache_hits+=1
-  elif (call/'started.json').exists():result={'error':'interrupted_tool_not_reissued'}
+  elif (call/'started.json').exists():
+   result={'error':'interrupted_tool_result_unavailable_not_reissued'};self.actual+=1;self.unresolved_prior+=1
   else:
    write(call/'started.json',{'tool':name,'args':args,'utc':now()});self.actual+=1;began=time.monotonic()
    original_save=None

@@ -91,8 +91,9 @@ def run(cfg,out,prepare_only=False):
       for event in agent.workflow.stream({'messages':[HumanMessage(content=multimodal_content(prompt,images))]},{'recursion_limit':16}):
        if 'process' in event:raw=event['process']['messages'][-1].content
      except StopRun:raise
-     except Exception as exc:error={'type':type(exc).__name__,'message':str(exc)[:1600]}
-     record=dict(question_id=q,arm=arm,answer=answer(raw,question_parts(row['question'])[1]),raw_response=raw,model_calls=proxy.n,tool_requested=session.requested,tool_actual=session.actual,tool_cache_hits=session.cache_hits,new_visual_inputs=0,error=error,committed_utc=now())
+     except CaseBudget as exc:error={'type':type(exc).__name__,'message':str(exc)[:1600]}
+     except Exception as exc:raise StopRun('official_controller_exception:'+type(exc).__name__+':'+str(exc)) from exc
+     record=dict(question_id=q,arm=arm,answer=answer(raw,question_parts(row['question'])[1]),raw_response=raw,model_calls=proxy.n,tool_requested=session.requested,tool_actual=session.actual,tool_cache_hits=session.cache_hits,unresolved_prior_tool_results=session.unresolved_prior,new_visual_inputs=0,error=error,committed_utc=now())
      write(folder/'observations.json',session.observations)
     write(p,record);counts[arm]+=1;status(stage=arm,position=i)
   all_predictions=[read(out/'predictions'/r['question_id']/a/'terminal.json') for a in ('D','M','P') for r in rows]

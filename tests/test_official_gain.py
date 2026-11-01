@@ -38,5 +38,13 @@ class Tests(unittest.TestCase):
    self.assertIsInstance(b,tuple);self.assertEqual(str(a),str(b));self.assertEqual(p.actual,0)
    for _ in range(3):p.execute('test',{'image_path':im['path']})
    self.assertIn('budget',p.execute('test',{'image_path':im['path']})['error'])
+ def test_numpy_scalar_dtype_and_official_text_survive(self):
+  import numpy as np
+  from official_gain.runtime import encode_tool,decode_tool,write,read
+  value=({'score':np.float32(.1234567)},{'size':np.int64(512)})
+  with tempfile.TemporaryDirectory() as d:
+   p=Path(d)/'record.json';write(p,{'raw':value,'encoded':encode_tool(value)})
+   restored=decode_tool(read(p)['encoded'])
+   self.assertEqual(str(value),str(restored));self.assertEqual(type(restored[0]['score']),np.float32)
 
 if __name__=='__main__':unittest.main()
