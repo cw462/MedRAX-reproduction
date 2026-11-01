@@ -43,6 +43,8 @@ def prepare(cfg,out):
  return rows,protocol
 
 def run(cfg,out,prepare_only=False):
+ # Must precede any transformers/HF import, including nested vision encoders.
+ os.environ.update(HF_HOME=str(Path(cfg['root'])/'models/hf_full'),HF_HUB_CACHE=str(Path(cfg['root'])/'models/hf_full/hub'),TRANSFORMERS_CACHE=str(Path(cfg['root'])/'models/hf_full/hub'),HF_HUB_OFFLINE='1',TRANSFORMERS_OFFLINE='1',TOKENIZERS_PARALLELISM='false',MPLBACKEND='Agg')
  from run_direct_vlm import request_for
  from v12_evidence import question_parts,build_images,multimodal_content
  from official_gain.evidence_agent import run_p,ToolSession
