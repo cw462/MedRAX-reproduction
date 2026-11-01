@@ -46,5 +46,8 @@ class Tests(unittest.TestCase):
    p=Path(d)/'record.json';write(p,{'raw':value,'encoded':encode_tool(value)})
    restored=decode_tool(read(p)['encoded'])
    self.assertEqual(str(value),str(restored));self.assertEqual(type(restored[0]['score']),np.float32)
+   from official_gain.observations import compact
+   projection=compact({'source_image_id':'image:1','tool':'classifier','raw_result':value,'execution':'returned','limits':'fallible'})
+   json.dumps(projection,allow_nan=False)
 
 if __name__=='__main__':unittest.main()

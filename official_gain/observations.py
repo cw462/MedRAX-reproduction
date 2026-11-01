@@ -32,5 +32,6 @@ def compact(observation):
  def clean(v):
   if isinstance(v,dict):return {k:clean(x) for k,x in v.items() if not any(s in k.lower() for s in ('area','perimeter','pixel_spacing','confidence','path','traceback'))}
   if isinstance(v,(tuple,list)):return [clean(x) for x in v]
+  if type(v).__module__.startswith('numpy'):return v.tolist() if hasattr(v,'tolist') else v.item()
   return v
  return {'source_image_id':observation['source_image_id'],'tool':observation['tool'],'result':clean(observation['raw_result']),'limits':observation['limits'],'execution':observation['execution']}
