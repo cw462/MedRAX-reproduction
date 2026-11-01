@@ -32,6 +32,7 @@ def roi(source,box,out,name,normalized=True):
    b=[math.floor(box[0]*w),math.floor(box[1]*h),math.ceil(box[2]*w),math.ceil(box[3]*h)]
   else:
    if len(box)!=4 or not all(type(v) in (float,int) and math.isfinite(v) for v in box):raise ValueError('invalid_original_pixel_box')
+   if not (0<=box[0]<box[2]<=w and 0<=box[1]<box[3]<=h):raise ValueError('original_pixel_box_out_of_bounds')
    # Context padding remains in original coordinates. No model-space guess.
    x0,y0,x1,y1=box;px=max(8,.15*(x1-x0));py=max(8,.15*(y1-y0))
    b=[max(0,math.floor(x0-px)),max(0,math.floor(y0-py)),min(w,math.ceil(x1+px)),min(h,math.ceil(y1+py))]

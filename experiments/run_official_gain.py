@@ -21,15 +21,28 @@ def prepare(cfg,out):
   return rows,protocol
  commit=subprocess.check_output(['git','-C',str(repo),'rev-parse','HEAD'],text=True).strip()
  if commit!=cfg['official_commit']:raise ValueError('official_snapshot_mismatch')
- cached=root/cfg['direct_cache'];cache_cfg=read(cached/'protocol.json');cache_ok=cache_cfg['system_prompt']==SYSTEM_PROMPT and all(cache_cfg[k]==cfg[k] for k in ('model','temperature','top_p')) and cache_cfg['max_output_tokens']==cfg['max_tokens']
- cache_ok=cache_ok and read(cached/'selection.json')['rows']==rows
- # One compatibility comparison, including exact actual image bytes for all rows.
- for row in rows:
-  question_parts(row['question']);build_images(row,root/cfg['image_root'])
-  q=cached/'checkpoints'/row['question_id']
-  if cache_ok:
-   saved=read(q/'request.json')
-   cache_ok=saved.get('messages')==request_for(row,root/cfg['image_root']) and saved.get('model')==cfg['model'] and saved.get('temperature')==cfg['temperature'] and saved.get('top_p')==cfg['top_p'] and saved.get('max_tokens')==cfg['max_tokens']
+ cached=root/cfg['direct_cache']
+ if cfg.get('direct_verified_run'):
+  # Explicitly authorized reuse of the prior exact-request comparison. No
+  # repeated image hashing, no old M/P results or score/reference access.
+  previous=root/cfg['direct_verified_run'];prior=read(previous/'protocol.json')
+  if read(previous/'status.json').get('status')!='generation_complete' or not prior.get('direct_cache_reused'):raise StopRun('verified_direct_cache_not_complete')
+  keys=('root','repo','input','image_root','direct_cache','model','temperature','top_p','max_tokens','timeout_seconds')
+  if any(prior.get(k)!=cfg.get(k) for k in keys) or read(previous/'selection.json')['rows']!=rows:raise StopRun('verified_direct_cache_protocol_mismatch')
+  if prior.get('initial_system')!=SYSTEM_PROMPT:raise StopRun('verified_direct_cache_system_mismatch')
+  for row in rows:
+   legal=question_parts(row['question'])[1];saved=read(previous/'predictions'/row['question_id']/'D'/'terminal.json')
+   if saved['answer'] not in legal or not saved.get('cache_reused'):raise StopRun('verified_direct_terminal_not_legal_cached')
+  cache_ok=True
+ else:
+  cache_cfg=read(cached/'protocol.json');cache_ok=cache_cfg['system_prompt']==SYSTEM_PROMPT and all(cache_cfg[k]==cfg[k] for k in ('model','temperature','top_p')) and cache_cfg['max_output_tokens']==cfg['max_tokens']
+  cache_ok=cache_ok and read(cached/'selection.json')['rows']==rows
+  for row in rows:
+   question_parts(row['question']);build_images(row,root/cfg['image_root'])
+   q=cached/'checkpoints'/row['question_id']
+   if cache_ok:
+    saved=read(q/'request.json')
+    cache_ok=saved.get('messages')==request_for(row,root/cfg['image_root']) and saved.get('model')==cfg['model'] and saved.get('temperature')==cfg['temperature'] and saved.get('top_p')==cfg['top_p'] and saved.get('max_tokens')==cfg['max_tokens']
  protocol=dict(cfg,implementation_commit=os.environ.get('MEDRAX_CODE_COMMIT','unrecorded'),direct_cache_reused=cache_ok,initial_system=SYSTEM_PROMPT,reference_labels_read_by_generator=False,normal_request_upper_bound=420 if cache_ok else 480)
  for name,value in [('protocol.json',protocol),('selection.json',{'rows':rows,'planned_n':60})]:
   p=out/name
@@ -59,14 +72,18 @@ def run(cfg,out,prepare_only=False):
   for row in rows:
    q=row['question_id'];folder=out/'predictions'/q/'D';p=folder/'terminal.json'
    if p.exists():continue
-   if protocol['direct_cache_reused']:
+   if cfg.get('direct_verified_run'):
+    original=root/cfg['direct_verified_run']/'predictions'/q/'D';terminal=read(original/'terminal.json');raw=terminal['raw_response']
+    write(folder/'source.json',{'cache':str(original),'verified_by_prior_run':True,'terminal':terminal,'original_request':str(root/cfg['direct_cache']/'checkpoints'/q/'request.json')})
+   elif protocol['direct_cache_reused']:
     original=root/cfg['direct_cache']/'checkpoints'/q
     terminal=read(original/'terminal.json');attempts=sorted(original.glob('attempt_*/response.json'))
     if not attempts:raise StopRun('direct_saved_response_missing')
     raw=read(attempts[-1])['content'];write(folder/'source.json',{'cache':str(original),'request':str(original/'request.json'),'terminal':terminal})
    else:
     response=client.invoke(folder/'calls/direct',request_for(row,root/cfg['image_root']));raw=response.content if response else ''
-   write(p,dict(question_id=q,arm='D',answer=answer(raw,question_parts(row['question'])[1]),raw_response=raw,cache_reused=protocol['direct_cache_reused'],committed_utc=now()));counts['D']+=1;status(stage='D')
+   direct_answer=terminal['answer'] if cfg.get('direct_verified_run') else answer(raw,question_parts(row['question'])[1])
+   write(p,dict(question_id=q,arm='D',answer=direct_answer,raw_response=raw,cache_reused=protocol['direct_cache_reused'],committed_utc=now()));counts['D']+=1;status(stage='D')
   status(stage='initializing_six_medical_tools')
   import tool_registry_ext
   runtime_artifacts=out/'artifacts'/('runtime_'+uuid.uuid4().hex);runtime_artifacts.mkdir(parents=True)
@@ -89,7 +106,11 @@ def run(cfg,out,prepare_only=False):
      raw='';error=None
      try:
       for event in agent.workflow.stream({'messages':[HumanMessage(content=multimodal_content(prompt,images))]},{'recursion_limit':16}):
-       if 'process' in event:raw=event['process']['messages'][-1].content
+       if 'process' in event:
+        msg=event['process']['messages'][-1];raw=msg.content
+        if cfg.get('repaired_execution') and proxy.n>=4:
+         if getattr(msg,'tool_calls',None):error={'type':'unexpected_tool_calls_after_final_no_schema','message':'Saved final reply requested tools; no extra tool or model call executed.'}
+         break
      except StopRun:raise
      except CaseBudget as exc:error={'type':type(exc).__name__,'message':str(exc)[:1600]}
      except Exception as exc:raise StopRun('official_controller_exception:'+type(exc).__name__+':'+str(exc)) from exc

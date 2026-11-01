@@ -45,7 +45,7 @@ def score(run,out):
    if p is not None and p.stat().st_size==len(data) and p.read_bytes()==data:
     name=os.path.relpath(p,self.out).replace('\\','/');self.manifest[h]={'path':name,'bytes':len(data),'reuse':True};return name
    return super().put(data)
- assets=Assets(out,run,mappings=[(protocol['root']+'/runs/official_gain60',run)])
+ assets=Assets(out,run,mappings=[(protocol['root']+'/runs/'+protocol.get('run_id','official_gain60'),run)])
  bundles={}
  for row in rows:
   q=row['question_id'];value={'input':row,'reference':labels[q],'post_run_explicit_answers':{a:{'answer':views[a][q],'rule':extraction[a][q][1]} for a in ('D','M','P')}}
@@ -56,7 +56,7 @@ def score(run,out):
  # Only actual experiment artifacts; synthetic preflight pixels are separate.
  for p in (run/'artifacts').rglob('*'):
   if p.is_file() and p.suffix.lower() in ('.png','.jpg','.jpeg') and 'preflight' not in p.relative_to(run/'artifacts').parts:
-   private=protocol['root']+'/runs/official_gain60/'+p.relative_to(run).as_posix();assets.file(p,private)
+   private=protocol['root']+'/runs/'+protocol.get('run_id','official_gain60')+'/'+p.relative_to(run).as_posix();assets.file(p,private)
  records=[]
  for row in rows:
   q=row['question_id'];value=bundles[q];write(out/'traces'/f'{q}.json',assets.clean(value,Path('traces')))
@@ -80,12 +80,17 @@ def score(run,out):
  (out/'cases/README.md').write_text('# Full 60 cases\n\n'+''.join(f'- [{q}]({q}.md)\n' for q in qids),encoding='utf-8')
  text='# 官方 ReAct 与选项差异视觉取证：D/M/P\n\n|组|正确/60|准确率|有效答案|缺答|\n|---|---:|---:|---:|---:|\n'
  for a,v in totals.items():text+=f"|{a}|{v['correct']}/60|{v['accuracy']:.1%}|{v['valid']}|{v['missing']}|\n"
- text+='\n上表为评分后从已保存回复提取明确选项的口径，无推理、无重跑，规则统一适用于三组且不读取参考。原运行解析器过严，冻结终态计分D/M/P为42/3/28，缺答0/56/2；51条M及1条P回复有明确选项但未被运行解析器接受。两套结果均保留，不能把原M的3/60当作模型医学判断能力。提取规则及逐条映射见[answer_extraction.json](answer_extraction.json)。\n\n**当前结果不支持提分：P低于D与M。P存在定位框坐标及动作契约实现缺陷，M也有历史工具输出丢失；本轮不能隔离方法本身的因果效果。**\n'
+ text+='\n上表按保存回复的明确答案统计；不进行额外推理。运行终态口径另存metrics.frozen_runtime_totals，逐条映射见[answer_extraction.json](answer_extraction.json)。原预测未改写。\n'
+ if not protocol.get('repaired_execution'):
+  text+='\n本轮初版运行解析器过严，原D/M/P正确数42/3/28；后置统一提取恢复明确选项。另有已披露的坐标/动作契约及历史输出丢失缺陷，不能隔离方法因果效果。\n'
+ else:
+  text+='\n这是用户授权的执行链修复后新运行：D按既有验证来源复用，M/P重新覆盖全部60题；首轮结果独立保留。修复坐标、绑定、动作枚举、明确答案解析和预算内收尾，无额外组或裁决调用。是否成功改善必须以本轮实际工具记录与分数判断。\n'
+ text+='\n'+('P同时超过D与M；仍仅限反复使用的开发集单次结果。' if metrics['P_exceeds_both_D_and_M'] else 'P未同时超过D与M，本轮不支持预定的同时超越结论。')+'\n'
  text+='\nD为匹配直接首答；M使用未改写的官方Agent ReAct；P使用差异驱动动作、独立短观察和真实视觉输入回传。主模型统一qwen3-vl-plus。两组每题最多4中央模型调用、4医学工具调用；P含共享D首答，新增最多3中央调用、2个ROI/配对视图。这些是新实验预算，不是论文原设定。\n\n'
  for name,t in transitions.items():text+=f"{name}: 纠正{t['legal_wrong_to_correct']}、误改{t['correct_to_legal_wrong']}、缺答恢复{t['missing_to_correct']}、正确变缺答{t['correct_to_missing']}，净{t['net']:+d}。\n\n"
  text+=f"新增请求{cost['new_requests']}，技术重试{cost['technical_retries']}，保存结算{cost['new_run_cny']} CNY，账本增量{cost['ledger_run_increment_cny']} CNY，耗时（含初始化及恢复）{cost['elapsed_including_initialization_and_recovery_s']/60:.1f}分钟。工具与各阶段费用见[metrics](metrics.json)/[费用](cost_timing.json)。费用是既有计价假设而非供应商账单。\n\n"
  if protocol['direct_cache_reused']:text+='逐题实际请求及解码完全匹配才复用D缓存；本轮没有重付D费用。缓存D原记录费用0.326016 CNY，完整P逻辑路径费用需同时考虑这笔共享首答，不能把新增P费用当整个路径费用。\n\n'
- text+='[完整60题及图像/过程](cases/README.md) · [运行及恢复协议](protocol.md) · [冻结配置](protocol.json) · [具体差异分析](outcome_interpretation.md) · [工具执行与实现缺陷](tool_execution_analysis.md) · [全部转换题](failure_analysis.md)。\n\n未改专家权重；沿用既有离线加载和bf16兼容工作进程，因此不是论文GPT-4o环境的严格数值复现。官方Agent本身不新增图像回传；P才将工具视觉产物作为真正图像输入。M保留官方自主首轮与通用工具提示，另有统一调用预算及简短输出格式适配。这个60题为反复使用开发集，无在线答案反馈，不支持独立泛化结论。P须同时超过D与M才支持当前设置收益；本轮不满足，且执行缺陷混杂。不会据此自动增加记忆、投票、裁决器或付费重跑。\n\n第三方基准原图来自ChestAgentBench/Eurorad，来源及条款见原病例页；未公开模型权重或凭据。\n'
+ text+='[完整60题及图像/过程](cases/README.md) · [运行及恢复协议](protocol.md) · [冻结配置](protocol.json) · [具体差异分析](outcome_interpretation.md) · [工具执行与实现缺陷](tool_execution_analysis.md) · [全部转换题](failure_analysis.md)。\n\n未改专家权重；沿用既有离线加载和bf16兼容工作进程，因此不是论文GPT-4o环境的严格数值复现。官方Agent本身不新增图像回传；P才将工具视觉产物作为真正图像输入。M保留官方自主首轮与通用工具提示，另有统一调用预算及简短输出格式适配。这个60题为反复使用开发集，无在线答案反馈，不支持独立泛化结论。P须同时超过D与M才支持当前设置收益；根据上表与实际执行情况判定；不会自动增加记忆、投票、裁决器或付费重跑。\n\n第三方基准原图来自ChestAgentBench/Eurorad，来源及条款见原病例页；未公开模型权重或凭据。\n'
  (out/'README.md').write_text(text,encoding='utf-8')
  analysis='# 差异题与取证分析\n\n这是评分后定向分析入口，需结合实际轨迹补充具体机制判断。初答与终答正确并集只供诊断，不能作为部署准确率。\n\n'
  for name,t in transitions.items():
