@@ -60,7 +60,8 @@ class ToolSession:
   result=[]
   for name,tool in self.tools.items():
    def call(_name=name,**kwargs):return self.execute(_name,kwargs)
-   result.append(StructuredTool.from_function(call,name=name,description=tool.description,args_schema=tool.args_schema))
+   result.append(StructuredTool.from_function(call,name=name,description=tool.description,args_schema=tool.args_schema,
+    handle_validation_error=lambda exc:'TOOL_ARGUMENT_ERROR: arguments did not match the advertised schema; no medical observation was produced. Correct the arguments within the remaining experimental budget.'))
   return result
 
 def evidence_payload(questions,observations):
