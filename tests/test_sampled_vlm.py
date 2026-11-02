@@ -372,6 +372,78 @@ class FailureContinuation(unittest.TestCase):
     def terminal(self,n):
         return runner.read(self.out/f'checkpoints/q{n}/sample_1/terminal.json')
 
+    @staticmethod
+    def media_download_error(message='Download multimodal file timed out', *, status=400,
+                             code='invalid_parameter_error', error_type='invalid_request_error',
+                             param=None, nested=True):
+        # Exact observed provider body, wrapped in the same .status_code/.body
+        # interface as an SDK HTTP exception; no SDK version/network dependency.
+        error={'code':code,'type':error_type,'message':message,'param':param}
+        exc=HTTPFailure(status,code,param)
+        exc.body={'error':error} if nested else error
+        return exc
+
+    def test_explicit_media_download_rejection_continues_without_resend_or_free_charge(self):
+        self.rows(2)
+        create=Mock(side_effect=[self.media_download_error(),self.reply()])
+        self.assertEqual(self.execute(create),0)
+        self.assertEqual(create.call_count,2)
+        terminal=self.terminal(1)
+        self.assertEqual(terminal['status'],'request_failed')
+        self.assertEqual(terminal['failure_class'],'sample_rejected')
+        self.assertEqual(len(terminal['attempts']),1)
+        attempt=terminal['attempts'][0]
+        self.assertFalse(attempt['fatal']);self.assertFalse(attempt['retryable'])
+        self.assertEqual(attempt['billing_outcome'],'unknown_conservative_reservation_not_invoice')
+        self.assertEqual(attempt['settlement']['status'],'unknown')
+        self.assertEqual(Decimal(attempt['settlement']['charged_cny']),Decimal('.043072'))
+        self.assertIsNone(self.settlements[0]['usage'])
+        self.assertFalse(self.settlements[0]['response_received'])
+        self.assertEqual(self.terminal(2)['answer'],'B')
+        saved=(self.out/'checkpoints/q1/sample_1/terminal.json').read_bytes()
+        self.assertEqual(self.execute(create),0)
+        self.assertEqual(create.call_count,2)
+        self.assertEqual(saved,(self.out/'checkpoints/q1/sample_1/terminal.json').read_bytes())
+
+    def test_media_download_rejection_matches_exact_normalized_sdk_payload(self):
+        for nested in (True,False):
+            result=runner.failure_details(self.media_download_error(
+                ' \tDOWNLOAD   multimodal\n file timed OUT \r\n',
+                code='INVALID_PARAMETER_ERROR',error_type='INVALID_REQUEST_ERROR',nested=nested))
+            self.assertEqual(result['failure_class'],'sample_rejected')
+            self.assertFalse(result['fatal']);self.assertFalse(result['retryable'])
+
+    def test_media_download_exception_never_masks_other_configuration_auth_or_quota_errors(self):
+        errors=[self.media_download_error('Invalid max_tokens'),
+                self.media_download_error('Download multimodal file timed out: other condition'),
+                self.media_download_error(param='model'),
+                self.media_download_error(code='invalid_api_key'),
+                self.media_download_error(code='unsupported_parameter'),
+                self.media_download_error(error_type='authentication_error'),
+                self.media_download_error(status=401),self.media_download_error(status=403)]
+        for error in errors:
+            result=runner.failure_details(error)
+            self.assertTrue(result['fatal'],result)
+            self.assertFalse(result['retryable'])
+            self.assertNotEqual(result['failure_class'],'sample_rejected')
+        ordinary=runner.failure_details(self.media_download_error('Invalid max_tokens'))
+        self.assertEqual(ordinary['failure_class'],'provider_configuration')
+        for error in (self.media_download_error(code='insufficient_quota'),
+                      self.media_download_error(error_type='Arrearage')):
+            result=runner.failure_details(error)
+            self.assertEqual(result['failure_class'],'provider_quota_or_balance')
+            self.assertTrue(result['fatal']);self.assertFalse(result['retryable'])
+
+    def test_five_explicit_media_download_rejections_still_stop(self):
+        self.rows(6)
+        create=Mock(side_effect=[self.media_download_error() for _ in range(5)]+[self.reply()])
+        self.assertEqual(self.execute(create),2)
+        self.assertEqual(create.call_count,5)
+        state=runner.read(self.out/'status.json')
+        self.assertEqual(state['error'],'consecutive_failed_samples_limit')
+        self.assertEqual(state['consecutive_failed_samples'],5)
+        self.assertFalse((self.out/'checkpoints/q6/sample_1/attempt_1/started.json').exists())
+
     def test_rejected_samples_continue_and_keep_conservative_error_accounting(self):
         self.rows(4)
         create=Mock(side_effect=[HTTPFailure(400),HTTPFailure(413),HTTPFailure(422),self.reply()])

@@ -315,11 +315,20 @@ def failure_details(exc, key=''):
         'invalid_request_format','invalid_request_schema')) or param in {
         'model','temperature','top_p','max_tokens','max_completion_tokens','stream','stream_options',
         'enable_thinking','thinking_budget','vl_high_resolution_images','reasoning_effort'}
+    # The provider explicitly rejects one unavailable media input under its
+    # generic invalid-parameter code. This exact response is sample-local; it
+    # does not authorize a resend or establish zero billable usage.
+    media_download_timeout = (status == 400 and code == 'invalid_parameter_error'
+        and error_type == 'invalid_request_error' and not param
+        and isinstance(provider_message, str)
+        and ' '.join(provider_message.split()).casefold() == 'download multimodal file timed out')
     kind, fatal, retry = 'local_execution_failure', True, False
     if isinstance(exc, RuntimeError) and str(exc) == 'returned_model_identity_mismatch':
         kind = 'model_identity_mismatch'
     elif quota:
         kind = 'provider_quota_or_balance'
+    elif media_download_timeout:
+        kind, fatal = 'sample_rejected', False
     elif configuration:
         kind = 'provider_configuration'
     elif status in {401,403}:
