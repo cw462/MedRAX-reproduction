@@ -1,7 +1,8 @@
 # Multi-model independent-answer voting: protocol, 2026-11-02
 
-Status: code and plan publication only, at the user's latest instruction. No new
-inference was launched and no new experimental result is reported here.
+Status: the user authorized starting the existing phases 0–3 on 2026-11-02,
+superseding the earlier publication-only hold. No new experimental score is
+reported here; generation, offline scoring and phase gates remain separate.
 The user authorized the attached *MedRAX performance-gain plan* using
 `qwen3-vl-plus`, `qwen3.8-max-0902`, and `gpt-4o`.
 The user replaced Kimi with GPT-4o on 2026-11-02 before any inference;
@@ -12,7 +13,8 @@ launched under this first-stage authorization. No result is claimed in this prot
 The user subsequently declined the always-nine GPT-4o expansion and its possible
 2,412 additional calls. Preserve the existing three-or-nine rule, two-question
 smokes, no added Qwen-Max text-only arm and the CNY 200 cap. This review revision
-changes failure handling and image-metadata wording only; no inference is launched.
+changes failure handling and image-metadata wording only; the later launch
+authorization does not expand arms, samples, budget or reserved-test access.
 
 ## Question and design
 
