@@ -3,8 +3,10 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from experiments.score_votes import (choose_k, error_overlap, exact_mcnemar,
-                                    paired, paired_bootstrap, resources, score, vote)
+from experiments.score_votes import (choose_k, correctness_auroc, error_overlap,
+                                    exact_mcnemar, load_complete_run, paired,
+                                    paired_bootstrap, resources, score, vote,
+                                    vote_diagnostics)
 
 
 def put(path, value):
@@ -16,8 +18,8 @@ def run_fixture(root, name, answers, model=None, complete=True):
     path = root / name
     samples = len(answers[0])
     put(path / "protocol.json", {"model": model or name, "samples": samples, "temperature": .2 if samples == 1 else .7})
-    put(path / "selection.json", {"rows": [{"question_id": "q1", "case_id": "c1"},
-                                            {"question_id": "q2", "case_id": "c2"}]})
+    put(path / "selection.json", {"rows": [{"question_id": f"q{i + 1}", "case_id": f"c{i + 1}"}
+                                          for i in range(len(answers))]})
     put(path / "status.json", {"status": "generation_complete" if complete else "running"})
     records = [{"question_id": f"q{qi + 1}", "case_id": f"c{qi + 1}", "sample_index": i + 1,
                 "status": "completed" if answer else "request_failed", "answer": answer,
@@ -83,6 +85,15 @@ class VoteMathTests(unittest.TestCase):
         value = resources([{"status": "completed", "attempts": [{"usage": {"prompt_tokens": 15, "completion_tokens": 9}}]}])
         self.assertEqual(value["input_tokens"], 15)
         self.assertEqual(value["output_tokens"], 9)
+
+    def test_margin_auroc_handles_ties_and_degenerate_classes(self):
+        result = correctness_auroc([.1, .5, .5, .9], [False, False, True, True])
+        self.assertEqual(result["auroc"], .875)
+        self.assertEqual(result["correct_n"], 2)
+        for labels in ([], [True, True], [False, False]):
+            value = correctness_auroc([.5] * len(labels), labels)
+            self.assertIsNone(value["auroc"])
+            self.assertIn("undefined_reason", value)
 
 
 class CompletePhaseTests(unittest.TestCase):
@@ -158,6 +169,96 @@ class CompletePhaseTests(unittest.TestCase):
         self.assertEqual(result["totals"]["SC/K3"]["correct"], 2)
         self.assertEqual(original, (path / "predictions.jsonl").read_bytes())
         self.assertEqual(result["sampling_curves"]["SC"][0]["resamples"], 20)
+        self.assertNotIn("agent_v2_voting", result)
+        self.assertFalse((self.root / "report" / "vote_diagnostics.json").exists())
+
+    def test_v2_matched_single_and_same_temperature_comparisons_keep_D_ties(self):
+        run_fixture(self.root, "d", [["B"], ["B"]], model="qwen")
+        run_fixture(self.root, "hires", [["A"], ["A"]], model="qwen")
+        path = run_fixture(self.root, "sc", [["B"] + ["A"] * 8, ["A"] + ["B"] * 8], model="qwen")
+        original = (path / "predictions.jsonl").read_bytes()
+        manifest = self.manifest([
+            {"id": "D", "run": "d"}, {"id": "SelectedSingle", "run": "hires"},
+            {"id": "S0", "run": "sc", "direct_arm": "D"}], phase=2,
+            primary_voting_arm="S0", selected_single_arm="SelectedSingle", fixed_primary_k=9,
+            ks=list(range(1, 10)))
+        result = score(manifest, self.root / "labels.json", self.root / "report")
+        self.assertEqual(result["comparisons"]["D_to_S0/K9"]["net"], 1)
+        self.assertEqual(result["comparisons"]["SelectedSingle_to_S0/K9"]["net"], 1)
+        self.assertEqual(result["comparisons"]["S0/K1_to_S0/K9"]["net"], 2)
+        rows = json.loads((self.root / "report" / "per_question.json").read_text())["records"]
+        self.assertEqual(rows[0]["answers"]["S0/K2"], "B")  # D wins the tie, not HiRes A.
+        self.assertEqual(result["agent_v2_voting"]["primary_view"], "S0/K9")
+        self.assertFalse(result["agent_v2_voting"]["primary_K_selected_from_labels"])
+        self.assertEqual(original, (path / "predictions.jsonl").read_bytes())
+        diagnostics = json.loads((self.root / "report" / "vote_diagnostics.json").read_text())
+        self.assertFalse(diagnostics["labels_used"])
+        self.assertEqual(diagnostics["records"][0]["sample_answers"], ["B"] + ["A"] * 8)
+        self.assertNotIn('"reference"', json.dumps(diagnostics))
+        self.assertNotIn('"correct"', json.dumps(diagnostics))
+
+    def test_v2_primary_is_nine_even_when_sampling_curve_plateaus_at_one(self):
+        run_fixture(self.root, "d", [["A"], ["B"]])
+        run_fixture(self.root, "sc", [["A"] * 9, ["B"] * 9])
+        manifest = self.manifest([{"id": "D", "run": "d"},
+                                  {"id": "S0", "run": "sc", "direct_arm": "D"}],
+                                 primary_voting_arm="S0", selected_single_arm="D", fixed_primary_k=9)
+        result = score(manifest, self.root / "labels.json", self.root / "report")
+        self.assertEqual(choose_k(result["sampling_curves"]["S0"]), 1)
+        self.assertEqual(result["tuning_decisions"]["S0_selected_K"], 9)
+        agreement = result["agent_v2_voting"]
+        self.assertIsNone(agreement["agreement_bins"]["technical_incomplete"]["vote_totals"])
+        self.assertIsNone(agreement["correctness_auroc"]["complete_nine_only"]["margin_planned"]["auroc"])
+
+    def test_v2_diagnostics_do_not_treat_missing_as_unanimous_or_genuine_split(self):
+        answers = [["A"] * 9, ["A"] * 8 + ["B"], ["A"] * 7 + ["B"] * 2,
+                   ["A"] * 6 + ["B"] * 3, ["A"] * 5 + ["B"] * 4,
+                   ["A"] * 8 + [None], [None] * 9, ["A"] * 4 + ["B"] * 4 + [None]]
+        path = run_fixture(self.root, "sc", answers)
+        run = load_complete_run(path)
+        qids = run["qids"]
+        rows = vote_diagnostics(run, dict.fromkeys(qids, "B"), qids,
+                                {q: "c" + q[1:] for q in qids})
+        self.assertEqual(rows[0]["agreement_bin"], "unanimous_9_of_9")
+        self.assertEqual(rows[1]["agreement_bin"], "high_agreement_7_or_8_of_9")
+        self.assertEqual(rows[2]["agreement_bin"], "high_agreement_7_or_8_of_9")
+        self.assertEqual(rows[3]["agreement_bin"], "split_at_most_6_of_9")
+        self.assertFalse(rows[3]["complete_split_by_top_votes"]["5"])
+        self.assertTrue(rows[3]["complete_split_by_top_votes"]["6"])
+        self.assertTrue(rows[2]["complete_split_by_top_votes"]["7"])
+        self.assertEqual(rows[5]["agreement_bin"], "technical_incomplete")
+        self.assertEqual(rows[5]["agreement_planned"], 8 / 9)
+        self.assertEqual(rows[5]["margin_planned"], 8 / 9)
+        self.assertEqual(rows[5]["missing_samples"], 1)
+        self.assertIsNone(rows[6]["vote_answer"])
+        self.assertTrue(rows[6]["split_by_top_votes"]["6"])
+        self.assertFalse(rows[6]["complete_split_by_top_votes"]["6"])
+        self.assertEqual(rows[7]["vote_answer"], "B")
+        self.assertEqual(rows[7]["margin_planned"], 0)
+        # The same label-free metadata feeds scored strata, with every question retained.
+        run_fixture(self.root, "d", [["A"] for _ in answers])
+        put(self.root / "labels.json", {q: "A" for q in qids})
+        manifest = self.manifest([{"id": "D", "run": "d"},
+                                  {"id": "S0", "run": "sc", "direct_arm": "D"}],
+                                 primary_voting_arm="S0", selected_single_arm="D", fixed_primary_k=9)
+        result = score(manifest, self.root / "labels.json", self.root / "report")
+        groups = result["agent_v2_voting"]["agreement_bins"]
+        self.assertEqual([v["planned_n"] for v in groups.values()], [1, 2, 2, 3])
+        thresholds = result["agent_v2_voting"]["split_thresholds"]
+        self.assertEqual(thresholds["6"]["complete_split"]["planned_n"], 2)
+        self.assertEqual(thresholds["6"]["incomplete_meeting_raw_rule_n"], 2)
+        self.assertEqual(thresholds["6"]["complete_split_fraction_of_all_questions"], 2 / 8)
+        self.assertEqual(thresholds["5"]["complete_split"]["planned_n"], 1)
+        self.assertEqual(thresholds["7"]["complete_split"]["planned_n"], 3)
+
+    def test_v2_invalid_primary_configuration_rejected_before_label_access(self):
+        run_fixture(self.root, "d", [["A"], ["B"]])
+        run_fixture(self.root, "sc", [["A"] * 9, ["B"] * 9])
+        manifest = self.manifest([{"id": "D", "run": "d"},
+                                  {"id": "S0", "run": "sc", "direct_arm": "D"}],
+                                 primary_voting_arm="S0", selected_single_arm="D", fixed_primary_k=7)
+        with self.assertRaisesRegex(ValueError, "fixed_nine"):
+            score(manifest, self.root / "nonexistent_labels.json", self.root / "report")
 
     def test_test_split_never_selects_prompt_or_K(self):
         run_fixture(self.root, "d", [["B"], ["B"]])

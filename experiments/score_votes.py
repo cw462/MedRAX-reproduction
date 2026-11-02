@@ -17,6 +17,10 @@ Held-out scoring requires explicit frozen weights and strongest member, and
 frozen_before_test=true. The scorer never chooses a model or K on test labels.
 Primary B2 uses tuning-accuracy-weighted per-model three-sample majorities.
 Pooling all nine independent sample votes is a secondary diagnostic only.
+
+Optional agent-v2 fields primary_voting_arm, selected_single_arm and
+fixed_primary_k=9 freeze the primary K before scoring. They add matched-prompt
+and same-temperature contrasts without changing the saved D tie anchor.
 """
 from __future__ import annotations
 
@@ -247,6 +251,128 @@ def choose_k(curve, minimum_increment_pp=.5):
     return curve[-1]["k"]
 
 
+def v2_config(manifest, runs, specs, baseline):
+    """Validate an opt-in protocol before opening references; legacy is unchanged."""
+    fields = ("primary_voting_arm", "selected_single_arm", "fixed_primary_k")
+    if not any(key in manifest for key in fields):
+        return None
+    if not all(key in manifest for key in fields):
+        raise ValueError("v2_requires_primary_arm_selected_single_and_fixed_K")
+    primary, single = manifest[fields[0]], manifest[fields[1]]
+    if manifest[fields[2]] != 9 or primary not in runs or runs[primary]["samples"] != 9:
+        raise ValueError("v2_requires_fixed_nine_planned_samples")
+    if single not in runs or runs[single]["samples"] != 1:
+        raise ValueError("v2_selected_single_must_be_saved_single_call_arm")
+    if specs[primary].get("direct_arm") != baseline:
+        raise ValueError("v2_preserves_original_D_tie_anchor")
+    split = {"k": 9, "primary_max_top_votes": 6,
+             "sensitivity_max_top_votes": [5, 7], "denominator": "planned_samples"}
+    configured = manifest.get("split_rule", split)
+    if any(configured.get(key) != value for key, value in split.items()):
+        raise ValueError("v2_split_rule_must_be_frozen_6_of_9_with_5_7_sensitivity")
+    return {"primary_voting_arm": primary, "selected_single_arm": single,
+            "fixed_primary_k": 9, "split_rule": split, "tie_anchor_arm": baseline}
+
+
+def vote_diagnostics(run, tie, qids, case_ids, k=9):
+    """Label-free vote metadata; failures are never promoted to unanimity."""
+    if k != 9 or run["samples"] != k:
+        raise ValueError("v2_diagnostics_require_nine_planned_samples")
+    statuses = defaultdict(Counter)
+    for row in run["records"]:
+        statuses[str(row["question_id"])][row["status"]] += 1
+    rows = []
+    for q in qids:
+        answers = [run["answers"][q, i] for i in range(1, k + 1)]
+        counts = Counter(answer for answer in answers if answer is not None)
+        leading = sorted(counts, key=lambda answer: (-counts[answer], answer))
+        top = counts[leading[0]] if leading else 0
+        second = counts[leading[1]] if len(leading) > 1 else 0
+        valid = sum(counts.values())
+        complete = valid == k
+        bin_name = ("technical_incomplete" if not complete else
+                    "unanimous_9_of_9" if top == 9 else
+                    "high_agreement_7_or_8_of_9" if top >= 7 else "split_at_most_6_of_9")
+        rows.append({"question_id": q, "case_id": case_ids[q], "planned_samples": k,
+                     "sample_answers": answers, "valid_samples": valid, "missing_samples": k - valid,
+                     "sample_status_counts": dict(statuses[q]), "complete_nine_answers": complete,
+                     "answer_counts": dict(sorted(counts.items())), "leading_options": leading[:2],
+                     "top_votes": top, "second_votes": second,
+                     "agreement_planned": top / k, "margin_planned": (top - second) / k,
+                     "agreement_bin": bin_name, "tie_anchor_answer": tie[q],
+                     "vote_answer": vote(answers, tie[q]), "first_sample_answer": answers[0],
+                     "split_by_top_votes": {str(n): top <= n for n in (5, 6, 7)},
+                     "complete_split_by_top_votes": {str(n): complete and top <= n for n in (5, 6, 7)}})
+    return rows
+
+
+def correctness_auroc(scores, correct):
+    """Rank AUROC for correctness, with half credit for tied scores."""
+    if len(scores) != len(correct) or any(not math.isfinite(value) for value in scores):
+        raise ValueError("invalid_AUROC_inputs")
+    positives = sum(bool(value) for value in correct)
+    negatives = len(correct) - positives
+    result = {"n": len(correct), "correct_n": positives, "incorrect_n": negatives,
+              "positive_class": "vote_answer_correct", "auroc": None}
+    if not positives or not negatives:
+        result["undefined_reason"] = "both_correct_and_incorrect_questions_required"
+        return result
+    grouped = defaultdict(lambda: [0, 0])
+    for value, label in zip(scores, correct):
+        grouped[value][0 if label else 1] += 1
+    below, concordant = 0, 0.0
+    for value in sorted(grouped):
+        positive, negative = grouped[value]
+        concordant += positive * (below + .5 * negative)
+        below += negative
+    result["auroc"] = concordant / (positives * negatives)
+    return result
+
+
+def v2_vote_summary(config, rows, views, labels, qids, case_ids, repeats, seed):
+    primary = config["primary_voting_arm"] + "/K9"
+    baseline = config["tie_anchor_arm"]
+    single = config["selected_single_arm"]
+    pred = views[primary]
+
+    def subset(selected):
+        # Empty strata are explicit rather than zero accuracy or an invalid bootstrap.
+        return {"planned_n": len(selected), "question_ids": selected,
+                "vote_totals": totals(pred, labels, selected) if selected else None,
+                "baseline_to_vote": paired(views[baseline], pred, labels, selected, case_ids,
+                                            repeats, seed) if selected else None,
+                "selected_single_to_vote": paired(views[single], pred, labels, selected, case_ids,
+                                                   repeats, seed) if selected else None}
+
+    bins = {name: subset([row["question_id"] for row in rows if row["agreement_bin"] == name])
+            for name in ("unanimous_9_of_9", "high_agreement_7_or_8_of_9",
+                         "split_at_most_6_of_9", "technical_incomplete")}
+    thresholds = {}
+    for threshold in (5, 6, 7):
+        selected = [row["question_id"] for row in rows if row["complete_split_by_top_votes"][str(threshold)]]
+        raw = [row["question_id"] for row in rows if row["split_by_top_votes"][str(threshold)]]
+        thresholds[str(threshold)] = {"role": "primary" if threshold == 6 else "sensitivity_only",
+                                      "complete_split": subset(selected),
+                                      "complete_split_fraction_of_all_questions": len(selected) / len(qids),
+                                      "raw_top_vote_rule_n_including_incomplete": len(raw),
+                                      "raw_top_vote_rule_question_ids": raw,
+                                      "incomplete_meeting_raw_rule_n": len(raw) - len(selected)}
+    auc = {}
+    for name, selected_rows in (("complete_nine_only", [r for r in rows if r["complete_nine_answers"]]),
+                                ("all_questions_secondary", rows)):
+        correctness = [pred[row["question_id"]] == labels[row["question_id"]] for row in selected_rows]
+        auc[name] = {metric: correctness_auroc([row[metric] for row in selected_rows], correctness)
+                     for metric in ("margin_planned", "agreement_planned")}
+    return {**config, "primary_view": primary, "primary_K_selected_from_labels": False,
+            "agreement_denominator": "nine_planned_samples_even_when_some_are_missing",
+            "agreement_bins": bins, "split_thresholds": thresholds, "correctness_auroc": auc,
+            "notes": ["7/9 and 8/9 are high agreement, not unanimity.",
+                      "Incomplete samples form their own technical stratum; raw threshold flags are also retained.",
+                      "K9 versus selected single controls the image/prompt choice, but may differ in temperature.",
+                      "K9 versus cached K1 uses the same sampled-run configuration and temperature; no new calls.",
+                      "All vote ties retain the original D anchor; K1 is not an oracle-selected sample."]}
+
+
 def resources(records):
     attempts = [attempt for record in records for attempt in record.get("attempts", [])]
     amounts = [(a.get("settlement") or {}).get("charged_cny") for a in attempts]
@@ -301,6 +427,11 @@ def score(manifest_path, labels_path, out):
     if ensemble and not tune and not (manifest.get("frozen_before_test") and ensemble.get("weights")
                                      and ensemble.get("strongest_member") and ensemble.get("weights_source")):
         raise ValueError("heldout_ensemble_requires_frozen_tuning_choices")
+    v2 = v2_config(manifest, runs, specs, baseline)
+    diagnostics = None
+    if v2:
+        tie = {q: runs[baseline]["answers"][q, 1] for q in qids}
+        diagnostics = vote_diagnostics(runs[v2["primary_voting_arm"]], tie, qids, case_ids)
     # FIRST reference access occurs only after every declared run has passed coverage.
     labels = read_labels(labels_path, qids)
     seed = int(manifest.get("seed", 20261102))
@@ -323,11 +454,17 @@ def score(manifest_path, labels_path, out):
         ks = [int(k) for k in manifest.get("ks", [1, 3, 5, 7, 9]) if int(k) <= run["samples"]]
         if not ks or any(k < 1 for k in ks):
             raise ValueError("valid_K_values_required")
+        if v2 and arm_id == v2["primary_voting_arm"]:
+            ks = sorted(set(ks) | {1, v2["fixed_primary_k"]})
         for k in ks:
             views[f"{arm_id}/K{k}"] = sample_predictions(run, k, tie, qids)
         if tune:
             curves[arm_id] = sampling_curve(run, tie, labels, qids, ks, repeats, seed)
-            decisions[arm_id + "_selected_K"] = choose_k(curves[arm_id])
+            if v2 and arm_id == v2["primary_voting_arm"]:
+                decisions[arm_id + "_selected_K"] = v2["fixed_primary_k"]
+                decisions[arm_id + "_K_selection_rule"] = "fixed_before_scoring_curve_is_diagnostic_only"
+            else:
+                decisions[arm_id + "_selected_K"] = choose_k(curves[arm_id])
     direct_candidates = manifest.get("selection", {}).get("candidates", [])
     if direct_candidates and tune:
         if any(c not in views or runs[c]["samples"] != 1 for c in direct_candidates):
@@ -381,6 +518,19 @@ def score(manifest_path, labels_path, out):
     scored = {name: totals(pred, labels, qids) for name, pred in views.items()}
     comparisons = {baseline + "_to_" + name: paired(baseline_predictions, pred, labels, qids, case_ids, bootstrap_n, seed)
                    for name, pred in views.items() if name != baseline}
+    v2_summary = None
+    if v2:
+        primary = v2["primary_voting_arm"] + "/K9"
+        same_temperature_single = v2["primary_voting_arm"] + "/K1"
+        for anchor in (v2["selected_single_arm"], same_temperature_single):
+            key = anchor + "_to_" + primary
+            if key not in comparisons:
+                comparisons[key] = paired(views[anchor], views[primary], labels, qids, case_ids, bootstrap_n, seed)
+        v2_summary = v2_vote_summary(v2, diagnostics, views, labels, qids, case_ids, bootstrap_n, seed)
+        v2_summary["comparison_keys"] = {
+            "original_D_to_K9": baseline + "_to_" + primary,
+            "selected_single_to_K9": v2["selected_single_arm"] + "_to_" + primary,
+            "same_temperature_K1_to_K9": same_temperature_single + "_to_" + primary}
     if ensemble:
         contrast = paired(views["B1_best_member_K9"], views["B2_three_models_3x3"], labels, qids, case_ids, bootstrap_n, seed)
         comparisons["B1_to_B2"] = contrast
@@ -418,8 +568,14 @@ def score(manifest_path, labels_path, out):
                       for attempt in row.get("attempts", []) if isinstance(attempt.get("response_model"), str)}),
                   "paper_snapshot_match_established": False
               } for a, run in runs.items() if run["config"].get("model") == "gpt-4o"}}
+    if v2_summary:
+        result["agent_v2_voting"] = v2_summary
     out.mkdir(parents=True, exist_ok=True)
     write(out / "metrics.json", result)
+    if diagnostics is not None:
+        write(out / "vote_diagnostics.json", {"schema": "agent_v2_label_free_vote_diagnostics_v1",
+                                              "labels_used": False, "protocol": v2,
+                                              "records": diagnostics})
     write(out / "cost_summary.json", {"arms": costs, "new_inference": 0,
                                      "shared_direct_anchors_are_fixed_acquisition_cost": True,
                                      "sample_call_matching_does_not_match_tokens_or_money": True})
@@ -431,6 +587,19 @@ def score(manifest_path, labels_path, out):
     for name, values in scored.items():
         report += f"|{name}|{values['correct']}/{values['planned_n']}|{values['accuracy']:.2%}|{values['missing']}|\n"
     report += "\n[Complete metrics](metrics.json) · [Per-question scores](per_question.json) · [Costs](cost_summary.json).\n\nMissing and technical failures remain in the denominator. Sampling-curve spread is not a population CI. Paired uncertainty resamples complete cases; exact McNemar remains a question-level test. All model/K choices are tuning-only; held-out labels never select weights or a winner.\n"
+    if v2_summary:
+        report += "\nAgent v2 fixes K=9 before scoring; the K curve cannot change this primary result.\n\n|Contrast|Net correct|Gain (pp)|Case-cluster 95% CI (pp)|\n|---|---:|---:|---|\n"
+        for purpose, key in v2_summary["comparison_keys"].items():
+            value = comparisons[key]
+            low, high = value["bootstrap"]["delta_ci95_pp"]
+            report += f"|{purpose}: {key}|{value['net']}|{value['delta_pp']:.2f}|[{low:.2f}, {high:.2f}]|\n"
+        report += ("\nThe selected-single contrast controls for the chosen image/prompt configuration; "
+                   "the same-temperature K1 contrast uses sample 1 of the saved pool. Original D remains "
+                   "the tie anchor. Agreement uses all nine planned samples: only nine valid identical "
+                   "answers count as unanimous. Incomplete sets are reported separately from complete "
+                   "7–8/9 and ≤6/9 sets. Primary split ≤6 and sensitivity splits ≤5/≤7 are frozen. "
+                   "Undefined single-class AUROCs are null, not zero. "
+                   "[Label-free vote diagnostics](vote_diagnostics.json).\n")
     if ensemble_info:
         report += "\nPrimary B2/B3 first take each model's own three-sample plurality, then weight those model votes by frozen tuning-pool accuracy (plan S4). Pooled nine/six-sample votes are secondary diagnostics. B2−B1 and its confidence interval use the weighted primary B2.\n\n" + ensemble_info["compute_limitation"] + "\n"
     report += "\nGPT-4o arms, when present, request the provider alias gpt-4o; returned identities are preserved, and a matching paper snapshot/protocol has not been established. GPT-4o's presence in B0 or sampling does not constitute strict paper reproduction. A subset score cannot be directly compared with the paper's full-benchmark headline. No parser or technical recovery is counted as mechanism gain.\n"
