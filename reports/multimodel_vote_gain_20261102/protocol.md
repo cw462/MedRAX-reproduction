@@ -1,0 +1,145 @@
+# Multi-model independent-answer voting: protocol, 2026-11-02
+
+Status: implementation/preparation. No new experimental result is reported here.
+The user authorized the attached *MedRAX performance-gain plan* using
+`qwen3-vl-plus`, `qwen3.8-max-0902`, and `kimi/kimi-k3.1-pro`.
+The user has approved a **CNY 200 incremental cap**, for the basic-answer and
+voting stages first. Full-benchmark/heldout expansion is not automatically
+launched under this first-stage authorization. No result is claimed in this protocol.
+
+## Question and design
+
+Does aggregating independent answers improve over one direct answer on the same
+backbone, and does a three-model ensemble improve further? This is a fresh run;
+previous experiments and predictions remain intact. There is no answer-revision
+judge, memory injection, online feedback or new ReAct loop in the main arms.
+
+1. Infrastructure regression: regenerate the old 60-question direct baseline once,
+   as the plan explicitly requests. Its historical derived score is 42/60.
+   This is a pipeline check, not a new heldout result or tuning set. Separately
+   run two old questions per new model/high-resolution/thinking capability.
+2. Tune on approximately 400 questions grouped by explicit source case ID:
+   historical direct prompt, text only, native images with explicit figure labels
+   and provider high-resolution mode, concise evidence summary (at most 150
+   words), and provider thinking mode. Retain the direct setting unless a
+   candidate improves tune accuracy by at least 1.5 percentage points.
+3. Draw nine independent samples at Qwen temperature 0.7. Evaluate the fixed
+   first K samples for K=1,3,5,7,9. Two hundred random subsets describe variance;
+   they are not 200 additional deployable systems or a source of selected votes.
+   Every sample starts from the original question/options/images; previous
+   answers and explanations never enter another sample's context.
+4. Measure all three model single-call anchors and compare nine samples from the
+   strongest tune model with three samples from each model. Remove the strongest
+   model to form a six-sample diagnostic. Plain plurality is the primary result;
+   tune-accuracy-weighted per-model majority is secondary. Freeze weights and
+   strongest-model choice before any test labels are scored.
+5. Score frozen arms once on approximately 1,000 case-disjoint heldout questions.
+   A full 2,500-question result is separate: it includes seen and tuning cases
+   and must not be called wholly heldout. Reuse a sample only when its complete
+   frozen acquisition configuration and input match; never rerun for a better
+   result. The full benchmark must finish before comparing its headline with
+   the paper's full-benchmark result.
+
+The two-question capability check confirms API acceptance and returned model
+identity, not medical accuracy. An unsupported parameter/model is reported,
+not silently substituted. Phase transitions freeze a new configuration and
+code commit after the previous phase finishes and is scored offline.
+
+## Attribution and documented deviations
+
+The actual historical D prompt returns `Answer` plus one or two brief `Reason`
+sentences. It does not forbid all reasoning as the attachment suggests. Its
+literal prompt is preserved. A new derived parser accepts the last explicit
+Answer line, including markdown and answer text; an ambiguous choice or refusal
+remains missing. Previous prediction files and old parsers are not rewritten.
+
+The three authorized models do not include GPT-4o. The paper-backbone-matched
+attribution arms are therefore not executed; a modern-backbone comparison alone
+cannot attribute a difference from the paper to the voting method.
+
+Qwen direct anchors use T=0.2/top_p=0.95 with `enable_thinking=false` explicitly.
+The dedicated Qwen thinking arm pins `enable_thinking=true`, uses streaming,
+an 8,192 output ceiling and a 4,096 thinking budget. Kimi K3.1 Pro always thinks;
+its documented sampling parameters are fixed T=1.0/top_p=0.95. Its independent
+anchor also uses T=1.0, with maximum reasoning effort and an 8,192 output ceiling.
+Output truncation and absent final answers are retained, not repaired by a paid
+format retry. Capabilities are tested before the large arms are frozen.
+
+Nine sampled calls versus three times three sampled calls is a sample-count
+comparison. Independent tie-break anchors add one versus three logical calls
+unless their common acquisition cost is shared. Report both conventions and
+actual tokens, reasoning usage, latency and monetary cost; different model
+reasoning workloads are not equal compute merely because request counts match.
+
+Plurality ties use the independent direct answer only if it is among the tied
+leaders, then fixed alphabetical order. If all samples are invalid, the vote
+stays missing. No confidence gate, label-conditioned subset, or hidden fallback
+turns an invalid vote into a direct prediction.
+
+## Data and image contract
+
+Use the complete 2,500-row source `metadata.jsonl.new`; the older
+`metadata.jsonl` download is truncated. Neither source file is rewritten.
+Exclude actual historically exposed question/image/prediction/feedback/training
+cases, including seed cases. A registry that only enumerates benchmark IDs and
+split metadata does not by itself expose question/image content; this distinction
+and all exclusion evidence are recorded in the split manifest. Never infer a
+case ID from a question-ID prefix. The final manifest reports actual counts,
+not the paper's nominal case count.
+
+Inference JSONL contains only question ID, case ID, question/options, images and
+figure labels. Labels live in a separate scoring directory. The generation
+process does not import or open labels. Native bytes means the saved benchmark
+image bytes, not DICOM or a claim that the provider performs no resizing. Keep
+all selected images; pair known figure labels with the corresponding image
+immediately before that image. Do not invent a figure label when none is known.
+
+## Budget, recovery and artifacts
+
+One incremental budget applies to the entire experiment, including capability
+checks and technical attempts. Serial arm ledgers inherit preceding committed
+spend. The original account ledger is retained; no account ledger is published.
+Runtime byte-drift shutdown stays disabled as the user previously instructed;
+the original identity, locks and amount checks remain. A shared persistent
+request counter spans restarts and models. SDK retries are zero; at most one
+explicit technical retry per sample is permitted within the phase/global budget.
+An unknown provider outcome is never blindly sent again. A successful saved
+response is reused; all completed terminal records are immutable.
+
+The maximum planned request inventory is 56,268 normal plus 2,814 technical
+attempts; this is an upper bound across all planned stages, not permission to
+spend to that number. The monetary cap applies first. Optional tool-voter and
+external-dataset stages are deferred until primary results and dataset access
+are established. No external restricted patient data is assumed available.
+
+Each finished phase publishes the exact frozen code/configuration, full
+denominators, samples/votes, corrections/harms/missing recovery, case-aware
+uncertainty, question/options/images, observable requests/replies, model
+identities, usage, costs and failures. Historical case content is published per
+the user's repository preference; credentials, account ledgers and weights are
+excluded. Reports distinguish current experiment evidence from hypotheses.
+
+## Provider sources checked 2026-11-02
+
+- [Alibaba model pricing](https://help.aliyun.com/zh/model-studio/model-pricing):
+  Beijing Qwen3.8-Max 12/36 CNY per million input/output tokens; Kimi K3.1 Pro
+  13/68. Qwen3-VL-Plus retains the existing conservative 4/12 accounting rates.
+  Cache discounts are not assumed; these are accounting estimates, not invoices.
+- [Alibaba Kimi model](https://help.aliyun.com/en/model-studio/kimi-k3-1-pro-by-moonshot):
+  image input and OpenAI-compatible endpoint availability.
+- [Kimi API quickstart](https://platform.kimi.com/docs/guide/kimi-k3-1-pro-quickstart):
+  always-on thinking and fixed sampling parameters.
+- [Alibaba vision API](https://docs.bailian.console.aliyun.com/en/model-studio/vision):
+  Qwen thinking and `vl_high_resolution_images` behavior. Actual support must
+  still be confirmed on this credential/endpoint with the two-question smoke.
+
+## Entrypoints
+
+- `data_tools/make_heldout.py`: case-isolated split and separate labels.
+- `experiments/configure_vote_gain.py`: explicit-budget phase-0 configuration.
+- `experiments/run_sampled_vlm.py`: independent immutable samples.
+- `experiments/run_vote_phase.py`: serial frozen arms; no in-process scoring.
+- `experiments/score_votes.py`: offline complete-phase scores and votes.
+
+Later phases are materialized only after their upstream decisions are available;
+no heldout label or intermediate test accuracy may change those decisions.
