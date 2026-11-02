@@ -106,6 +106,72 @@ class InputAndBudgetContracts(unittest.TestCase):
         self.cfg['profile'].update(max_input_tokens=120000,max_output_tokens=8192)
         return self.cfg
 
+    def token_plan_config(self):
+        self.cfg.update(model='qwen3.7-plus', credential_slot='token_plan')
+        self.cfg['profile'].update(base_url=runner.TOKEN_PLAN_BASE_URL,
+                                   identity_prefixes=['qwen3.7-plus'])
+        return self.cfg
+
+    def test_token_plan_identity_and_accounting_are_explicit(self):
+        profile=runner.validate_cfg(self.token_plan_config())
+        for identity in ('qwen3.7-plus','qwen3.7-plus-2026-05-26'):
+            self.assertTrue(profile.identity_ok(identity),identity)
+        for identity in (None,'','qwen3-vl-plus','qwen3.7-plus-mini',
+                         'qwen3.7-plus-2026-05-26-other','qwen3x7-plus-2026-05-26'):
+            self.assertFalse(profile.identity_ok(identity),identity)
+        self.assertIn(runner.TOKEN_PLAN_ACCOUNTING_NOTE,profile.price_basis)
+        self.assertEqual(profile.input_cny_per_million,Decimal('4'))
+        self.assertEqual(profile.output_cny_per_million,Decimal('12'))
+
+    def test_token_plan_requires_its_own_key_route_endpoint_and_family(self):
+        self.token_plan_config()
+        for slot in ('dashscope','apiyi',None):
+            self.cfg['credential_slot']=slot
+            with self.assertRaisesRegex(ValueError,'credential_slot'):runner.validate_cfg(self.cfg)
+        self.cfg['credential_slot']='token_plan'
+        for endpoint in ('https://example.invalid/v1',runner.TOKEN_PLAN_BASE_URL+'/',
+                         runner.TOKEN_PLAN_BASE_URL+'?provider=other'):
+            self.cfg['profile']['base_url']=endpoint
+            with self.assertRaisesRegex(ValueError,'token_plan_endpoint'):runner.validate_cfg(self.cfg)
+        self.cfg['profile']['base_url']=runner.TOKEN_PLAN_BASE_URL
+        self.cfg['profile']['identity_prefixes']=['qwen3.7-plus','qwen3-vl-plus']
+        with self.assertRaisesRegex(ValueError,'exact_family_identity'):runner.validate_cfg(self.cfg)
+
+    def test_token_plan_high_resolution_payload_is_explicit_and_unchanged(self):
+        cfg=self.token_plan_config()
+        cfg.update(high_resolution=True,capability_confirmed=True)
+        cfg['extra_body']['vl_high_resolution_images']=True
+        runner.validate_cfg(cfg)
+        cfg['extra_body'].pop('enable_thinking')
+        with self.assertRaisesRegex(ValueError,'pin_qwen'):runner.validate_cfg(cfg)
+        cfg['extra_body']['enable_thinking']=False
+        raw={'model':'qwen3.7-plus-2026-05-26',
+             'choices':[{'message':{'content':'Answer: B'},'finish_reason':'stop'}],
+             'usage':{'prompt_tokens':10,'completion_tokens':5}}
+        create=Mock(return_value=SimpleNamespace(model_dump=lambda **_:raw))
+        client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        factory=Mock(return_value=client)
+        class MockLedger:
+            def __init__(self,*args,**kwargs):self.remaining=Decimal('10')
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+            def reserve(self,**kwargs):return 'mock-id'
+            def settle(self,*args,**kwargs):return {'charged_cny':'0','status':'settled'}
+        out=self.root/'token-plan-out';out.mkdir()
+        with patch.dict(sys.modules,{'openai':SimpleNamespace(OpenAI=factory),
+                                    'v12_ledger':SimpleNamespace(V12ProviderLedger=MockLedger)}):
+            with patch.object(sys,'stdin',io.StringIO('synthetic-token-plan-key\n')):
+                self.assertEqual(runner.run(SimpleNamespace(prepare_only=False,api_key_stdin=True),cfg,out),0)
+        self.assertEqual(factory.call_args.kwargs['base_url'],runner.TOKEN_PLAN_BASE_URL)
+        self.assertEqual(factory.call_args.kwargs['api_key'],'synthetic-token-plan-key')
+        sent=create.call_args.kwargs
+        self.assertEqual(sent['model'],'qwen3.7-plus')
+        self.assertEqual(sent['extra_body'],{'enable_thinking':False,'vl_high_resolution_images':True})
+        self.assertTrue(any(item.get('image_url',{}).get('url','').startswith('data:image/')
+                            for item in sent['messages'][1]['content']))
+        terminal=runner.read(out/'checkpoints/q1/sample_1/terminal.json')
+        self.assertEqual(terminal['attempts'][0]['response_model'],'qwen3.7-plus-2026-05-26')
+
     def test_gpt4o_baseline_sampling_and_provider_parameters(self):
         self.gpt4o_config()
         runner.validate_cfg(self.cfg)

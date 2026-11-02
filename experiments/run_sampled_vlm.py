@@ -22,7 +22,12 @@ from run_direct_vlm import SYSTEM_PROMPT, now, read, read_lines, write
 from official_gain_answer_scoring import explicit_answer
 from v12_evidence import build_images, multimodal_content, question_parts
 
-MODELS = {'qwen3-vl-plus', 'qwen3.8-max-0902', 'gpt-4o'}
+MODELS = {'qwen3-vl-plus', 'qwen3.7-plus', 'qwen3.8-max-0902', 'gpt-4o'}
+TOKEN_PLAN_BASE_URL = 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1'
+TOKEN_PLAN_ACCOUNTING_NOTE = (
+    'Token Plan usage is measured in provider Credits; these CNY rates are a conservative '
+    'budget proxy, not a provider invoice or Credits-to-CNY conversion. '
+    'This runner never purchases additional quota automatically.')
 VARIANTS = {'answer', 'cot', 'think', 'text_only'}
 ROW_FIELDS = {'question_id', 'case_id', 'question', 'images', 'figure_labels'}
 FAILURE_POLICY = {
@@ -100,6 +105,10 @@ def profile_for(cfg):
                 # Prefix matching would also accept gpt-4o-mini and is forbidden.
                 return isinstance(returned, str) and (
                     returned == 'gpt-4o' or re.fullmatch(r'gpt-4o-\d{4}-\d{2}-\d{2}', returned) is not None)
+            if self.model == 'qwen3.7-plus':
+                return isinstance(returned, str) and (
+                    returned == 'qwen3.7-plus' or
+                    re.fullmatch(r'qwen3\.7-plus-\d{4}-\d{2}-\d{2}', returned) is not None)
             return super().identity_ok(returned)
     p = cfg['profile']
     required = {'base_url', 'identity_prefixes', 'input_cny_per_million',
@@ -118,9 +127,17 @@ def profile_for(cfg):
             raise ValueError('gpt4o_context_requires_120000_input_and_8192_output_ceiling')
         if p['identity_prefixes'] != ['gpt-4o']:
             raise ValueError('gpt4o_exact_family_identity_required')
+    price_basis = p['price_basis']
+    if cfg['model'] == 'qwen3.7-plus':
+        if p['base_url'] != TOKEN_PLAN_BASE_URL:
+            raise ValueError('qwen37_token_plan_endpoint_required')
+        if p['identity_prefixes'] != ['qwen3.7-plus']:
+            raise ValueError('qwen37_exact_family_identity_required')
+        if TOKEN_PLAN_ACCOUNTING_NOTE not in price_basis:
+            price_basis += ' ' + TOKEN_PLAN_ACCOUNTING_NOTE
     return SamplingProfile(name=cfg['model'], base_url=p['base_url'], model=cfg['model'],
         identity_prefixes=tuple(p['identity_prefixes']), input_cny_per_million=rates[0],
-        output_cny_per_million=rates[1], price_basis=p['price_basis'],
+        output_cny_per_million=rates[1], price_basis=price_basis,
         max_input_tokens=p['max_input_tokens'], max_output_tokens=p['max_output_tokens'],
         supports_vision=True, notes='Frozen sampling-phase profile; costs are disclosed accounting rates.')
 
@@ -128,7 +145,7 @@ def profile_for(cfg):
 def validate_cfg(cfg):
     if cfg['model'] not in MODELS or cfg['prompt_variant'] not in VARIANTS:
         raise ValueError('unsupported_model_or_variant')
-    expected_slot = 'apiyi' if cfg['model'] == 'gpt-4o' else 'dashscope'
+    expected_slot = {'gpt-4o':'apiyi', 'qwen3.7-plus':'token_plan'}.get(cfg['model'], 'dashscope')
     if cfg.get('credential_slot') != expected_slot:
         raise ValueError('explicit_model_provider_credential_slot_required')
     if not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', cfg['run_id']):

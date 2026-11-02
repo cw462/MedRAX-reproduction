@@ -35,7 +35,7 @@ def validate_manifest(manifest):
         if not config_path.is_absolute():config_path=root/config_path
         cfg = read(config_path)
         validate_cfg(cfg)
-        if cfg.get('credential_slot') not in {'dashscope', 'apiyi'}:
+        if cfg.get('credential_slot') not in {'dashscope', 'apiyi', 'token_plan'}:
             raise ValueError('valid_credential_slot_required')
         if Path(cfg['root']).resolve()!=root:raise ValueError('one_runtime_root_required')
         if cfg['inherit_ledger'] != previous:
@@ -84,7 +84,7 @@ def load_credentials(args, slots):
         raise ValueError('stdin_credentials_required')
     if len(raw) > 65536 or not isinstance(values, dict):
         raise ValueError('invalid_stdin_credentials')
-    if not slots <= set(values) or set(values) - {'dashscope', 'apiyi'}:
+    if not slots <= set(values) or set(values) - {'dashscope', 'apiyi', 'token_plan'}:
         raise ValueError('invalid_stdin_credentials')
     for value in values.values():
         if not isinstance(value, str) or not value or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value):

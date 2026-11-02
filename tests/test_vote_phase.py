@@ -89,7 +89,12 @@ class PhaseWiring(unittest.TestCase):
         self.assertEqual(state['completed_arms'],['D_regression60'])
 
     def test_mixed_keys_are_routed_only_to_the_selected_child_stdin(self):
-        keys={'dashscope':'synthetic-dashscope-secret','apiyi':'synthetic-apiyi-secret'}
+        target=Path(self.manifest['arms'][0]['config']);cfg=sampled.read(target)
+        cfg.update(model='qwen3.7-plus',credential_slot='token_plan')
+        cfg['profile'].update(base_url=sampled.TOKEN_PLAN_BASE_URL,identity_prefixes=['qwen3.7-plus'])
+        sampled.write(target,cfg)
+        keys={'dashscope':'synthetic-dashscope-secret','apiyi':'synthetic-apiyi-secret',
+              'token_plan':'synthetic-token-plan-secret'}
         stdin=SimpleNamespace(buffer=io.BytesIO(json.dumps(keys).encode()))
         output=io.StringIO()
         argv=['run_vote_phase','--manifest',str(self.path),'--credentials-json-stdin']
@@ -108,6 +113,21 @@ class PhaseWiring(unittest.TestCase):
         self.assertEqual(sampled.read(Path(gpt_arm['config']))['credential_slot'],'apiyi')
         public_text=(Path(self.manifest['out'])/'phase_protocol.json').read_text(encoding='utf-8')+output.getvalue()
         for key in keys.values():self.assertNotIn(key,public_text)
+
+    def test_token_plan_only_phase_uses_single_stdin_key(self):
+        self.manifest['arms']=self.manifest['arms'][:1]
+        sampled.write(self.path,self.manifest)
+        target=Path(self.manifest['arms'][0]['config']);cfg=sampled.read(target)
+        cfg.update(model='qwen3.7-plus',credential_slot='token_plan')
+        cfg['profile'].update(base_url=sampled.TOKEN_PLAN_BASE_URL,identity_prefixes=['qwen3.7-plus'])
+        sampled.write(target,cfg)
+        argv=['run_vote_phase','--manifest',str(self.path),'--api-key-stdin']
+        stdin=SimpleNamespace(buffer=io.BytesIO(b'synthetic-token-plan-only\n'))
+        with patch.object(sys,'argv',argv),patch.object(sys,'stdin',stdin),\
+             patch.object(phase.subprocess,'run',return_value=SimpleNamespace(returncode=0)) as run:
+            self.assertEqual(phase.main(),0)
+        self.assertEqual(run.call_count,1)
+        self.assertEqual(run.call_args.kwargs['input'],b'synthetic-token-plan-only\n')
 
     def test_mixed_phase_rejects_single_key_before_read_or_execution(self):
         argv=['run_vote_phase','--manifest',str(self.path),'--api-key-stdin']
