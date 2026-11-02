@@ -23,7 +23,8 @@ class PhaseWiring(unittest.TestCase):
         rows=[{'question_id':f'unrelated_{i}','question':'Choose.\nA) Alpha\nB) Beta','images':['image.png']} for i in range(60)]
         path.write_text(''.join(json.dumps(r)+'\n' for r in rows),encoding='utf-8')
         metadata=self.root/'data/chest-agent-bench/metadata.jsonl.new';metadata.parent.mkdir(parents=True)
-        metadata.write_text(''.join(json.dumps({'full_question_id':r['question_id'],
+        metadata.write_text(''.join(json.dumps({'question_id':r['question_id'],
+            'full_question_id':'explicit_full_'+r['question_id'],
             'case_id':f'actual_case_{i//2}','answer':'DO_NOT_COPY'})+'\n' for i,r in enumerate(rows)),encoding='utf-8')
         self.args=SimpleNamespace(root=str(self.root),code='code_vote_gain',new_budget_cny='200',
             inherited_committed_cny='194.252828',original_cap_cny='1000000',

@@ -49,16 +49,20 @@ def phase0(args):
     if len(old) != 60:raise ValueError('regression_requires_original60')
     rows = [{k:r[k] for k in ('question_id','case_id','question','images','figure_labels') if k in r} for r in old]
     if any(not r.get('case_id') for r in rows):
-        # The authoritative full_question_id mapping supplies clustering only.
+        # Authoritative source question_id/full_question_id aliases supply
+        # clustering only; historical inputs use the former explicit field.
         # No answer/reference fields are copied into inference or logs.
         metadata=root/'data/chest-agent-bench/metadata.jsonl.new'
         mapping={}
         with metadata.open(encoding='utf-8') as handle:
             for line in handle:
                 if not line.strip():continue
-                item=json.loads(line);qid=item.get('full_question_id');case=item.get('case_id')
-                if qid is not None and case is not None:
-                    qid=str(qid);case=str(case)
+                item=json.loads(line);case=item.get('case_id')
+                if isinstance(case,bool) or case is None or not str(case).strip():continue
+                for field in ('question_id','full_question_id'):
+                    qid=item.get(field)
+                    if qid is None:continue
+                    qid=str(qid);case=str(case).strip()
                     if qid in mapping and mapping[qid]!=case:raise ValueError('ambiguous_source_case_binding')
                     mapping[qid]=case
         for row in rows:
