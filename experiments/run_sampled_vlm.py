@@ -281,9 +281,18 @@ def failure_details(exc, key=''):
             identifiers['provider_error_' + field] = value
     code = str(identifiers.get('provider_error_code', '')).lower()
     param = str(identifiers.get('provider_error_param', '')).lower()
+    error_type = str(identifiers.get('provider_error_type', '')).lower()
+    provider_message = body.get('message')
+    # DashScope reports account arrears as HTTP 400, including Arrearage in
+    # code/type and an overdue-payment documentation link. This is systemic,
+    # not a rejected image/sample. Preserve the existing billing guard/category.
+    account_arrears = any(marker in value for value in (code, error_type)
+                          for marker in ('arrearage', 'overdue-payment', 'overdue_payment'))
+    if isinstance(provider_message, str):
+        account_arrears = account_arrears or bool(re.search(r'\boverdue[-_ ]payment\b', provider_message, re.I))
     quota = any(x in code for x in ('insufficient_quota','quota_exceeded','insufficient_balance',
         'insufficient_funds','credit_balance','billing_hard_limit','balance_not_enough','account_deactivated',
-        'spend_limit','usage_limit'))
+        'spend_limit','usage_limit')) or account_arrears
     configuration = any(x in code for x in ('model_not_found','model_not_exist','invalid_model',
         'unsupported_model','unsupported_parameter','unsupported_param','invalid_parameter','invalid_api_key',
         'invalid_request_format','invalid_request_schema')) or param in {

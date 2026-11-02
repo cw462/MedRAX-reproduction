@@ -435,6 +435,45 @@ class FailureContinuation(unittest.TestCase):
         self.assertEqual(self.terminal(1)['answer'],'B')
         self.assertEqual(runner.read(self.out/'status.json')['extra_requests_used'],1)
 
+    def test_dashscope_http400_arrearage_stops_before_next_sample(self):
+        self.rows(2)
+        error = HTTPFailure(400, 'Arrearage')
+        error.body['error'].update(type='Arrearage', message=(
+            'Access denied. Please make sure your account is in good standing. '
+            'See https://help.example.invalid/errors#overdue-payment'))
+        create = Mock(side_effect=[error, self.reply()])
+        self.assertEqual(self.execute(create), 2)
+        self.assertEqual(create.call_count, 1)
+        terminal = self.terminal(1)
+        attempt = terminal['attempts'][0]
+        self.assertEqual(terminal['fatal_reason'], 'provider_quota_or_balance')
+        self.assertEqual(attempt['status_code'], 400)
+        self.assertEqual(attempt['provider_error_code'], 'Arrearage')
+        self.assertEqual(attempt['provider_error_type'], 'Arrearage')
+        self.assertFalse(attempt['retryable'])
+        self.assertEqual(attempt['billing_outcome'], 'unknown_conservative_reservation_not_invoice')
+        original = (self.out/'checkpoints/q1/sample_1/terminal.json').read_bytes()
+        self.assertEqual(self.execute(create), 2)
+        self.assertEqual(create.call_count, 1)
+        self.assertEqual(original, (self.out/'checkpoints/q1/sample_1/terminal.json').read_bytes())
+
+    def test_overdue_payment_markers_are_systemic_but_old_terminals_unchanged(self):
+        for fields in ({'type': 'Arrearage'}, {'code': 'overdue-payment'},
+                       {'message': 'Access denied: account overdue payment'},
+                       {'message': 'See https://help.example.invalid/errors#overdue-payment'}):
+            error = HTTPFailure(400)
+            error.body['error'].update(fields)
+            result = runner.failure_details(error)
+            self.assertEqual(result['failure_class'], 'provider_quota_or_balance')
+            self.assertTrue(result['fatal'])
+            self.assertFalse(result['retryable'])
+        # Recovery reads the original saved decision instead of retrospectively
+        # changing the five historical sample_rejected terminal records.
+        old = {'status': 'request_failed', 'failure_class': 'sample_rejected',
+               'attempts': [{'failure_class': 'sample_rejected', 'fatal': False,
+                             'provider_error_code': 'Arrearage'}]}
+        self.assertEqual(runner.terminal_failure(old), (True, None))
+
     def test_malformed_response_is_a_controller_error_not_sample_rejection(self):
         self.rows(2)
         bad=SimpleNamespace(model_dump=lambda **_:{'model':'qwen3-vl-plus','choices':[],
