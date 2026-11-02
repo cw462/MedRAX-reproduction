@@ -106,6 +106,20 @@ class CompletePhaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "generation_not_complete"):
             score(manifest, self.root / "nonexistent_labels.json", self.root / "report")
 
+    def test_generation_gate_blocks_completed_baseline_before_labels(self):
+        run_fixture(self.root, "d", [["A"], ["B"]])
+        protocol = json.loads((self.root / "d" / "protocol.json").read_text())
+        protocol["extra_body"] = {"enable_thinking": True, "reasoning_effort": "max"}
+        put(self.root / "d" / "protocol.json", protocol)
+        put(self.root / "phase0" / "status.json", {"status": "running"})
+        manifest = self.manifest([{"id": "D", "run": "d"}], generation_gate="phase0/status.json")
+        with self.assertRaisesRegex(ValueError, "generation_gate_not_complete"):
+            score(manifest, self.root / "nonexistent_labels.json", self.root / "report")
+        put(self.root / "phase0" / "status.json", {"status": "generation_complete"})
+        result = score(manifest, self.root / "labels.json", self.root / "report")
+        self.assertTrue(result["direct_anchor_configurations"]["D"]["enable_thinking"])
+        self.assertEqual(result["direct_anchor_configurations"]["D"]["reasoning_effort"], "max")
+
     def test_duplicate_terminal_rejected_even_with_complete_status(self):
         path = run_fixture(self.root, "d", [["A"], ["B"]])
         p = path / "predictions.jsonl"
@@ -154,6 +168,17 @@ class CompletePhaseTests(unittest.TestCase):
         self.assertFalse(result["tuning_decisions"])
         self.assertFalse(result["sampling_curves"])
 
+    def test_phase3a_direct_anchors_need_no_ensemble_samples(self):
+        arms = []
+        for arm, answers in [("D", [["A"], ["B"]]), ("MAX", [["A"], ["A"]]), ("KIMI", [["B"], ["B"]])]:
+            run_fixture(self.root, arm, answers)
+            arms.append({"id": arm, "run": arm})
+        manifest = self.manifest(arms, phase="3a")
+        result = score(manifest, self.root / "labels.json", self.root / "report")
+        self.assertIsNone(result["ensemble"])
+        self.assertEqual(set(result["totals"]), {"D", "MAX", "KIMI"})
+        self.assertEqual(len(result["pairwise_direct_error_overlap"]), 3)
+
     def test_ensemble_excludes_strongest_from_B3_anchor(self):
         arms = []
         for i in range(3):
@@ -173,8 +198,14 @@ class CompletePhaseTests(unittest.TestCase):
         put(self.root / "phase.json", value)
         with self.assertRaisesRegex(ValueError, "frozen_tuning"):
             score(manifest, self.root / "labels.json", self.root / "report2")
+        value["frozen_before_test"] = True
+        value["ensemble"]["weights_source"] = "phase3a B0 tuning metrics"
+        put(self.root / "phase.json", value)
+        frozen = score(manifest, self.root / "labels.json", self.root / "report2")
+        self.assertEqual(frozen["totals"]["B2_three_models_3x3"]["correct"], 1)
+        self.assertNotIn("S1/K5", frozen["totals"])
 
-    def test_primary_ensemble_pools_independent_samples(self):
+    def test_primary_ensemble_uses_weighted_model_majorities(self):
         arms = []
         for i in range(3):
             did = "D" if i == 0 else "D" + str(i)
@@ -185,8 +216,9 @@ class CompletePhaseTests(unittest.TestCase):
         manifest = self.manifest(arms, phase=3, ensemble={"members": ["S0", "S1", "S2"],
                                                        "weights": {"S0": .8, "S1": .7, "S2": .7}, "strongest_member": "S0"})
         result = score(manifest, self.root / "labels.json", self.root / "report")
-        self.assertEqual(result["totals"]["B2_three_models_3x3"]["correct"], 2)
-        self.assertEqual(result["totals"]["B2_weighted_model_majority_secondary"]["correct"], 1)
+        self.assertEqual(result["totals"]["B2_three_models_3x3"]["correct"], 1)
+        self.assertEqual(result["totals"]["B2_pooled_nine_samples_secondary"]["correct"], 2)
+        self.assertEqual(result["comparisons"]["B1_to_B2"]["net"], -1)
 
 
 if __name__ == "__main__":

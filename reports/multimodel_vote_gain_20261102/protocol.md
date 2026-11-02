@@ -1,6 +1,7 @@
 # Multi-model independent-answer voting: protocol, 2026-11-02
 
-Status: implementation/preparation. No new experimental result is reported here.
+Status: code and plan publication only, at the user's latest instruction. No new
+inference was launched and no new experimental result is reported here.
 The user authorized the attached *MedRAX performance-gain plan* using
 `qwen3-vl-plus`, `qwen3.8-max-0902`, and `kimi/kimi-k3.1-pro`.
 The user has approved a **CNY 200 incremental cap**, for the basic-answer and
@@ -18,11 +19,13 @@ judge, memory injection, online feedback or new ReAct loop in the main arms.
    as the plan explicitly requests. Its historical derived score is 42/60.
    This is a pipeline check, not a new heldout result or tuning set. Separately
    run two old questions per new model/high-resolution/thinking capability.
-2. Tune on approximately 400 questions grouped by explicit source case ID:
+2. Tune on 402 questions (99 cases) grouped by explicit source case ID:
    historical direct prompt, text only, native images with explicit figure labels
    and provider high-resolution mode, concise evidence summary (at most 150
    words), and provider thinking mode. Retain the direct setting unless a
-   candidate improves tune accuracy by at least 1.5 percentage points.
+   visual candidate improves tune accuracy by at least 1.5 percentage points.
+   Text only is the attachment's diagnostic control and is not a visual
+   configuration eligible for advancement.
 3. Draw nine independent samples at Qwen temperature 0.7. Evaluate the fixed
    first K samples for K=1,3,5,7,9. Two hundred random subsets describe variance;
    they are not 200 additional deployable systems or a source of selected votes.
@@ -30,10 +33,13 @@ judge, memory injection, online feedback or new ReAct loop in the main arms.
    answers and explanations never enter another sample's context.
 4. Measure all three model single-call anchors and compare nine samples from the
    strongest tune model with three samples from each model. Remove the strongest
-   model to form a six-sample diagnostic. Plain plurality is the primary result;
-   tune-accuracy-weighted per-model majority is secondary. Freeze weights and
+   model to form a six-sample diagnostic. Per the attachment's S4, each model
+   first takes its own three-sample majority, then those three decisions are
+   weighted by B0 tune accuracy. Pooling all nine sample votes is secondary.
+   Freeze weights and
    strongest-model choice before any test labels are scored.
-5. Score frozen arms once on approximately 1,000 case-disjoint heldout questions.
+5. In a later authorized stage, score frozen arms once on the 1,002-question,
+   241-case heldout set.
    A full 2,500-question result is separate: it includes seen and tuning cases
    and must not be called wholly heldout. Reuse a sample only when its complete
    frozen acquisition configuration and input match; never rerun for a better
@@ -105,6 +111,13 @@ request counter spans restarts and models. SDK retries are zero; at most one
 explicit technical retry per sample is permitted within the phase/global budget.
 An unknown provider outcome is never blindly sent again. A successful saved
 response is reused; all completed terminal records are immutable.
+
+The frozen tune inputs contain at most five images per question. The 131,072
+input-token reservation/hard bound leaves room for five provider high-resolution
+image allocations (up to 16,384 each) and text; it avoids treating the old
+single-image token allowance as a valid multi-image ceiling. Settlement uses
+returned actual usage, not the full pre-call reservation, when complete usage
+is available.
 
 The maximum planned request inventory is 56,268 normal plus 2,814 technical
 attempts; this is an upper bound across all planned stages, not permission to

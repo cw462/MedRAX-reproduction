@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from decimal import Decimal
 import json
+import os
 from pathlib import Path
 
 
@@ -27,7 +28,7 @@ def profile(model, output=8192):
     identities = ['kimi/kimi-k3.1-pro', 'kimi-k3.1-pro'] if model.startswith('kimi/') else [model]
     return {'base_url':'https://dashscope.aliyuncs.com/compatible-mode/v1',
         'identity_prefixes':identities,'input_cny_per_million':inp,
-        'output_cny_per_million':out,'max_input_tokens':65536,'max_output_tokens':output,
+        'output_cny_per_million':out,'max_input_tokens':131072,'max_output_tokens':output,
         'price_basis':'2026-11-02 official Beijing list rates; qwen3-vl-plus retains historical conservative 4/12 accounting; cache discounts not assumed; reasoning counted in completion_tokens'}
 
 
@@ -116,6 +117,12 @@ def phase0(args):
         'global_request_counter':f'{relative}/global_requests.json',
         'next_phase':'stop after generation for regression score and capability assessment; freeze phase1 separately'}
     dump_new(config_dir/'phase0.json',manifest)
+    score_arms=[{'id':a['id'],'run':os.path.relpath(a['out'],config_dir).replace('\\','/')} for a in arms]
+    dump_new(config_dir/'phase0.score.json',{'phase':0,'split':'regression',
+        'baseline':'D_regression60','arms':score_arms[:1],
+        'generation_gate':os.path.relpath(parent/'phase0/status.json',config_dir).replace('\\','/')})
+    dump_new(config_dir/'phase0.smokes.export.json',{'phase':0,'split':'capability_smoke',
+        'arms':score_arms[1:]})
     print(json.dumps({'phase_manifest':str(config_dir/'phase0.json'),'new_budget_cny':str(budget),
         'planned_requests':68,'paid_calls_started':0}))
 

@@ -70,7 +70,11 @@ def main():
     out=out.resolve()
     if not out.is_relative_to(root):raise ValueError('phase_path_outside_experiment_root')
     out.mkdir(parents=True, exist_ok=True)
-    with exclusive_lock(out/'.phase.lock'):
+    global_counter=(root/manifest['global_request_counter']).resolve()
+    if not global_counter.is_relative_to(root):raise ValueError('global_counter_outside_root')
+    # Serial ledger inheritance is safe only if different phases cannot execute
+    # concurrently from the same preceding balance snapshot.
+    with exclusive_lock(str(global_counter)+'.execution.lock'), exclusive_lock(out/'.phase.lock'):
         arms = validate_manifest(manifest)
         frozen_write(out/'phase_protocol.json', dict(manifest,
             arm_configurations={arm['id']:read(Path(arm['config'])) for arm in arms},

@@ -2,6 +2,8 @@
 
 No provider, ledger, inference, or prediction writes. All declared runs must have
 complete, unique terminal coverage before the separate labels file is opened.
+An optional generation_gate names a phase status JSON, relative to the manifest;
+it must be generation_complete before any arm or reference labels are read.
 
 Manifest example (paths relative to the manifest):
  {"phase": 2, "split": "tune", "baseline": "D", "arms": [
@@ -13,7 +15,8 @@ Optional ensemble: {"members": [sampled arm IDs], "weights": {ID: weight},
 On tune only, omitted weights/strongest are derived from member direct arms.
 Held-out scoring requires explicit frozen weights and strongest member, and
 frozen_before_test=true. The scorer never chooses a model or K on test labels.
-Primary B2 pools nine independent votes. Weighted model-majority is secondary.
+Primary B2 uses tuning-accuracy-weighted per-model three-sample majorities.
+Pooling all nine independent sample votes is a secondary diagnostic only.
 """
 from __future__ import annotations
 
@@ -265,6 +268,10 @@ def resources(records):
 def score(manifest_path, labels_path, out):
     manifest_path, out = Path(manifest_path).resolve(), Path(out).resolve()
     manifest = read(manifest_path)
+    if manifest.get("generation_gate"):
+        gate = read((manifest_path.parent / manifest["generation_gate"]).resolve())
+        if gate.get("status") != "generation_complete":
+            raise ValueError("phase_generation_gate_not_complete")
     arms = manifest["arms"]
     if not arms or len({a["id"] for a in arms}) != len(arms):
         raise ValueError("unique_nonempty_arm_ids_required")
@@ -352,21 +359,21 @@ def score(manifest_path, labels_path, out):
             raise ValueError("B2_requires_3x3_and_B1_requires_nine_saved_samples")
         member_predictions = {m: sample_predictions(runs[m], 3, views[direct[m]], qids) for m in members}
         views["B1_best_member_K9"] = sample_predictions(runs[strongest], 9, views[direct[strongest]], qids)
-        views["B2_three_models_3x3"] = {q: vote([runs[m]["answers"][q, i] for m in members for i in range(1, 4)],
+        views["B2_pooled_nine_samples_secondary"] = {q: vote([runs[m]["answers"][q, i] for m in members for i in range(1, 4)],
                                               views[direct[strongest]][q]) for q in qids}
-        views["B2_weighted_model_majority_secondary"] = {q: vote([member_predictions[m][q] for m in members],
+        views["B2_three_models_3x3"] = {q: vote([member_predictions[m][q] for m in members],
                                               views[direct[strongest]][q], [weights[m] for m in members]) for q in qids}
         remaining = [m for m in members if m != strongest]
         remaining_anchor = max(remaining, key=lambda m: (weights[m], -remaining.index(m)))
-        views["B3_without_strongest"] = {q: vote([runs[m]["answers"][q, i] for m in remaining for i in range(1, 4)],
+        views["B3_pooled_six_samples_secondary"] = {q: vote([runs[m]["answers"][q, i] for m in remaining for i in range(1, 4)],
                                                views[direct[remaining_anchor]][q]) for q in qids}
-        views["B3_weighted_model_majority_secondary"] = {q: vote([member_predictions[m][q] for m in remaining],
+        views["B3_without_strongest"] = {q: vote([member_predictions[m][q] for m in remaining],
                                                views[direct[remaining_anchor]][q], [weights[m] for m in remaining]) for q in qids}
         ensemble_info = {"members": members, "weights": weights, "strongest_member": strongest,
                          "weights_source": ensemble.get("weights_source", "this tuning phase direct accuracy"),
                          "member_direct_arms": direct, "B1_sample_calls": 9, "B2_sample_calls": 9,
-                         "primary_vote_rule": "pool all independent sample votes; no per-model compression or weights",
-                         "secondary_vote_rule": "three-sample plurality per model, then tuning-accuracy-weighted model votes",
+                         "primary_vote_rule": "three-sample plurality per model, then tuning-accuracy-weighted model votes, following plan S4",
+                         "secondary_vote_rule": "pool all independent sample votes; no per-model compression or weights; diagnostic only",
                          "direct_anchor_temperatures": {m: runs[direct[m]]["config"].get("temperature") for m in members},
                          "B3_sample_calls": 6, "tiebreak_direct_calls_reused_but_not_free": True,
                          "B1_direct_anchor_calls": 1, "B2_direct_anchor_calls": 3, "B3_direct_anchor_calls": 2,
@@ -399,7 +406,10 @@ def score(manifest_path, labels_path, out):
               "ensemble": ensemble_info, "pairwise_direct_error_overlap": overlaps, "resources": costs,
               "new_inference": 0, "prediction_records_modified": False,
               "vote_rule": "plurality valid votes only; saved direct anchor if among tied winners, else alphabetical; all missing stays missing",
-              "direct_anchor_configurations": {a: {k: runs[a]["config"].get(k) for k in ("model", "temperature", "top_p", "prompt_variant", "enable_thinking", "reasoning_effort")} for a in runs if runs[a]["samples"] == 1},
+              "direct_anchor_configurations": {a: {
+                  **{k: runs[a]["config"].get(k) for k in ("model", "temperature", "top_p", "prompt_variant")},
+                  **{k: runs[a]["config"].get("extra_body", {}).get(k) for k in ("enable_thinking", "reasoning_effort")}
+              } for a in runs if runs[a]["samples"] == 1},
               "deployed_K_rule": "first K saved samples; Monte Carlo subsampling is diagnostic, not oracle selection",
               "test_selection_performed": False, "paper_GPT4o_attribution_arms_executed": False}
     out.mkdir(parents=True, exist_ok=True)
@@ -416,7 +426,7 @@ def score(manifest_path, labels_path, out):
         report += f"|{name}|{values['correct']}/{values['planned_n']}|{values['accuracy']:.2%}|{values['missing']}|\n"
     report += "\n[Complete metrics](metrics.json) · [Per-question scores](per_question.json) · [Costs](cost_summary.json).\n\nMissing and technical failures remain in the denominator. Sampling-curve spread is not a population CI. Paired uncertainty resamples complete cases; exact McNemar remains a question-level test. All model/K choices are tuning-only; held-out labels never select weights or a winner.\n"
     if ensemble_info:
-        report += "\n" + ensemble_info["compute_limitation"] + "\n"
+        report += "\nPrimary B2/B3 first take each model's own three-sample plurality, then weight those model votes by frozen tuning-pool accuracy (plan S4). Pooled nine/six-sample votes are secondary diagnostics. B2−B1 and its confidence interval use the weighted primary B2.\n\n" + ensemble_info["compute_limitation"] + "\n"
     report += "\nThis phase has no GPT-4o matched attribution arm. A subset score cannot be directly compared with the paper's full-benchmark headline. No parser or technical recovery is counted as mechanism gain.\n"
     (out / "README.md").write_text(report, encoding="utf-8")
     return result

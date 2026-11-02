@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from data_tools.make_heldout import build, collect_history, main, ordered_images, read_rows
+from data_tools.make_heldout import build, collect_history, decode_history_manifest, main, ordered_images, read_rows
 
 
 def row(case, number=0, **extra):
@@ -122,6 +122,34 @@ class HeldoutSplitTests(unittest.TestCase):
             p.write_text(json.dumps(row(10)) + '\n{"answer":')
             with self.assertRaisesRegex(ValueError, 'line 2'):
                 read_rows(p)
+
+    def test_public_schema2_history_cli_decodes_losslessly_and_rejects_bad_index(self):
+        packed = dict(history(10), schema_version=2,
+                      source_files=['reports/train/trace.jsonl', 'archive/train.labels.jsonl'],
+                      case_source_indices={'10': [0]},
+                      qid_linked_legacy_case_aliases=[[0, 'case_hash', 'old-content-hash', ['10']]],
+                      metadata_only_inventories_not_exposure=[],
+                      isolated_reference_stores_not_exposure=[{'source_file_index': 1, 'record_count': 8}])
+        decoded = decode_history_manifest(packed)
+        self.assertEqual(decoded['case_sources'], {'10': ['reports/train/trace.jsonl']})
+        self.assertEqual(decoded['qid_linked_legacy_case_aliases'],
+                         [['reports/train/trace.jsonl', 'case_hash', 'old-content-hash', ['10']]])
+        self.assertEqual(decoded['isolated_reference_stores_not_exposure'],
+                         [{'source': 'archive/train.labels.jsonl', 'record_count': 8}])
+        self.assertEqual(packed['schema_version'], 2)  # decoding does not mutate the published file
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / 'metadata.jsonl').write_text('\n'.join(json.dumps(row(c)) for c in range(10, 18)))
+            (root / 'public.json').write_text(json.dumps(packed))
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                main(['--metadata', str(root / 'metadata.jsonl'), '--history-manifest', str(root / 'public.json'),
+                      '--history-out', str(root / 'decoded.json'), '--preview', '--tune-questions', '2', '--test-questions', '2'])
+            self.assertEqual(json.loads(output.getvalue())['seen_case_n'], 1)
+            self.assertEqual(json.loads((root / 'decoded.json').read_text()), decoded)
+        packed['case_source_indices']['10'] = [-1]
+        with self.assertRaisesRegex(ValueError, 'source_file_index'):
+            decode_history_manifest(packed)
 
 
 if __name__ == '__main__':

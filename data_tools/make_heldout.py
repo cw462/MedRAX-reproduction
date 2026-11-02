@@ -315,6 +315,51 @@ def write_json(path, value):
     Path(path).write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
 
+def decode_history_manifest(value):
+    """Read original histories or the losslessly indexed public schema 2."""
+    if not isinstance(value, dict):
+        raise ValueError('history manifest must be an object')
+    version = value.get('schema_version', 1)
+    if version == 1:
+        return value
+    if version != 2:
+        raise ValueError('unsupported history manifest schema')
+    sources = value.get('source_files')
+    by_case = value.get('case_source_indices')
+    if (not isinstance(sources, list) or any(not isinstance(x, str) for x in sources)
+            or not isinstance(by_case, dict)
+            or set(by_case) != set(value.get('excluded_case_ids', []))):
+        raise ValueError('invalid indexed history source table or case coverage')
+
+    def source(index):
+        if type(index) is not int or not 0 <= index < len(sources):
+            raise ValueError('invalid history source_file_index')
+        return sources[index]
+
+    decoded = {k: v for k, v in value.items()
+               if k not in {'encoding', 'source_files', 'case_source_indices'}}
+    decoded['schema_version'] = 1
+    decoded['source_manifest_schema_version'] = 2
+    decoded['case_sources'] = {}
+    for case, indices in by_case.items():
+        if not isinstance(indices, list) or not indices:
+            raise ValueError('excluded case requires historical source indices')
+        decoded['case_sources'][case] = [source(i) for i in indices]
+    decoded['qid_linked_legacy_case_aliases'] = []
+    for item in value.get('qid_linked_legacy_case_aliases', []):
+        if not isinstance(item, list) or len(item) != 4:
+            raise ValueError('invalid indexed legacy case alias')
+        decoded['qid_linked_legacy_case_aliases'].append([source(item[0]), *item[1:]])
+    for field in ('metadata_only_inventories_not_exposure', 'isolated_reference_stores_not_exposure'):
+        decoded[field] = []
+        for item in value.get(field, []):
+            if not isinstance(item, dict) or 'source_file_index' not in item:
+                raise ValueError('invalid indexed historical inventory')
+            decoded[field].append({**{k: v for k, v in item.items() if k != 'source_file_index'},
+                                   'source': source(item['source_file_index'])})
+    return decoded
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--metadata', type=Path, required=True)
@@ -337,7 +382,7 @@ def main(argv=None):
     else:
         if a.extra_history:
             p.error('--extra-history requires --reports')
-        history = json.loads(a.history_manifest.read_text(encoding='utf-8'))
+        history = decode_history_manifest(json.loads(a.history_manifest.read_text(encoding='utf-8')))
     if a.history_out:
         write_json(a.history_out, history)
     inputs, labels, manifest = build(rows, history, a.seed, a.tune_questions, a.test_questions)
