@@ -3,7 +3,9 @@
 Status: code and plan publication only, at the user's latest instruction. No new
 inference was launched and no new experimental result is reported here.
 The user authorized the attached *MedRAX performance-gain plan* using
-`qwen3-vl-plus`, `qwen3.8-max-0902`, and `kimi/kimi-k3.1-pro`.
+`qwen3-vl-plus`, `qwen3.8-max-0902`, and `gpt-4o`.
+The user replaced Kimi with GPT-4o on 2026-11-02 before any inference;
+GPT-4o uses the user's APIYi endpoint and a separate private credential.
 The user has approved a **CNY 200 incremental cap**, for the basic-answer and
 voting stages first. Full-benchmark/heldout expansion is not automatically
 launched under this first-stage authorization. No result is claimed in this protocol.
@@ -59,15 +61,20 @@ literal prompt is preserved. A new derived parser accepts the last explicit
 Answer line, including markdown and answer text; an ambiguous choice or refusal
 remains missing. Previous prediction files and old parsers are not rewritten.
 
-The three authorized models do not include GPT-4o. The paper-backbone-matched
-attribution arms are therefore not executed; a modern-backbone comparison alone
-cannot attribute a difference from the paper to the voting method.
+GPT-4o now has a B0 direct anchor and an independent sample arm. It receives
+nine samples only if it is the strongest B0 model, otherwise three; no additional
+paper-attribution A0/A1 arms are introduced. We request the `gpt-4o` alias and
+archive its returned version. This does not establish the paper's exact snapshot
+or reproduce its full dataset/prompt conditions, and cannot isolate a difference
+from the paper as a voting-method effect.
 
 Qwen direct anchors use T=0.2/top_p=0.95 with `enable_thinking=false` explicitly.
 The dedicated Qwen thinking arm pins `enable_thinking=true`, uses streaming,
-an 8,192 output ceiling and a 4,096 thinking budget. Kimi K3.1 Pro always thinks;
-its documented sampling parameters are fixed T=1.0/top_p=0.95. Its independent
-anchor also uses T=1.0, with maximum reasoning effort and an 8,192 output ceiling.
+an 8,192 output ceiling and a 4,096 thinking budget. GPT-4o anchors use T=0.2
+and independent samples T=0.7, both top_p=0.95 and max_tokens=2,048. Its ordinary
+Chat Completions requests omit Qwen thinking/high-resolution parameters and
+reasoning_effort. Only the exact `gpt-4o` alias or full `gpt-4o-YYYY-MM-DD`
+returned identity is accepted; `gpt-4o-mini` and other suffixes are rejected.
 Output truncation and absent final answers are retained, not repaired by a paid
 format retry. Capabilities are tested before the large arms are frozen.
 
@@ -102,6 +109,11 @@ immediately before that image. Do not invent a figure label when none is known.
 
 ## Budget, recovery and artifacts
 
+Qwen uses the `dashscope` credential slot and GPT-4o uses `apiyi`. Mixed-provider
+phases accept a credential map via stdin and pass only the relevant key to each
+child. A single-key input is rejected for mixed slots; preparation needs no key.
+No key is stored in the configuration, protocol, command arguments or repository.
+
 One incremental budget applies to the entire experiment, including capability
 checks and technical attempts. Serial arm ledgers inherit preceding committed
 spend. The original account ledger is retained; no account ledger is published.
@@ -112,12 +124,15 @@ explicit technical retry per sample is permitted within the phase/global budget.
 An unknown provider outcome is never blindly sent again. A successful saved
 response is reused; all completed terminal records are immutable.
 
-The frozen tune inputs contain at most five images per question. The 131,072
+The frozen tune inputs contain at most five images per question. Qwen's 131,072
 input-token reservation/hard bound leaves room for five provider high-resolution
 image allocations (up to 16,384 each) and text; it avoids treating the old
 single-image token allowance as a valid multi-image ceiling. Settlement uses
 returned actual usage, not the full pre-call reservation, when complete usage
-is available.
+is available. GPT-4o instead reserves at most 120,000 input tokens, within its
+128,000 context together with the actual 2,048 requested output ceiling. Its
+conservative usage guard allows at most 8,192 output tokens; this is a billing
+protection bound, not the request's generation length.
 
 The maximum planned request inventory is 56,268 normal plus 2,814 technical
 attempts; this is an upper bound across all planned stages, not permission to
@@ -135,13 +150,19 @@ excluded. Reports distinguish current experiment evidence from hypotheses.
 ## Provider sources checked 2026-11-02
 
 - [Alibaba model pricing](https://help.aliyun.com/zh/model-studio/model-pricing):
-  Beijing Qwen3.8-Max 12/36 CNY per million input/output tokens; Kimi K3.1 Pro
-  13/68. Qwen3-VL-Plus retains the existing conservative 4/12 accounting rates.
+  Beijing Qwen3.8-Max 12/36 CNY per million input/output tokens.
+  Qwen3-VL-Plus retains the existing conservative 4/12 accounting rates.
   Cache discounts are not assumed; these are accounting estimates, not invoices.
-- [Alibaba Kimi model](https://help.aliyun.com/en/model-studio/kimi-k3-1-pro-by-moonshot):
-  image input and OpenAI-compatible endpoint availability.
-- [Kimi API quickstart](https://platform.kimi.com/docs/guide/kimi-k3-1-pro-quickstart):
-  always-on thinking and fixed sampling parameters.
+- [APIYi public pricing](https://api.apiyi.com/api/pricing) and
+  [public conversion metadata](https://api.apiyi.com/api/status): GPT-4o model
+  ratio 1.25, output multiplier 4, quota_per_unit 500000 and default/svip group
+  ratio 1 imply USD 2.5/10 per million input/output tokens. The guard retains
+  conservative CNY 8/USD, yielding CNY 20/80, without cache discounts; the site's
+  displayed conversion was 7.3. These are estimates, not the account invoice.
+- [OpenAI GPT-4o model documentation](https://developers.openai.com/api/docs/models/gpt-4o):
+  image input, 128,000 context and alias/snapshot distinction. APIYi's authenticated
+  read-only model catalog listed `gpt-4o` and dated variants on 2026-11-02;
+  catalog presence is not a successful vision inference. No paid smoke was made.
 - [Alibaba vision API](https://docs.bailian.console.aliyun.com/en/model-studio/vision):
   Qwen thinking and `vl_high_resolution_images` behavior. Actual support must
   still be confirmed on this credential/endpoint with the two-question smoke.

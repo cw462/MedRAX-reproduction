@@ -1,6 +1,7 @@
 """Run a frozen list of independent sampling arms serially; never score in-process.
 
-The answer workers receive input-only JSONL files and a credential through stdin.
+The answer workers receive input-only JSONL files and their own credential through
+stdin. Mixed-provider phases select keys by their frozen credential slots.
 Each arm inherits the previous arm's committed spend, including conservative
 charges for interrupted requests. The phase stops on failure for explicit review.
 """
@@ -33,6 +34,8 @@ def validate_manifest(manifest):
         if not config_path.is_absolute():config_path=root/config_path
         cfg = read(config_path)
         validate_cfg(cfg)
+        if cfg.get('credential_slot') not in {'dashscope', 'apiyi'}:
+            raise ValueError('valid_credential_slot_required')
         if Path(cfg['root']).resolve()!=root:raise ValueError('one_runtime_root_required')
         if cfg['inherit_ledger'] != previous:
             raise ValueError('all_arms_must_inherit_the_preceding_spend')
@@ -58,11 +61,49 @@ def validate_manifest(manifest):
     return normalized
 
 
+def load_credentials(args, slots):
+    """Read keys only for execution; never include supplied contents in errors."""
+    if args.prepare_only:
+        return {}
+    if args.api_key_stdin:
+        if len(slots) != 1:
+            raise ValueError('mixed_credential_slots_require_json_stdin')
+        raw = sys.stdin.buffer.readline(65537)
+        try:
+            values = {next(iter(slots)): raw.decode('utf-8').rstrip('\r\n')}
+        except UnicodeError:
+            raise ValueError('invalid_stdin_credentials') from None
+    elif args.credentials_json_stdin:
+        raw = sys.stdin.buffer.read(65537)
+        try:
+            values = json.loads(raw.decode('utf-8'))
+        except (UnicodeError, ValueError):
+            raise ValueError('invalid_stdin_credentials') from None
+    else:
+        raise ValueError('stdin_credentials_required')
+    if len(raw) > 65536 or not isinstance(values, dict):
+        raise ValueError('invalid_stdin_credentials')
+    if not slots <= set(values) or set(values) - {'dashscope', 'apiyi'}:
+        raise ValueError('invalid_stdin_credentials')
+    for value in values.values():
+        if not isinstance(value, str) or not value or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value):
+            raise ValueError('invalid_stdin_credentials')
+        try:
+            value.encode('ascii')
+        except UnicodeError:
+            raise ValueError('invalid_stdin_credentials') from None
+    return {slot: values[slot].encode('ascii') for slot in slots}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--prepare-only', action='store_true')
-    parser.add_argument('--api-key-stdin', action='store_true')
+    credentials = parser.add_mutually_exclusive_group()
+    credentials.add_argument('--api-key-stdin', action='store_true',
+        help='One stdin key; allowed only when all arms use the same credential slot.')
+    credentials.add_argument('--credentials-json-stdin', action='store_true',
+        help='Read a JSON object of credential-slot keys from stdin; keys are never persisted.')
     args = parser.parse_args()
     manifest = read(args.manifest)
     root=Path(manifest['root']).resolve();out = Path(manifest['out'])
@@ -76,12 +117,13 @@ def main():
     # concurrently from the same preceding balance snapshot.
     with exclusive_lock(str(global_counter)+'.execution.lock'), exclusive_lock(out/'.phase.lock'):
         arms = validate_manifest(manifest)
+        configurations = {arm['id']: read(Path(arm['config'])) for arm in arms}
         frozen_write(out/'phase_protocol.json', dict(manifest,
-            arm_configurations={arm['id']:read(Path(arm['config'])) for arm in arms},
+            arm_configurations=configurations,
             implementation_commit=os.environ.get('MEDRAX_CODE_COMMIT', 'uncommitted')))
-        key = sys.stdin.buffer.readline().strip() if args.api_key_stdin else b''
-        if not args.prepare_only and (not key or not manifest.get('budget_authorization')):
-            raise ValueError('authorized_budget_and_stdin_credential_required')
+        if not args.prepare_only and not manifest.get('budget_authorization'):
+            raise ValueError('authorized_budget_required')
+        keys = load_credentials(args, {cfg['credential_slot'] for cfg in configurations.values()})
         completed = []
         for arm in arms:
             state_path = Path(arm['out'])/'status.json'
@@ -94,7 +136,8 @@ def main():
             command = [sys.executable, str(Path(__file__).with_name('run_sampled_vlm.py')),
                 '--config', arm['config'], '--out', arm['out']]
             command += ['--prepare-only'] if args.prepare_only else ['--api-key-stdin', '--resume']
-            result = subprocess.run(command, input=None if args.prepare_only else key+b'\n', check=False)
+            key = None if args.prepare_only else keys[configurations[arm['id']]['credential_slot']] + b'\n'
+            result = subprocess.run(command, input=key, check=False)
             if result.returncode:
                 write(out/'status.json', {'status':'stopped','updated_utc':now(),
                     'active_arm':arm['id'],'completed_arms':completed,'exitcode':result.returncode})

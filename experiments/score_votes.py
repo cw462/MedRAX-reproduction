@@ -377,7 +377,7 @@ def score(manifest_path, labels_path, out):
                          "direct_anchor_temperatures": {m: runs[direct[m]]["config"].get("temperature") for m in members},
                          "B3_sample_calls": 6, "tiebreak_direct_calls_reused_but_not_free": True,
                          "B1_direct_anchor_calls": 1, "B2_direct_anchor_calls": 3, "B3_direct_anchor_calls": 2,
-                         "compute_limitation": "B0 direct anchors are a shared fixed acquisition cost. B1/B2 match nine sampled calls, not token or monetary compute. Standalone deployment including model-specific direct anchors is B1 10, B2 12, B3 8 logical calls. Kimi's anchor remains its supported T1.0 thinking configuration, not T0.2."}
+                         "compute_limitation": "B0 direct anchors are a shared fixed acquisition cost. B1/B2 match nine sampled calls, not token or monetary compute. Standalone deployment including model-specific direct anchors is B1 10, B2 12, B3 8 logical calls. GPT-4o uses T0.2 direct anchors and T0.7 independent samples; its requested provider alias does not establish a paper-matched snapshot."}
     scored = {name: totals(pred, labels, qids) for name, pred in views.items()}
     comparisons = {baseline + "_to_" + name: paired(baseline_predictions, pred, labels, qids, case_ids, bootstrap_n, seed)
                    for name, pred in views.items() if name != baseline}
@@ -411,7 +411,13 @@ def score(manifest_path, labels_path, out):
                   **{k: runs[a]["config"].get("extra_body", {}).get(k) for k in ("enable_thinking", "reasoning_effort")}
               } for a in runs if runs[a]["samples"] == 1},
               "deployed_K_rule": "first K saved samples; Monte Carlo subsampling is diagnostic, not oracle selection",
-              "test_selection_performed": False, "paper_GPT4o_attribution_arms_executed": False}
+              "test_selection_performed": False, "paper_GPT4o_attribution_arms_executed": False,
+              "gpt4o_provider_alias_arms": {a: {
+                  "requested_model": "gpt-4o", "samples": run["samples"],
+                  "returned_models": sorted({attempt["response_model"] for row in run["records"]
+                      for attempt in row.get("attempts", []) if isinstance(attempt.get("response_model"), str)}),
+                  "paper_snapshot_match_established": False
+              } for a, run in runs.items() if run["config"].get("model") == "gpt-4o"}}
     out.mkdir(parents=True, exist_ok=True)
     write(out / "metrics.json", result)
     write(out / "cost_summary.json", {"arms": costs, "new_inference": 0,
@@ -427,7 +433,7 @@ def score(manifest_path, labels_path, out):
     report += "\n[Complete metrics](metrics.json) · [Per-question scores](per_question.json) · [Costs](cost_summary.json).\n\nMissing and technical failures remain in the denominator. Sampling-curve spread is not a population CI. Paired uncertainty resamples complete cases; exact McNemar remains a question-level test. All model/K choices are tuning-only; held-out labels never select weights or a winner.\n"
     if ensemble_info:
         report += "\nPrimary B2/B3 first take each model's own three-sample plurality, then weight those model votes by frozen tuning-pool accuracy (plan S4). Pooled nine/six-sample votes are secondary diagnostics. B2−B1 and its confidence interval use the weighted primary B2.\n\n" + ensemble_info["compute_limitation"] + "\n"
-    report += "\nThis phase has no GPT-4o matched attribution arm. A subset score cannot be directly compared with the paper's full-benchmark headline. No parser or technical recovery is counted as mechanism gain.\n"
+    report += "\nGPT-4o arms, when present, request the provider alias gpt-4o; returned identities are preserved, and a matching paper snapshot/protocol has not been established. GPT-4o's presence in B0 or sampling does not constitute strict paper reproduction. A subset score cannot be directly compared with the paper's full-benchmark headline. No parser or technical recovery is counted as mechanism gain.\n"
     (out / "README.md").write_text(report, encoding="utf-8")
     return result
 

@@ -30,10 +30,16 @@ class TuningConfiguration(unittest.TestCase):
         rows=[dict(old[0],question_id=f'tune_{i}',case_id=f'new_case_{i//2}',figure_labels=['Figure 1']) for i in range(402)]
         path=self.root/tune.TUNE;path.parent.mkdir(parents=True)
         path.write_text(''.join(json.dumps(r)+'\n' for r in rows),encoding='utf-8')
+        self.gpt_profile=self.root/'gpt4o.public.json'
+        write(self.gpt_profile,{'model':'gpt-4o','credential_slot':'apiyi',
+            'base_url':'https://example.invalid/v1','identity_prefixes':['gpt-4o'],
+            'input_cny_per_million':'1','output_cny_per_million':'2',
+            'price_basis':'synthetic fixture only','max_input_tokens':120000,'max_output_tokens':8192})
         with contextlib.redirect_stdout(io.StringIO()):
             phase0.phase0(SimpleNamespace(root=str(self.root),code='code_vote_gain',
                 new_budget_cny='200',inherited_committed_cny='194.252828',original_cap_cny='1000000',
-                inherit_ledger='reports/old.json',budget_authorization='synthetic 200 CNY'))
+                inherit_ledger='reports/old.json',budget_authorization='synthetic 200 CNY',
+                gpt4o_profile=str(self.gpt_profile)))
         self.p0metrics=self.root/'reports/p0/metrics.json'
         self.p1metrics=self.root/'reports/p1/metrics.json'
         self.p3metrics=self.root/'reports/p3a/metrics.json'
@@ -89,7 +95,7 @@ class TuningConfiguration(unittest.TestCase):
             self.assertEqual(cfg['new_experiment_budget_cny'],'200')
             self.assertEqual(cfg['inherit_ledger'],previous);previous=cfg['ledger']
             self.assertEqual(cfg['global_max_requests'],59082)
-        self.assertEqual(counts,{'QwenMax_samples':9,'Kimi_samples':3})
+        self.assertEqual(counts,{'QwenMax_samples':9,'GPT4o_samples':3})
         score=tune.read(self.config/'phase3b.score.json')
         self.assertEqual(score['ensemble']['strongest_member'],'S1')
         self.assertEqual(score['ensemble']['primary_vote_rule'],'tune_accuracy_weighted_model_majorities')
@@ -128,21 +134,37 @@ class TuningConfiguration(unittest.TestCase):
         values['totals']['Think']['correct']=281;write(self.p1metrics,values)
         with self.assertRaisesRegex(ValueError,'fixed_1p5'):self.run_phase('3a')
 
-    def test_cross_model_only_supported_flags_and_kimi_native_temperature(self):
-        self.through_three_a('Kimi_B0');self.run_phase('3b')
+    def test_cross_model_only_supported_flags_and_gpt4o_sampling(self):
+        self.through_three_a('GPT4o_B0');self.run_phase('3b')
         manifests=[tune.read(self.config/f'phase{p}.json') for p in ('3a','3b')]
         for manifest in manifests:
             for arm in manifest['arms']:
                 cfg=tune.read(self.root/arm['config'])
                 self.assertTrue(cfg['figure_labels']);self.assertFalse(cfg['high_resolution'])
                 self.assertNotIn('vl_high_resolution_images',cfg['extra_body'])
-                if cfg['model'].startswith('kimi/'):
-                    self.assertEqual(cfg['temperature'],1.0)
-                    self.assertEqual(cfg['extra_body'],{'reasoning_effort':'max'})
+                if cfg['model']=='gpt-4o':
+                    self.assertEqual(cfg['temperature'],.2 if manifest['phase']=='3a' else .7)
+                    self.assertEqual(cfg['extra_body'],{})
+                    self.assertEqual(cfg['max_output_tokens'],2048)
+                    self.assertEqual(cfg['credential_slot'],'apiyi')
+                    self.assertEqual(cfg['profile']['input_cny_per_million'],'1')
+                    self.assertEqual(cfg['profile']['max_input_tokens'],120000)
+                    self.assertEqual(cfg['profile']['base_url'],'https://example.invalid/v1')
+                else:
+                    self.assertEqual(cfg['credential_slot'],'dashscope')
+                    self.assertEqual(cfg['profile']['max_input_tokens'],131072)
         score=tune.read(self.config/'phase3b.score.json')
         self.assertEqual(score['ensemble']['strongest_member'],'S2')
         cfg=tune.read(self.root/manifests[-1]['arms'][-1]['config'])
         self.assertEqual(cfg['samples'],9)
+
+    def test_public_gpt4o_profile_rejects_credentials_and_nonpositive_rates(self):
+        values=tune.read(self.gpt_profile)
+        for key,value in [('api_key','synthetic-credential'),('input_cny_per_million','0')]:
+            changed=dict(values);changed[key]=value;write(self.gpt_profile,changed)
+            with self.assertRaises(ValueError) as caught:phase0.load_gpt4o_profile(self.gpt_profile)
+            self.assertNotIn('synthetic-credential',str(caught.exception))
+        with self.assertRaisesRegex(ValueError,'explicit_gpt4o'):phase0.load_gpt4o_profile(None)
 
     def test_when_Qwen_is_strongest_only_three_new_samples_per_other_model(self):
         self.through_three_a('Qwen_B0');result=self.run_phase('3b')

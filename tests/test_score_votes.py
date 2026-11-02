@@ -170,14 +170,17 @@ class CompletePhaseTests(unittest.TestCase):
 
     def test_phase3a_direct_anchors_need_no_ensemble_samples(self):
         arms = []
-        for arm, answers in [("D", [["A"], ["B"]]), ("MAX", [["A"], ["A"]]), ("KIMI", [["B"], ["B"]])]:
-            run_fixture(self.root, arm, answers)
+        for arm, answers in [("D", [["A"], ["B"]]), ("MAX", [["A"], ["A"]]), ("GPT4O", [["B"], ["B"]])]:
+            run_fixture(self.root, arm, answers, model='gpt-4o' if arm=='GPT4O' else arm)
             arms.append({"id": arm, "run": arm})
         manifest = self.manifest(arms, phase="3a")
         result = score(manifest, self.root / "labels.json", self.root / "report")
         self.assertIsNone(result["ensemble"])
-        self.assertEqual(set(result["totals"]), {"D", "MAX", "KIMI"})
+        self.assertEqual(set(result["totals"]), {"D", "MAX", "GPT4O"})
         self.assertEqual(len(result["pairwise_direct_error_overlap"]), 3)
+        self.assertEqual(set(result['gpt4o_provider_alias_arms']), {'GPT4O'})
+        self.assertFalse(result['gpt4o_provider_alias_arms']['GPT4O']['paper_snapshot_match_established'])
+        self.assertFalse(result['paper_GPT4o_attribution_arms_executed'])
 
     def test_ensemble_excludes_strongest_from_B3_anchor(self):
         arms = []

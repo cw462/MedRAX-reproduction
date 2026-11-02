@@ -16,8 +16,9 @@ python -m pip install -r requirements-vote-gain.txt
 
 下列命令在代码仓库执行。`PROJECT_ROOT` 是数据/运行目录的绝对根路径，
 `CODE_ROOT` 是本仓库的绝对路径，必须位于 PROJECT_ROOT 下（可以相同）。
-不要在脚本中写入 API key。以下需要密钥的命令仅从环境变量读入 stdin，
-不把密钥写进 argv、配置或日志。
+不要在脚本中写入 API key。Qwen 使用 DASHSCOPE_API_KEY，GPT-4o 使用 APIYI_API_KEY。
+以下示例只从环境变量读入 stdin，不把密钥写进 argv、配置或日志；本机已配置的
+私有部署器从仓库之外的独立凭据文件读取。不要将凭据文件复制到公开目录。
 
 已有冻结输入的相对位置：
 
@@ -53,6 +54,7 @@ python data_tools/make_heldout.py \
 ```sh
 python experiments/configure_vote_gain.py \
   --root "$PROJECT_ROOT" --code "$CODE_ROOT" \
+  --gpt4o-profile "$CODE_ROOT/configs/gpt4o_apiyi_vote_profile.json" \
   --new-budget-cny 200 \
   --inherited-committed-cny "$RECORDED_COMMITTED_CNY" \
   --original-cap-cny "$RECORDED_ORIGINAL_CAP_CNY" \
@@ -60,7 +62,10 @@ python experiments/configure_vote_gain.py \
   --budget-authorization 'User 2026-11-02: incremental CNY200, basic and voting phases'
 ```
 
-此命令只写配置，不打开账本或调用模型。旧 60 题回归输入来自原先保存的
+此命令只写配置，不打开账本或调用模型。GPT-4o 的公开配置固定 API易接口、
+`gpt-4o` 别名、20/80 CNY 每百万 token 保护费率及费率来源，不含密钥。
+API易模型目录已通过只读请求确认；首次真实图像调用仍由阶段 0 完成。
+旧 60 题回归输入来自原先保存的
 `runs/v4_validation60/inputs.jsonl`；case ID 从源元数据明确的两种 question ID
 字段映射补齐，绝不拆字符串猜病例。
 
@@ -74,13 +79,17 @@ python experiments/run_vote_phase.py --manifest "$CFG/phase0.json" --prepare-onl
 不可原地修改。之后获得继续运行指令时才执行：
 
 ```sh
-printf '%s\n' "$DASHSCOPE_API_KEY" | \
-  python -u experiments/run_vote_phase.py --manifest "$CFG/phase0.json" --api-key-stdin
+python -c 'import json,os; print(json.dumps({"dashscope":os.environ["DASHSCOPE_API_KEY"],"apiyi":os.environ["APIYI_API_KEY"]}))' | \
+  python -u experiments/run_vote_phase.py --manifest "$CFG/phase0.json" --credentials-json-stdin
 ```
 
 该入口串行运行 D60 和四组两题接口检查；共用整个实验的执行锁。失败即保留状态
 并停止，先确认具体异常；不得重新发出结果未知的请求。恢复时沿用同一入口和
 冻结配置，已完成样本会跳过。不存在自动额外跑一遍来修复低分的路径。
+
+阶段 0、3a、3b 含两种 credential_slot，必须使用上述凭据映射；每个模型子进程
+只收到自己的密钥。仅 Qwen 的阶段 1/2 可继续使用 `--api-key-stdin`，也可统一使用
+凭据映射。混合阶段会拒绝单密钥入口，不会把 Qwen 密钥误传到 API易。
 
 ## 完成后评分和晋级
 

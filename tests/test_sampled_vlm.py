@@ -18,7 +18,7 @@ import run_sampled_vlm as runner
 
 def config(root):
     return dict(root=str(root), input='questions.jsonl', image_root='images',
-        run_id='synthetic_test', model='qwen3-vl-plus', prompt_variant='answer',
+        run_id='synthetic_test', model='qwen3-vl-plus', credential_slot='dashscope', prompt_variant='answer',
         samples=1, temperature=.2, top_p=.95, max_output_tokens=256,
         request_timeout_seconds=10, figure_labels=False, high_resolution=False,
         extra_body={'enable_thinking':False}, profile=dict(
@@ -100,13 +100,66 @@ class InputAndBudgetContracts(unittest.TestCase):
         self.cfg=config(self.root);self.cfg['prompt_variant']='think'
         with self.assertRaisesRegex(ValueError,'enable_thinking'):runner.validate_cfg(self.cfg)
 
-    def test_kimi_uses_its_documented_native_sampling(self):
-        self.cfg.update(model='kimi/kimi-k3.1-pro',temperature=1.0,
-                        extra_body={'reasoning_effort':'low'})
-        self.cfg['profile']['identity_prefixes']=['kimi/kimi-k3.1-pro']
+    def gpt4o_config(self):
+        self.cfg.update(model='gpt-4o', credential_slot='apiyi', extra_body={})
+        self.cfg['profile']['identity_prefixes']=['gpt-4o']
+        self.cfg['profile'].update(max_input_tokens=120000,max_output_tokens=8192)
+        return self.cfg
+
+    def test_gpt4o_baseline_sampling_and_provider_parameters(self):
+        self.gpt4o_config()
         runner.validate_cfg(self.cfg)
         self.cfg['temperature']=.7
-        with self.assertRaisesRegex(ValueError,'kimi_k31'):runner.validate_cfg(self.cfg)
+        runner.validate_cfg(self.cfg)
+        for key,value in {'enable_thinking':False,'thinking_budget':4096,
+                          'reasoning_effort':'low','vl_high_resolution_images':False}.items():
+            self.cfg['extra_body']={key:value}
+            with self.assertRaisesRegex(ValueError,'gpt4o_no_provider'):runner.validate_cfg(self.cfg)
+        self.cfg['extra_body']={};self.cfg['prompt_variant']='think'
+        with self.assertRaisesRegex(ValueError,'gpt4o_no_provider'):runner.validate_cfg(self.cfg)
+
+    def test_gpt4o_identity_cannot_accept_mini_or_unknown_snapshot_suffix(self):
+        profile=runner.validate_cfg(self.gpt4o_config())
+        for identity in ('gpt-4o','gpt-4o-2024-05-13','gpt-4o-2024-08-06','gpt-4o-2024-11-20'):
+            self.assertTrue(profile.identity_ok(identity), identity)
+        for identity in (None,'','gpt-4o-mini','gpt-4o-mini-2024-07-18','gpt-4o-2024-08-06-other','other'):
+            self.assertFalse(profile.identity_ok(identity), identity)
+
+    def test_gpt4o_context_and_credential_slot_are_explicit(self):
+        self.gpt4o_config();self.cfg['profile']['max_input_tokens']=131072
+        with self.assertRaisesRegex(ValueError,'gpt4o_context'):runner.validate_cfg(self.cfg)
+        self.cfg['profile']['max_input_tokens']=120000
+        self.cfg['profile']['max_output_tokens']=16384
+        with self.assertRaisesRegex(ValueError,'gpt4o_context'):runner.validate_cfg(self.cfg)
+        self.cfg['profile']['max_output_tokens']=8192;self.cfg['credential_slot']='dashscope'
+        with self.assertRaisesRegex(ValueError,'credential_slot'):runner.validate_cfg(self.cfg)
+
+    def test_gpt4o_actual_mock_payload_uses_images_and_archives_returned_snapshot(self):
+        cfg=self.gpt4o_config();cfg['max_output_tokens']=2048
+        raw={'model':'gpt-4o-2024-11-20','choices':[{'message':{'content':'Answer: B'},'finish_reason':'stop'}],
+             'usage':{'prompt_tokens':10,'completion_tokens':5}}
+        create=Mock(return_value=SimpleNamespace(model_dump=lambda **_:raw))
+        client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        class MockLedger:
+            def __init__(self,*args,**kwargs):self.remaining=Decimal('10')
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+            def reserve(self,**kwargs):return 'mock-id'
+            def settle(self,*args,**kwargs):return {'charged_cny':'0','status':'settled'}
+        out=self.root/'gpt-out';out.mkdir()
+        with patch.dict(sys.modules,{'openai':SimpleNamespace(OpenAI=lambda **_:client),
+                                    'v12_ledger':SimpleNamespace(V12ProviderLedger=MockLedger)}):
+            with patch.object(sys,'stdin',io.StringIO('synthetic-apiyi-key\n')):
+                self.assertEqual(runner.run(SimpleNamespace(prepare_only=False,api_key_stdin=True),cfg,out),0)
+        sent=create.call_args.kwargs
+        self.assertEqual(sent['model'],'gpt-4o');self.assertEqual(sent['max_tokens'],2048)
+        self.assertEqual(sent['temperature'],.2);self.assertEqual(sent['top_p'],.95)
+        self.assertEqual(sent.get('extra_body',{}),{})
+        self.assertTrue(any(item.get('image_url',{}).get('url','').startswith('data:image/')
+                            for item in sent['messages'][1]['content']))
+        terminal=runner.read(out/'checkpoints/q1/sample_1/terminal.json')
+        self.assertEqual(terminal['attempts'][0]['response_model'],'gpt-4o-2024-11-20')
+        self.assertEqual(terminal['model'],'gpt-4o')
 
     def test_global_cap_precedes_monetary_reservation_and_survives_resume(self):
         reserve=Mock(return_value='mock-reservation')

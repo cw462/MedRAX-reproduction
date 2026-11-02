@@ -22,7 +22,7 @@ from run_direct_vlm import SYSTEM_PROMPT, now, read, read_lines, write
 from official_gain_answer_scoring import explicit_answer
 from v12_evidence import build_images, multimodal_content, question_parts
 
-MODELS = {'qwen3-vl-plus', 'qwen3.8-max-0902', 'kimi/kimi-k3.1-pro'}
+MODELS = {'qwen3-vl-plus', 'qwen3.8-max-0902', 'gpt-4o'}
 VARIANTS = {'answer', 'cot', 'think', 'text_only'}
 ROW_FIELDS = {'question_id', 'case_id', 'question', 'images', 'figure_labels'}
 COT_PROMPT = '''You answer medical image multiple-choice questions. Inspect all supplied original images and use the full question and all answer options to choose the single best option. Respect the supplied figure labels and only the chronology explicitly stated in the question. Give a concise evidence summary of at most 150 words: relevant findings by region and side, and brief support or conflict for the answer options. End with Answer: <one legal option letter> on its own last line. Give the best option even when details remain uncertain. Do not provide a long reasoning trace.'''
@@ -83,6 +83,14 @@ def exclusive_lock(path):
 
 def profile_for(cfg):
     from provider_profile import ProviderProfile
+    class SamplingProfile(ProviderProfile):
+        def identity_ok(self, returned):
+            if self.model == 'gpt-4o':
+                # The requested name is a provider alias, not a promised snapshot.
+                # Prefix matching would also accept gpt-4o-mini and is forbidden.
+                return isinstance(returned, str) and (
+                    returned == 'gpt-4o' or re.fullmatch(r'gpt-4o-\d{4}-\d{2}-\d{2}', returned) is not None)
+            return super().identity_ok(returned)
     p = cfg['profile']
     required = {'base_url', 'identity_prefixes', 'input_cny_per_million',
                 'output_cny_per_million', 'price_basis', 'max_input_tokens', 'max_output_tokens'}
@@ -95,7 +103,12 @@ def profile_for(cfg):
         raise ValueError('positive_explicit_rates_required')
     if any(type(p[k]) is not int or p[k] <= 0 for k in ('max_input_tokens', 'max_output_tokens')):
         raise ValueError('positive_explicit_token_bounds_required')
-    return ProviderProfile(name=cfg['model'], base_url=p['base_url'], model=cfg['model'],
+    if cfg['model'] == 'gpt-4o':
+        if p['max_input_tokens'] > 120000 or p['max_output_tokens'] > 8192:
+            raise ValueError('gpt4o_context_requires_120000_input_and_8192_output_ceiling')
+        if p['identity_prefixes'] != ['gpt-4o']:
+            raise ValueError('gpt4o_exact_family_identity_required')
+    return SamplingProfile(name=cfg['model'], base_url=p['base_url'], model=cfg['model'],
         identity_prefixes=tuple(p['identity_prefixes']), input_cny_per_million=rates[0],
         output_cny_per_million=rates[1], price_basis=p['price_basis'],
         max_input_tokens=p['max_input_tokens'], max_output_tokens=p['max_output_tokens'],
@@ -105,6 +118,9 @@ def profile_for(cfg):
 def validate_cfg(cfg):
     if cfg['model'] not in MODELS or cfg['prompt_variant'] not in VARIANTS:
         raise ValueError('unsupported_model_or_variant')
+    expected_slot = 'apiyi' if cfg['model'] == 'gpt-4o' else 'dashscope'
+    if cfg.get('credential_slot') != expected_slot:
+        raise ValueError('explicit_model_provider_credential_slot_required')
     if not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', cfg['run_id']):
         raise ValueError('unsafe_run_id')
     if type(cfg['samples']) is not int or not 1 <= cfg['samples'] <= 15:
@@ -126,13 +142,11 @@ def validate_cfg(cfg):
         raise ValueError('think_variant_requires_explicit_enable_thinking')
     if cfg['model'].startswith('qwen') and cfg['prompt_variant'] != 'think' and extra.get('enable_thinking') is not False:
         raise ValueError('pin_qwen_non_thinking_explicitly')
-    if cfg['model'].startswith('kimi/'):
-        if cfg['temperature'] != 1.0 or cfg['top_p'] != .95:
-            raise ValueError('kimi_k31_requires_temperature_1_top_p_095')
-        if 'enable_thinking' in extra or 'thinking_budget' in extra:
-            raise ValueError('kimi_always_thinks_use_reasoning_effort_only')
-        if extra.get('reasoning_effort') not in ('low', 'high', 'max'):
-            raise ValueError('pin_kimi_reasoning_effort_explicitly')
+    if cfg['model'] == 'gpt-4o':
+        if extra or cfg['prompt_variant'] == 'think':
+            raise ValueError('gpt4o_no_provider_thinking_or_highres_parameters')
+        if cfg['temperature'] not in (.2, .7) or cfg['top_p'] != .95:
+            raise ValueError('gpt4o_fixed_baseline_or_sampling_parameters_required')
     if bool(cfg.get('high_resolution')) != bool(extra.get('vl_high_resolution_images', False)):
         raise ValueError('high_resolution_flag_must_match_actual_payload')
     if (cfg.get('high_resolution') or cfg['prompt_variant'] == 'think') and not (

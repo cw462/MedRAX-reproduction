@@ -11,6 +11,7 @@ from decimal import Decimal
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 def dump_new(path, value):
@@ -21,13 +22,39 @@ def dump_new(path, value):
     if not path.exists():path.write_text(text, encoding='utf-8')
 
 
-def profile(model, output=8192):
-    rates = {'qwen3-vl-plus':('4','12'), 'qwen3.8-max-0902':('12','36'),
-             'kimi/kimi-k3.1-pro':('13','68')}
+def load_gpt4o_profile(path):
+    """Read only a public provider/rate profile; never read a credential file."""
+    if not path:
+        raise ValueError('explicit_gpt4o_public_profile_required')
+    p = json.loads(Path(path).read_text(encoding='utf-8'))
+    required = {'model','base_url','identity_prefixes','input_cny_per_million',
+                'output_cny_per_million','price_basis','max_input_tokens','max_output_tokens'}
+    allowed = required | {'credential_slot','notes','identity_rule','public_pricing_sources',
+        'model_documentation','catalog_check','request_output_tokens','context_window_tokens',
+        'provider_notes','secrets_included'}
+    if not isinstance(p, dict) or not required <= set(p) or set(p) - allowed:
+        raise ValueError('gpt4o_profile_requires_only_public_provider_and_rate_fields')
+    endpoint = urlsplit(p['base_url'])
+    if endpoint.scheme != 'https' or not endpoint.hostname or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment:
+        raise ValueError('gpt4o_https_endpoint_without_credentials_required')
+    if p['model'] != 'gpt-4o' or p.get('credential_slot','apiyi') != 'apiyi' or p['identity_prefixes'] != ['gpt-4o']:
+        raise ValueError('gpt4o_alias_and_apiyi_slot_required')
+    if p.get('secrets_included',False) is not False or p.get('request_output_tokens',2048) != 2048 or p.get('context_window_tokens',128000) != 128000:
+        raise ValueError('gpt4o_public_profile_context_and_request_contract_required')
+    # Reuse execution validation for accounting and hard context boundaries.
+    from run_sampled_vlm import profile_for
+    profile_for({'model':'gpt-4o','profile':p})
+    return p
+
+
+def profile(model, output=8192, gpt4o_profile=None):
+    if model == 'gpt-4o':
+        if gpt4o_profile is None:raise ValueError('explicit_gpt4o_public_profile_required')
+        return dict(gpt4o_profile)
+    rates = {'qwen3-vl-plus':('4','12'), 'qwen3.8-max-0902':('12','36')}
     inp, out = rates[model]
-    identities = ['kimi/kimi-k3.1-pro', 'kimi-k3.1-pro'] if model.startswith('kimi/') else [model]
     return {'base_url':'https://dashscope.aliyuncs.com/compatible-mode/v1',
-        'identity_prefixes':identities,'input_cny_per_million':inp,
+        'identity_prefixes':[model],'input_cny_per_million':inp,
         'output_cny_per_million':out,'max_input_tokens':131072,'max_output_tokens':output,
         'price_basis':'2026-11-02 official Beijing list rates; qwen3-vl-plus retains historical conservative 4/12 accounting; cache discounts not assumed; reasoning counted in completion_tokens'}
 
@@ -39,6 +66,7 @@ def phase0(args):
     if not code.is_absolute():code=root/code
     code=code.resolve();config_dir = code/'configs'/experiment
     if not code.is_relative_to(root):raise ValueError('code_directory_must_be_inside_root')
+    gpt4o_profile = load_gpt4o_profile(getattr(args,'gpt4o_profile',None))
     budget = Decimal(args.new_budget_cny)
     baseline = Decimal(args.inherited_committed_cny)
     cap = baseline+budget
@@ -79,7 +107,7 @@ def phase0(args):
     definitions = [
         ('D_regression60','qwen3-vl-plus','answer',False,False,60),
         ('qwen_max_smoke','qwen3.8-max-0902','answer',False,False,2),
-        ('kimi_smoke','kimi/kimi-k3.1-pro','answer',False,False,2),
+        ('gpt4o_smoke','gpt-4o','answer',False,False,2),
         ('qwen_highres_smoke','qwen3-vl-plus','answer',True,True,2),
         ('qwen_think_smoke','qwen3-vl-plus','think',False,False,2),
     ]
@@ -87,20 +115,21 @@ def phase0(args):
     arms=[]
     for arm_id, model, variant, hires, labels, count in definitions:
         run_id = f'vote_20261102_p0_{arm_id}'
-        thinking = variant == 'think' or model.startswith('kimi/')
+        thinking = variant == 'think'
         output = 8192 if thinking else 2048
-        extra = {'reasoning_effort':'max'} if model.startswith('kimi/') else {'enable_thinking':variant=='think'}
+        extra = {} if model == 'gpt-4o' else {'enable_thinking':variant=='think'}
         if hires:extra['vl_high_resolution_images']=True
         if variant=='think':extra['thinking_budget']=4096
         ledger=f'{relative}/private_ledgers/{arm_id}.json'
         cfg={'root':str(root),'run_id':run_id,'model':model,'prompt_variant':variant,
+            'credential_slot':'apiyi' if model == 'gpt-4o' else 'dashscope',
             'input':f'{relative}/inputs/{"regression60" if count==60 else "capabilities2"}.jsonl',
             'image_root':'data/memory_v1/images','samples':1,
-            'temperature':1.0 if model.startswith('kimi/') else 0.2,'top_p':0.95,
+            'temperature':0.2,'top_p':0.95,
             'max_output_tokens':output,'request_timeout_seconds':300 if thinking else 120,
             'stream':variant=='think','extra_body':extra,'figure_labels':labels,'high_resolution':hires,
             'capability_smoke':count==2,'capability_confirmed':False,
-            'profile':profile(model,16384 if thinking else 8192),'ledger':ledger,'inherit_ledger':previous,
+            'profile':profile(model,16384 if thinking else 8192,gpt4o_profile),'ledger':ledger,'inherit_ledger':previous,
             'cap_cny':str(cap),'new_experiment_budget_cny':str(budget),
             'budget_authorization':args.budget_authorization,
             'max_requests':count+(6 if count==60 else 1),'max_extra_requests':6 if count==60 else 1,
@@ -136,6 +165,8 @@ def main():
     parser.add_argument('--original-cap-cny',required=True)
     parser.add_argument('--inherit-ledger',required=True)
     parser.add_argument('--budget-authorization',required=True)
+    parser.add_argument('--gpt4o-profile',required=True,
+        help='Public API provider/rate JSON for gpt-4o, without credentials')
     phase0(parser.parse_args())
 
 

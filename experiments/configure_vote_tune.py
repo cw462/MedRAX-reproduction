@@ -24,7 +24,7 @@ NAME='multimodel_vote_gain_20261102'
 REL=Path('runs')/NAME
 TUNE=REL/'split_inputs/tune.inputs.jsonl'
 N=402
-DIRECT_IDS=('Qwen_B0','QwenMax_B0','Kimi_B0')
+DIRECT_IDS=('Qwen_B0','QwenMax_B0','GPT4o_B0')
 SAMPLE_IDS=('S0','S1','S2')
 
 
@@ -72,7 +72,7 @@ def metric(path, expected_phase, expected_n):
 
 
 def phase0_gate(manifest_path, metrics_path, root):
-    names={'D_regression60':60,'qwen_max_smoke':2,'kimi_smoke':2,
+    names={'D_regression60':60,'qwen_max_smoke':2,'gpt4o_smoke':2,
            'qwen_highres_smoke':2,'qwen_think_smoke':2}
     manifest,arms=completed(manifest_path,root,names,1)
     if set(arms)!=set(names):raise ValueError('exact_phase0_regression_and_capabilities_required')
@@ -137,9 +137,9 @@ def cross_model(template, selected):
     cfg['figure_labels']=selected.get('figure_labels',False)
     cfg['prompt_variant']='cot' if selected['prompt_variant']=='cot' else 'answer'
     cfg['high_resolution']=False
-    if cfg['model'].startswith('kimi/'):
-        cfg.update(temperature=1.0,top_p=.95,extra_body={'reasoning_effort':'max'},
-                   max_output_tokens=8192,stream=False,request_timeout_seconds=300)
+    if cfg['model'] == 'gpt-4o':
+        cfg.update(temperature=.2,top_p=.95,extra_body={},
+                   max_output_tokens=2048,stream=False,request_timeout_seconds=120)
     else:
         cfg.update(temperature=.2,extra_body={'enable_thinking':False},
                    max_output_tokens=2048,stream=False,request_timeout_seconds=120)
@@ -150,8 +150,8 @@ def cross_model(template, selected):
         'cross_model_prompt_variant':cfg['prompt_variant'],
         'highres_flag_not_confirmed_for_this_model_omitted':bool(selected.get('high_resolution')),
         'qwen_thinking_flag_not_confirmed_for_this_model_omitted':selected['prompt_variant']=='think',
-        'kimi_always_thinks_at_T1_max_effort':cfg['model'].startswith('kimi/'),
-        'no_Qwen_only_parameters_sent_to_Kimi':True}
+        'gpt4o_requested_as_provider_alias_not_fixed_snapshot':cfg['model']=='gpt-4o',
+        'no_Qwen_only_parameters_sent_to_GPT4o':True}
     return cfg
 
 
@@ -223,14 +223,14 @@ def materialize(phase, root, code, phase0_manifest, phase0_metrics=None,
     last2=r2['Qwen_SC9']['cfg']['ledger']
     if phase=='3a':
         specs=[];scoring=[qwen_anchor]
-        for name,template in [('QwenMax_B0','qwen_max_smoke'),('Kimi_B0','kimi_smoke')]:
+        for name,template in [('QwenMax_B0','qwen_max_smoke'),('GPT4o_B0','gpt4o_smoke')]:
             base=cross_model(templates[template]['cfg'],anchor['cfg'])
             cfg=arm_config(base,'3a',name,last2);specs.append((name,cfg))
             scoring.append({'id':name,'out':root/REL/'phase3a'/name})
         return save_phase(root,config_dir,'3a',p0,specs,last2,scoring,'Qwen_B0',provenance=provenance)
     if phase!='3b':raise ValueError('only_authorized_phases_1_2_3a_3b')
     p3,r3=completed(config_dir/'phase3a.json',root,N,1)
-    if set(r3)!={'QwenMax_B0','Kimi_B0'} or any(x['run']['qids']!=qids for x in r3.values()):
+    if set(r3)!={'QwenMax_B0','GPT4o_B0'} or any(x['run']['qids']!=qids for x in r3.values()):
         raise ValueError('three_model_B0_anchors_required')
     values=metric(at(root,phase3a_metrics),'3a',N)
     totals=values['totals']
@@ -246,7 +246,7 @@ def materialize(phase, root, code, phase0_manifest, phase0_metrics=None,
     scoring.append({'id':'S0','out':r2['Qwen_SC9']['out'],'direct_arm':'Qwen_B0','reuse':True})
     for name,sample_id in zip(DIRECT_IDS[1:],SAMPLE_IDS[1:]):
         sample_name=name.replace('_B0','_samples');sample_n=9 if name==strongest else 3
-        base=r3[name]['cfg'];temp=1.0 if base['model'].startswith('kimi/') else .7
+        base=r3[name]['cfg'];temp=.7
         cfg=arm_config(base,'3b',sample_name,last3,samples=sample_n,temperature=temp)
         specs.append((sample_name,cfg));scoring.append({'id':sample_id,'out':root/REL/'phase3b'/sample_name,'direct_arm':name})
     ensemble={'members':list(SAMPLE_IDS),'weights':weights,'strongest_member':SAMPLE_IDS[DIRECT_IDS.index(strongest)],
