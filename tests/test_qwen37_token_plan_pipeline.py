@@ -188,6 +188,23 @@ def test_unsent_and_terminal_ack_are_mutually_exclusive(tmp_path):
         unsent_execute(tmp_path, code, lambda *a, **k: None, acknowledge_event='fake')
 
 
+def test_unsent_recovery_worker_failure_stops_without_scoring_or_retry(tmp_path):
+    code, out, _, _ = unsent_fixture(tmp_path)
+    calls = []
+    def failed_original_worker(command, **kwargs):
+        calls.append(command)
+        assert Path(command[2]).name == 'run_vote_phase.py'
+        assert not any(arg.startswith('--acknowledge') for arg in command)
+        return SimpleNamespace(returncode=2)
+    with pytest.raises(RuntimeError, match='subprocess_failed'):
+        unsent_execute(tmp_path, code, failed_original_worker)
+    assert len(calls) == 1
+    state = json.loads((out/'pipeline_status.json').read_text())
+    assert state['status'] == 'stopped' and state['phase'] == 'phase2'
+    assert state['completed_phases'] == ['phase0', 'phase1']
+    assert not (tmp_path/'reports'/NAME/'phase2/metrics.json').exists()
+
+
 def test_original_pipeline_protocol_unchanged_when_recovery_is_rejected(tmp_path):
     code, out, arm, checkpoint = unsent_fixture(tmp_path)
     def fail(command, **kwargs): return SimpleNamespace(returncode=1)

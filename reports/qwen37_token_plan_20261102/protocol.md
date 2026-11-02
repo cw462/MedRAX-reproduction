@@ -82,3 +82,5 @@ python experiments/run_qwen37_token_plan_pipeline.py --root ROOT --code CODE \
 2026-11-03 01:18 恢复：仅将精确 HTTP400 媒体下载超时归为样本缺答且不重发；原全局错误记录保留。生成提示、输入、模型、采样和评分规则均保持。见[修订01](recovery_history/01_media_download_timeout/README.md)。原冻结提交与实际修订提交分别保留，不能宣称全程未修改运行器。
 
 2026-11-03 结算恢复02：候选 checksum 异常后仅一次原接口重开成功，按原 pending 恢复规则保守计费；未修改账本保护/冻结生成逻辑。原响应与失败终态保留，从下一样本继续。见[恢复02](recovery_history/02_ledger_checksum/README.md)。
+
+2026-11-03 02:00 恢复03：新增严格验证的未发送请求恢复入口，区别于已有失败终态的确认。保存原reserve_error，不生成假终态或假stop_event，原账本构造校验通过后才执行该未完成样本。模型、输入、采样/投票规则和金额保护均不改。见[恢复03](recovery_history/03_unsent_reservation_checksum/README.md)。
