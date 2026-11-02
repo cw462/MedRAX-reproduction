@@ -12,6 +12,7 @@ from decimal import Decimal
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -95,10 +96,46 @@ def load_credentials(args, slots):
     return {slot: values[slot].encode('ascii') for slot in slots}
 
 
+def acknowledgement_target(args, arms, out):
+    """Route one explicit recovery acknowledgement to the stopped arm only."""
+    event = args.acknowledge_stop
+    target = args.acknowledge_stop_arm
+    if not event and not target:
+        return None
+    if args.prepare_only or not event or not target:
+        raise ValueError('stop_acknowledgement_requires_execution_arm_and_event')
+    if not re.fullmatch(r'[A-Za-z0-9_.-]{1,200}', event):
+        raise ValueError('invalid_stop_event_id')
+    phase_path = out/'status.json'
+    state = read(phase_path) if phase_path.exists() else {}
+    if state.get('status') != 'stopped' or state.get('active_arm') != target:
+        raise ValueError('acknowledgement_must_target_active_stopped_arm')
+    unfinished = []
+    for arm in arms:
+        path = Path(arm['out'])/'status.json'
+        arm_state = read(path) if path.exists() else {}
+        if arm_state.get('status') != 'generation_complete':
+            unfinished.append((arm, arm_state))
+    if not unfinished or unfinished[0][0]['id'] != target:
+        raise ValueError('acknowledgement_must_target_first_unfinished_arm')
+    arm, arm_state = unfinished[0]
+    if arm_state.get('status') != 'stopped' or arm_state.get('stop_event_id') != event:
+        raise ValueError('acknowledgement_must_match_pending_stop_event')
+    if not (Path(arm['out'])/'stop_events'/f'{event}.json').is_file():
+        raise ValueError('stop_event_record_missing')
+    if (Path(arm['out'])/'stop_acknowledgements'/f'{event}.json').exists():
+        raise ValueError('stop_event_already_acknowledged')
+    return target
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--prepare-only', action='store_true')
+    parser.add_argument('--acknowledge-stop', metavar='EVENT_ID',
+        help='Explicitly acknowledge one resolved stop event; never repeats its failed sample.')
+    parser.add_argument('--acknowledge-stop-arm', metavar='ARM_ID',
+        help='Exact currently stopped arm for --acknowledge-stop; no automatic reset.')
     credentials = parser.add_mutually_exclusive_group()
     credentials.add_argument('--api-key-stdin', action='store_true',
         help='One stdin key; allowed only when all arms use the same credential slot.')
@@ -117,6 +154,7 @@ def main():
     # concurrently from the same preceding balance snapshot.
     with exclusive_lock(str(global_counter)+'.execution.lock'), exclusive_lock(out/'.phase.lock'):
         arms = validate_manifest(manifest)
+        acknowledge_arm = acknowledgement_target(args, arms, out)
         configurations = {arm['id']: read(Path(arm['config'])) for arm in arms}
         frozen_write(out/'phase_protocol.json', dict(manifest,
             arm_configurations=configurations,
@@ -136,6 +174,8 @@ def main():
             command = [sys.executable, str(Path(__file__).with_name('run_sampled_vlm.py')),
                 '--config', arm['config'], '--out', arm['out']]
             command += ['--prepare-only'] if args.prepare_only else ['--api-key-stdin', '--resume']
+            if arm['id'] == acknowledge_arm:
+                command += ['--acknowledge-stop', args.acknowledge_stop]
             key = None if args.prepare_only else keys[configurations[arm['id']]['credential_slot']] + b'\n'
             result = subprocess.run(command, input=key, check=False)
             if result.returncode:

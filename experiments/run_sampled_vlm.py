@@ -25,6 +25,16 @@ from v12_evidence import build_images, multimodal_content, question_parts
 MODELS = {'qwen3-vl-plus', 'qwen3.8-max-0902', 'gpt-4o'}
 VARIANTS = {'answer', 'cot', 'think', 'text_only'}
 ROW_FIELDS = {'question_id', 'case_id', 'question', 'images', 'figure_labels'}
+FAILURE_POLICY = {
+    'version': 'sample-failure-v1', 'consecutive_failed_samples_limit': 5,
+    'sample_rejections': '400/413/422 except identified systemic configuration errors become missing',
+    'unknown_outcomes': 'missing, never resend; the original ledger conservatively retains the reservation',
+    'retry': 'only explicit non-quota HTTP 429, at most one technical retry within all existing limits',
+    'immediate_stop': 'authentication/permission/model/endpoint/quota/configuration/identity/ledger/local failures',
+    'reset_streak': 'a successfully processed provider response, including an unparsed answer',
+    'operator_resume': 'explicit one-use stop-event acknowledgement may continue only unfinished samples; prior terminals and money protections remain',
+    'accounting': 'error reservation is a conservative budget charge, not a provider invoice',
+}
 COT_PROMPT = '''You answer medical image multiple-choice questions. Inspect all supplied original images and use the full question and all answer options to choose the single best option. Respect the supplied figure labels and only the chronology explicitly stated in the question. Give a concise evidence summary of at most 150 words: relevant findings by region and side, and brief support or conflict for the answer options. End with Answer: <one legal option letter> on its own last line. Give the best option even when details remain uncertain. Do not provide a long reasoning trace.'''
 
 
@@ -212,7 +222,7 @@ def prepare(cfg, out):
     # No repeated image hash scans. The actual request saves native byte payloads.
     frozen_write(out/'protocol.json', dict(cfg, system_prompt=COT_PROMPT if cfg['prompt_variant']=='cot' else SYSTEM_PROMPT,
         implementation_commit=os.environ.get('MEDRAX_CODE_COMMIT', 'unrecorded'),
-        labels_loaded_by_generation=False, parser_version='sampled-last-explicit-answer-v1'))
+        labels_loaded_by_generation=False, parser_version='sampled-last-explicit-answer-v1', failure_policy=FAILURE_POLICY))
     frozen_write(out/'selection.json', {'planned_n':len(rows), 'rows':rows})
     return rows
 
@@ -250,6 +260,96 @@ def safe_error(exc, key=''):
     message = str(exc).replace(key, '[REDACTED]') if key else str(exc)
     message = re.sub(r'(?i)(?:Bearer\s+\S+|sk-[A-Za-z0-9_-]{12,})', '[REDACTED]', message)
     return message[:1600]
+
+
+def failure_details(exc, key=''):
+    """Classify execution failure without persisting arbitrary provider bodies.
+
+    An HTTP error is not evidence of zero usage. All error accounting continues
+    through the unchanged ledger, and 408/5xx may follow completed generation.
+    """
+    status = getattr(exc, 'status_code', None)
+    status = status if type(status) is int else None
+    body = getattr(exc, 'body', None)
+    body = body.get('error', body) if isinstance(body, dict) else {}
+    if not isinstance(body, dict):body = {}
+    identifiers = {}
+    for field in ('code', 'type', 'param'):
+        value = body.get(field)
+        if (isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_.\[\]-]{1,100}', value)
+                and not (key and key in value) and not re.match(r'(?i)^(?:sk[-_]|bearer)',value)):
+            identifiers['provider_error_' + field] = value
+    code = str(identifiers.get('provider_error_code', '')).lower()
+    param = str(identifiers.get('provider_error_param', '')).lower()
+    quota = any(x in code for x in ('insufficient_quota','quota_exceeded','insufficient_balance',
+        'insufficient_funds','credit_balance','billing_hard_limit','balance_not_enough','account_deactivated',
+        'spend_limit','usage_limit'))
+    configuration = any(x in code for x in ('model_not_found','model_not_exist','invalid_model',
+        'unsupported_model','unsupported_parameter','unsupported_param','invalid_parameter','invalid_api_key',
+        'invalid_request_format','invalid_request_schema')) or param in {
+        'model','temperature','top_p','max_tokens','max_completion_tokens','stream','stream_options',
+        'enable_thinking','thinking_budget','vl_high_resolution_images','reasoning_effort'}
+    kind, fatal, retry = 'local_execution_failure', True, False
+    if isinstance(exc, RuntimeError) and str(exc) == 'returned_model_identity_mismatch':
+        kind = 'model_identity_mismatch'
+    elif quota:
+        kind = 'provider_quota_or_balance'
+    elif configuration:
+        kind = 'provider_configuration'
+    elif status in {401,403}:
+        kind = 'authentication_or_permission'
+    elif status in {404,405}:
+        kind = 'endpoint_or_model'
+    elif status in {400,413,422}:
+        kind, fatal = 'sample_rejected', False
+    elif status == 429:
+        kind, fatal, retry = 'rate_limited', False, True
+    elif status in {408,409} or (status is not None and 500 <= status < 600):
+        kind, fatal = 'unknown_provider_outcome', False
+    elif isinstance(exc, (TimeoutError, ConnectionError)) or type(exc).__name__ in {
+        'APITimeoutError','APIConnectionError','InterruptedUnknown'}:
+        kind, fatal = 'unknown_provider_outcome', False
+    return dict(failure_class=kind, fatal=fatal, retryable=retry, status_code=status,
+                billing_outcome='unknown_conservative_reservation_not_invoice', **identifiers)
+
+
+def terminal_failure(terminal):
+    """Read saved policy decisions; never alter terminal or attempt records."""
+    attempts = terminal.get('attempts', [])
+    last = attempts[-1] if attempts else {}
+    fatal = terminal.get('fatal_reason')
+    if last.get('settlement_error'):fatal = 'ledger_settlement_error'
+    if last.get('fatal'):fatal = last.get('failure_class', 'fatal_execution_failure')
+    if last.get('error_type') == 'RuntimeError' and 'identity' in last.get('error_message', ''):
+        fatal = 'model_identity_mismatch'
+    failed = terminal.get('status') == 'request_failed' or bool(fatal)
+    return failed, fatal
+
+
+def failure_prefix(rows, samples, records, out):
+    """Restore the streak, respecting only explicit immutable acknowledgements."""
+    consecutive = 0
+    for row in rows:
+        for sample in range(1,samples+1):
+            terminal = records.get((row['question_id'],sample))
+            if terminal is None:return consecutive, None
+            failed, fatal = terminal_failure(terminal)
+            consecutive = consecutive + 1 if failed else 0
+            if fatal or consecutive >= FAILURE_POLICY['consecutive_failed_samples_limit']:
+                reason = fatal or 'consecutive_failed_samples_limit'
+                suffix = re.sub(r'[^A-Za-z0-9_.-]', '_', reason)[:24]
+                event = {'event_id':f"{row['question_id']}__s{sample}__{suffix}",
+                    'question_id':row['question_id'],'sample_index':sample,'reason':reason,
+                    'consecutive_failed_samples':consecutive,'occurred_utc':terminal.get('ended_utc'),
+                    'failure_policy_version':FAILURE_POLICY['version']}
+                acknowledged = out/'stop_acknowledgements'/(event['event_id']+'.json')
+                if acknowledged.exists():
+                    ack = read(acknowledged)
+                    if ack.get('stop_event') != event:
+                        raise ValueError('stop_acknowledgement_event_conflict')
+                    consecutive = 0
+                else:return consecutive, event
+    return consecutive, None
 
 
 def invoke(client, payload, attempt_dir):
@@ -294,7 +394,9 @@ def recover_attempt(folder, legal, profile=None):
         if profile is not None and not profile.identity_ok(raw.get('model')):
             result.update(error_type='RuntimeError', error_message='returned_model_identity_mismatch')
     else:
-        result.update(response_received=False, error_type='InterruptedUnknown', recovery='unknown_paid_request_not_reissued')
+        result.update(response_received=False, error_type='InterruptedUnknown', recovery='unknown_paid_request_not_reissued',
+            failure_class='unknown_provider_outcome', fatal=False,
+            billing_outcome='unknown_conservative_reservation_not_invoice')
     frozen_write(folder/'result.json', result)
     return result
 
@@ -313,10 +415,25 @@ def run(args, cfg, out):
     starts=list((out/'checkpoints').glob('*/sample_*/attempt_*/started.json'))
     used=len(starts); extras=sum(p.parent.name!='attempt_1' for p in starts)
     planned=len(rows)*cfg['samples']
+    # Reconstruct the serial prefix before opening any key/client/ledger. A
+    # restart cannot erase four failures or bypass a previously reached stop.
+    consecutive_failed, pending_stop = failure_prefix(rows,cfg['samples'],records,out)
+    requested_ack = getattr(args,'acknowledge_stop',None)
+    if requested_ack:
+        if args.prepare_only:raise ValueError('prepare_cannot_acknowledge_stop')
+        if pending_stop is None or requested_ack != pending_stop['event_id']:
+            raise ValueError('acknowledgement_must_match_current_unacknowledged_stop')
+        frozen_write(out/'stop_events'/(requested_ack+'.json'),pending_stop)
+        frozen_write(out/'stop_acknowledgements'/(requested_ack+'.json'),
+            {'stop_event':pending_stop,'acknowledged_utc':now(),
+             'operator_action':'explicit_cli_acknowledgement_after_review',
+             'effect':'continue_unfinished_samples_only_no_prediction_or_cost_rewrite'})
+        consecutive_failed,pending_stop=failure_prefix(rows,cfg['samples'],records,out)
     def status(state, **extra):
         write(out/'status.json', dict(status=state,updated_utc=now(),planned_n=len(rows),planned_samples=planned,
             completed_n=sum(all((row['question_id'],i) in records for i in range(1,cfg['samples']+1)) for row in rows),
-            completed_samples=len(records),requests_used=used,extra_requests_used=extras,model=cfg['model'],**extra))
+            completed_samples=len(records),requests_used=used,extra_requests_used=extras,model=cfg['model'],
+            consecutive_failed_samples=consecutive_failed,**extra))
     def aggregate():
         text=''.join(json.dumps(records[row['question_id'],i],ensure_ascii=False)+'\n' for row in rows for i in range(1,cfg['samples']+1))
         target=out/'predictions.jsonl'
@@ -324,6 +441,9 @@ def run(args, cfg, out):
         if not target.exists():target.write_text(text,encoding='utf-8')
     if used>cfg['max_requests'] or extras>cfg['max_extra_requests']:
         raise ValueError('persistent_phase_request_limit_exceeded')
+    if pending_stop:
+        frozen_write(out/'stop_events'/(pending_stop['event_id']+'.json'),pending_stop)
+        status('stopped',error=pending_stop['reason'],stop_event_id=pending_stop['event_id']);return 2
     if len(records)==planned:
         aggregate();status('generation_complete');return 0
     if args.prepare_only:
@@ -354,7 +474,7 @@ def run(args, cfg, out):
                 if payload['stream']:payload['stream_options']={'include_usage':True}
                 frozen_write(folder/'request.json',payload)
                 frozen_write(folder/'image_metadata.json',{'images':[{k:v for k,v in im.items() if k!='path'} for im in images],
-                    'native_bytes_no_resizing':True,'billed_image_tokens':'reported only when provider returns a distinct usage field'})
+                    'native_bytes_sent':bool(images),'billed_image_tokens':'reported only when provider returns a distinct usage field'})
                 terminal={'question_id':qid,'case_id':row.get('case_id'),'sample_index':sample,'model':cfg['model'],
                     'prompt_variant':cfg['prompt_variant'],'temperature':cfg['temperature'],'answer':None,'status':'request_failed',
                     'raw_response':None,'attempts':[],'started_utc':now()}
@@ -396,33 +516,51 @@ def run(args, cfg, out):
                                 response_model=raw.get('model'),usage=usage,finish_reason=raw.get('choices',[{}])[0].get('finish_reason'),parsed=parse_answer(message.get('content'),legal))
                             if not profile.identity_ok(raw.get('model')):raise RuntimeError('returned_model_identity_mismatch')
                         except Exception as exc:
-                            error=exc;code=getattr(exc,'status_code',None)
-                            # Timeouts/connections have an unknown provider outcome;
-                            # never blindly retry them. Explicit transient HTTP only.
-                            retry=raw is None and code in {408,429,500,502,503,504}
-                            result.update(error_type=type(exc).__name__,error_message=safe_error(exc,key),status_code=code,retryable=retry)
-                            if not retry:stop=type(exc).__name__
+                            error=exc
+                            decision=failure_details(exc,key)
+                            # A malformed response or local processing error after
+                            # a reply is a controller problem, not a rejected sample.
+                            if raw is not None and decision['failure_class'] != 'model_identity_mismatch':
+                                decision.update(failure_class='response_processing_failure',fatal=True,retryable=False)
+                            result.update(error_type=type(exc).__name__,error_message=safe_error(exc,key),**decision)
+                            if result['fatal']:stop=result['failure_class']
                         result.update(elapsed_s=round(time.monotonic()-tick,3),ended_utc=now())
                         try:result['settlement']=ledger.settle(reservation,usage=usage,response_received=raw is not None,error_type=type(error).__name__ if error else None)
                         except Exception as exc:
-                            result['settlement_error']={'error_type':type(exc).__name__,'message':safe_error(exc,key)};stop=type(exc).__name__
+                            result['settlement_error']={'error_type':type(exc).__name__,'message':safe_error(exc,key)};stop='ledger_settlement_error'
                         frozen_write(attempt_dir/'result.json',result)
                     terminal['attempts'].append(result)
+                    if result.get('settlement_error'):stop='ledger_settlement_error'
+                    if result.get('fatal'):stop=result.get('failure_class','fatal_execution_failure')
                     if result.get('response_received'):
                         terminal.update(result.get('parsed') or parse_answer(result.get('raw_content'),legal))
                         terminal['raw_response']=result.get('raw_content')
                         if result.get('error_type')=='RuntimeError' and 'identity' in result.get('error_message',''):
                             terminal.update(answer=None,status='request_failed');stop='returned_model_identity_mismatch'
                         break
-                    if result.get('error_type')=='InterruptedUnknown':stop='InterruptedUnknown'
                     if stop or not result.get('retryable'):break
                     if attempt_number<cfg.get('max_attempts_per_sample',2):time.sleep(2)
                 if terminal['attempts']:
+                    if stop:
+                        terminal['fatal_reason']=stop
+                        terminal.update(answer=None,status='request_failed')
+                    failure=terminal['attempts'][-1].get('failure_class')
+                    if failure:terminal['failure_class']=failure
+                    failed,_=terminal_failure(terminal)
+                    consecutive_failed=consecutive_failed+1 if failed else 0
+                    terminal['consecutive_failed_samples']=consecutive_failed
                     terminal['ended_utc']=now();frozen_write(folder/'terminal.json',terminal);records[qid,sample]=terminal
                     print(json.dumps({'event':'sample_terminal','index':index,'sample':sample,'status':terminal['status'],'requests_used':used}),flush=True)
+                if consecutive_failed >= FAILURE_POLICY['consecutive_failed_samples_limit']:
+                    stop=stop or 'consecutive_failed_samples_limit'
                 if stop or not terminal['attempts']:
-                    write(out/'fatal_error.json',{'utc':now(),'error':stop or 'request_limit','question_id':qid,'sample':sample})
-                    status('stopped',error=stop or 'request_limit');end_ledger();return 2
+                    _,pending_stop=failure_prefix(rows,cfg['samples'],records,out)
+                    detail={}
+                    if pending_stop:
+                        frozen_write(out/'stop_events'/(pending_stop['event_id']+'.json'),pending_stop)
+                        detail={'stop_event_id':pending_stop['event_id']}
+                    write(out/'fatal_error.json',{'utc':now(),'error':stop or 'request_limit','question_id':qid,'sample':sample,**detail})
+                    status('stopped',error=stop or 'request_limit',**detail);end_ledger();return 2
                 status('running')
         aggregate();end_ledger();status('generation_complete');return 0
 
@@ -434,6 +572,7 @@ def main(argv=None):
     parser.add_argument('--model',choices=sorted(MODELS));parser.add_argument('--prompt-variant',choices=sorted(VARIANTS))
     parser.add_argument('--api-key-stdin',action='store_true');parser.add_argument('--prepare-only',action='store_true')
     parser.add_argument('--resume',action='store_true')
+    parser.add_argument('--acknowledge-stop',help='Explicitly acknowledge the exact stopped event after operator review; never retries an existing sample.')
     args=parser.parse_args(argv);out=args.out.resolve();out.mkdir(parents=True,exist_ok=True)
     cfg=read(args.config)
     for name in ('samples','temperature','model','prompt_variant'):

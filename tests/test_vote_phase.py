@@ -161,5 +161,41 @@ class PhaseWiring(unittest.TestCase):
         source.write_text('',encoding='utf-8')
         with self.assertRaisesRegex(ValueError,'missing_explicit_case_binding'):configure.phase0(self.args)
 
+    def stopped_gpt_phase(self):
+        arms=phase.validate_manifest(self.manifest)
+        out=Path(self.manifest['out']);target=arms[2]
+        for arm in arms[:2]:sampled.write(Path(arm['out'])/'status.json',{'status':'generation_complete'})
+        sampled.write(out/'status.json',{'status':'stopped','active_arm':target['id']})
+        sampled.write(Path(target['out'])/'status.json',{'status':'stopped','stop_event_id':'stop-q1-s1'})
+        sampled.write(Path(target['out'])/'stop_events/stop-q1-s1.json',{'reason':'synthetic failure'})
+        return arms,out,target
+
+    def test_recovery_acknowledgement_only_reaches_the_active_stopped_child(self):
+        arms,out,target=self.stopped_gpt_phase()
+        argv=['run_vote_phase','--manifest',str(self.path),'--credentials-json-stdin',
+              '--acknowledge-stop','stop-q1-s1','--acknowledge-stop-arm',target['id']]
+        stdin=SimpleNamespace(buffer=io.BytesIO(b'{"dashscope":"test-qwen","apiyi":"test-apiyi"}'))
+        with patch.object(sys,'argv',argv),patch.object(sys,'stdin',stdin),\
+             patch.object(phase.subprocess,'run',return_value=SimpleNamespace(returncode=0)) as run:
+            self.assertEqual(phase.main(),0)
+        self.assertEqual(run.call_count,3)
+        self.assertIn('--acknowledge-stop',run.call_args_list[0].args[0])
+        self.assertEqual(run.call_args_list[0].kwargs['input'],b'test-apiyi\n')
+        self.assertTrue(all('--acknowledge-stop' not in call.args[0] for call in run.call_args_list[1:]))
+
+    def test_acknowledgement_rejects_wrong_target_event_reuse_and_prepare(self):
+        arms,out,target=self.stopped_gpt_phase()
+        args=SimpleNamespace(prepare_only=False,acknowledge_stop='stop-q1-s1',acknowledge_stop_arm=target['id'])
+        self.assertEqual(phase.acknowledgement_target(args,arms,out),target['id'])
+        args.acknowledge_stop_arm=arms[3]['id']
+        with self.assertRaisesRegex(ValueError,'active_stopped'):phase.acknowledgement_target(args,arms,out)
+        args.acknowledge_stop_arm=target['id'];args.acknowledge_stop='unrelated-event'
+        with self.assertRaisesRegex(ValueError,'pending_stop'):phase.acknowledgement_target(args,arms,out)
+        args.acknowledge_stop='stop-q1-s1';args.prepare_only=True
+        with self.assertRaisesRegex(ValueError,'requires_execution'):phase.acknowledgement_target(args,arms,out)
+        args.prepare_only=False
+        sampled.write(Path(target['out'])/'stop_acknowledgements/stop-q1-s1.json',{'acknowledged':True})
+        with self.assertRaisesRegex(ValueError,'already_acknowledged'):phase.acknowledgement_target(args,arms,out)
+
 
 if __name__=='__main__':unittest.main()

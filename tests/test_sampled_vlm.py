@@ -160,6 +160,7 @@ class InputAndBudgetContracts(unittest.TestCase):
         terminal=runner.read(out/'checkpoints/q1/sample_1/terminal.json')
         self.assertEqual(terminal['attempts'][0]['response_model'],'gpt-4o-2024-11-20')
         self.assertEqual(terminal['model'],'gpt-4o')
+        self.assertIs(runner.read(out/'checkpoints/q1/sample_1/image_metadata.json')['native_bytes_sent'],True)
 
     def test_global_cap_precedes_monetary_reservation_and_survives_resume(self):
         reserve=Mock(return_value='mock-reservation')
@@ -254,6 +255,194 @@ class Recovery(unittest.TestCase):
         self.assertEqual(create.call_count,1)
         self.assertEqual(before,(out/'checkpoints/q1/sample_1/terminal.json').read_bytes())
         self.assertEqual(runner.read(out/'status.json')['status'],'generation_complete')
+
+
+class HTTPFailure(RuntimeError):
+    def __init__(self,status,code=None,param=None):
+        super().__init__('synthetic HTTP rejection')
+        self.status_code=status
+        self.body={'error':{'code':code,'param':param}}
+
+
+class FailureContinuation(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name);self.out=self.root/'out';self.out.mkdir()
+        self.cfg=config(self.root);self.cfg.update(prompt_variant='text_only',max_requests=30,
+            max_extra_requests=10,global_max_requests=30,global_max_extra_requests=10)
+        self.args=SimpleNamespace(prepare_only=False,api_key_stdin=True)
+        self.settlements=[];self.reservations=[]
+        settlements,reservations=self.settlements,self.reservations
+        class Ledger:
+            def __init__(self,*args,**kwargs):self.remaining=Decimal('10')
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+            def reserve(self,**kwargs):
+                reservations.append(kwargs);return 'mock-'+str(len(reservations))
+            def settle(self,*args,**kwargs):
+                settlements.append(kwargs)
+                charge=Decimal('.043072') if kwargs.get('error_type') else Decimal('.001')
+                self.remaining-=charge
+                return {'charged_cny':str(charge),'status':'unknown' if kwargs.get('error_type') else 'settled'}
+        self.ledger=Ledger
+
+    def rows(self,n):
+        (self.root/'questions.jsonl').write_text(''.join(json.dumps({'question_id':f'q{i}','case_id':f'c{i}',
+            'question':'Choose.\nA) Alpha\nB) Beta','images':[]})+'\n' for i in range(1,n+1)),encoding='utf-8')
+
+    @staticmethod
+    def reply(text='Answer: B'):
+        raw={'model':'qwen3-vl-plus','choices':[{'message':{'content':text},'finish_reason':'stop'}],
+            'usage':{'prompt_tokens':10,'completion_tokens':5}}
+        return SimpleNamespace(model_dump=lambda **_:raw)
+
+    def execute(self,create):
+        client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        with patch.dict(sys.modules,{'openai':SimpleNamespace(OpenAI=lambda **_:client),
+                                    'v12_ledger':SimpleNamespace(V12ProviderLedger=self.ledger)}), \
+             patch.object(sys,'stdin',io.StringIO('synthetic-key\n')),patch.object(runner.time,'sleep'):
+            return runner.run(self.args,self.cfg,self.out)
+
+    def terminal(self,n):
+        return runner.read(self.out/f'checkpoints/q{n}/sample_1/terminal.json')
+
+    def test_rejected_samples_continue_and_keep_conservative_error_accounting(self):
+        self.rows(4)
+        create=Mock(side_effect=[HTTPFailure(400),HTTPFailure(413),HTTPFailure(422),self.reply()])
+        self.assertEqual(self.execute(create),0)
+        self.assertEqual(create.call_count,4)
+        for i in range(1,4):
+            terminal=self.terminal(i)
+            self.assertIsNone(terminal['answer']);self.assertEqual(terminal['status'],'request_failed')
+            self.assertEqual(terminal['failure_class'],'sample_rejected')
+            self.assertEqual(terminal['attempts'][0]['settlement']['status'],'unknown')
+            self.assertEqual(terminal['attempts'][0]['billing_outcome'],'unknown_conservative_reservation_not_invoice')
+            self.assertIsNone(self.settlements[i-1]['usage'])
+            self.assertFalse(self.settlements[i-1]['response_received'])
+            self.assertTrue(self.settlements[i-1]['error_type'])
+        self.assertEqual(self.terminal(4)['answer'],'B')
+        metadata=runner.read(self.out/'checkpoints/q1/sample_1/image_metadata.json')
+        self.assertNotIn('native_bytes_no_resizing',metadata)
+        self.assertIs(metadata['native_bytes_sent'],False)
+
+    def test_five_failed_samples_stop_and_restart_cannot_bypass_threshold(self):
+        self.rows(6);create=Mock(side_effect=[HTTPFailure(400) for _ in range(5)]+[self.reply()])
+        self.assertEqual(self.execute(create),2)
+        self.assertEqual(create.call_count,5)
+        state=runner.read(self.out/'status.json')
+        self.assertEqual(state['error'],'consecutive_failed_samples_limit')
+        self.assertEqual(state['consecutive_failed_samples'],5)
+        before=(self.out/'checkpoints/q5/sample_1/terminal.json').read_bytes()
+        self.assertEqual(self.execute(create),2)
+        self.assertEqual(create.call_count,5)
+        self.assertEqual(before,(self.out/'checkpoints/q5/sample_1/terminal.json').read_bytes())
+        self.assertFalse((self.out/'checkpoints/q6/sample_1/attempt_1/started.json').exists())
+
+    def test_explicit_one_use_acknowledgement_resets_only_at_stopped_boundary(self):
+        self.rows(11)
+        create=Mock(side_effect=[HTTPFailure(400) for _ in range(10)]+[self.reply()])
+        self.assertEqual(self.execute(create),2)
+        first=runner.read(self.out/'status.json')['stop_event_id']
+        self.assertRegex(first,r'^[A-Za-z0-9_.-]{1,200}$')
+        original=(self.out/'checkpoints/q5/sample_1/terminal.json').read_bytes()
+        self.args.acknowledge_stop='wrong-event'
+        with self.assertRaisesRegex(ValueError,'current_unacknowledged'):self.execute(create)
+        self.assertEqual(create.call_count,5)
+        self.args.acknowledge_stop=first
+        self.assertEqual(self.execute(create),2)
+        self.assertEqual(create.call_count,10)
+        self.assertTrue((self.out/'stop_acknowledgements'/(first+'.json')).exists())
+        self.assertEqual(original,(self.out/'checkpoints/q5/sample_1/terminal.json').read_bytes())
+        second=runner.read(self.out/'status.json')['stop_event_id']
+        self.assertNotEqual(second,first)
+        with self.assertRaisesRegex(ValueError,'current_unacknowledged'):self.execute(create)
+        self.assertEqual(create.call_count,10)
+        self.args.acknowledge_stop=second
+        self.assertEqual(self.execute(create),0)
+        self.assertEqual(create.call_count,11)
+        self.assertEqual(self.terminal(11)['answer'],'B')
+        self.assertEqual(len(self.reservations),11)
+
+    def test_operator_can_resume_after_auth_fix_without_retrying_failed_sample(self):
+        self.rows(2);create=Mock(side_effect=[HTTPFailure(401),self.reply()])
+        self.assertEqual(self.execute(create),2)
+        stopped=runner.read(self.out/'status.json')['stop_event_id']
+        original=(self.out/'checkpoints/q1/sample_1/terminal.json').read_bytes()
+        self.args.acknowledge_stop=stopped;self.args.prepare_only=True
+        with self.assertRaisesRegex(ValueError,'prepare_cannot'):self.execute(create)
+        self.args.prepare_only=False
+        self.assertEqual(self.execute(create),0)
+        self.assertEqual(create.call_count,2)
+        self.assertEqual(original,(self.out/'checkpoints/q1/sample_1/terminal.json').read_bytes())
+        self.assertEqual(self.terminal(2)['answer'],'B')
+
+    def test_successful_provider_reply_resets_failure_streak_even_if_unparsed(self):
+        self.rows(10)
+        effects=[HTTPFailure(400) for _ in range(4)]+[self.reply('No final option')]
+        effects += [HTTPFailure(422) for _ in range(4)]+[self.reply()]
+        create=Mock(side_effect=effects)
+        self.assertEqual(self.execute(create),0)
+        self.assertEqual(create.call_count,10)
+        self.assertEqual(self.terminal(5)['status'],'unparsed')
+        self.assertEqual(self.terminal(5)['consecutive_failed_samples'],0)
+        self.assertEqual(self.terminal(9)['consecutive_failed_samples'],4)
+
+    def test_unknown_timeout_and_5xx_never_resend_same_sample(self):
+        self.rows(3);create=Mock(side_effect=[TimeoutError('synthetic timeout'),HTTPFailure(503),self.reply()])
+        self.assertEqual(self.execute(create),0)
+        self.assertEqual(create.call_count,3)
+        for i in (1,2):
+            terminal=self.terminal(i)
+            self.assertEqual(terminal['failure_class'],'unknown_provider_outcome')
+            self.assertEqual(len(terminal['attempts']),1)
+            self.assertFalse(terminal['attempts'][0]['retryable'])
+        self.assertEqual(self.execute(create),0)
+        self.assertEqual(create.call_count,3)
+
+    def test_interrupted_unknown_restores_streak_and_never_reissues(self):
+        self.rows(6)
+        create=Mock(side_effect=[HTTPFailure(400) for _ in range(4)]+[KeyboardInterrupt()])
+        with self.assertRaises(KeyboardInterrupt):self.execute(create)
+        self.assertEqual(create.call_count,5)
+        self.assertEqual(self.execute(create),2)
+        self.assertEqual(create.call_count,5)
+        terminal=self.terminal(5)
+        self.assertEqual(terminal['attempts'][0]['error_type'],'InterruptedUnknown')
+        self.assertEqual(terminal['consecutive_failed_samples'],5)
+
+    def test_systemic_errors_stop_immediately_and_do_not_resume_by_skipping_terminal(self):
+        self.rows(2);create=Mock(side_effect=[HTTPFailure(400,'model_not_found'),self.reply()])
+        self.assertEqual(self.execute(create),2)
+        self.assertEqual(create.call_count,1)
+        self.assertEqual(self.terminal(1)['fatal_reason'],'provider_configuration')
+        self.assertEqual(self.execute(create),2)
+        self.assertEqual(create.call_count,1)
+        for exc in (HTTPFailure(401),HTTPFailure(403),HTTPFailure(404),HTTPFailure(429,'insufficient_quota'),
+                    HTTPFailure(400,'unsupported_parameter'),HTTPFailure(400,None,'temperature'),
+                    HTTPFailure(429,'organization_spend_limit_exceeded'),HTTPFailure(429,'project_spend_limit_exceeded'),
+                    HTTPFailure(429,'organization_usage_limit_exceeded'),
+                    RuntimeError('returned_model_identity_mismatch'),OSError('disk failure')):
+            self.assertTrue(runner.failure_details(exc)['fatal'],repr(exc))
+            self.assertFalse(runner.failure_details(exc)['retryable'])
+        self.assertNotIn('provider_error_code',runner.failure_details(HTTPFailure(400,'synthetic-key'),'synthetic-key'))
+        self.assertNotIn('provider_error_code',runner.failure_details(HTTPFailure(400,'sk-synthetic-only')))
+
+    def test_only_explicit_rate_rejection_gets_one_authorized_retry(self):
+        self.rows(1);create=Mock(side_effect=[HTTPFailure(429,'rate_limit_exceeded'),self.reply()])
+        self.assertEqual(self.execute(create),0)
+        self.assertEqual(create.call_count,2)
+        self.assertEqual(len(self.terminal(1)['attempts']),2)
+        self.assertEqual(self.terminal(1)['answer'],'B')
+        self.assertEqual(runner.read(self.out/'status.json')['extra_requests_used'],1)
+
+    def test_malformed_response_is_a_controller_error_not_sample_rejection(self):
+        self.rows(2)
+        bad=SimpleNamespace(model_dump=lambda **_:{'model':'qwen3-vl-plus','choices':[],
+            'usage':{'prompt_tokens':10,'completion_tokens':5}})
+        create=Mock(side_effect=[bad,self.reply()])
+        self.assertEqual(self.execute(create),2)
+        self.assertEqual(create.call_count,1)
+        self.assertEqual(self.terminal(1)['fatal_reason'],'response_processing_failure')
 
 
 if __name__=='__main__':unittest.main()

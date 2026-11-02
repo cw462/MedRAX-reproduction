@@ -9,6 +9,10 @@ GPT-4o uses the user's APIYi endpoint and a separate private credential.
 The user has approved a **CNY 200 incremental cap**, for the basic-answer and
 voting stages first. Full-benchmark/heldout expansion is not automatically
 launched under this first-stage authorization. No result is claimed in this protocol.
+The user subsequently declined the always-nine GPT-4o expansion and its possible
+2,412 additional calls. Preserve the existing three-or-nine rule, two-question
+smokes, no added Qwen-Max text-only arm and the CNY 200 cap. This review revision
+changes failure handling and image-metadata wording only; no inference is launched.
 
 ## Question and design
 
@@ -106,6 +110,8 @@ process does not import or open labels. Native bytes means the saved benchmark
 image bytes, not DICOM or a claim that the provider performs no resizing. Keep
 all selected images; pair known figure labels with the corresponding image
 immediately before that image. Do not invent a figure label when none is known.
+New records use `native_bytes_sent`, replacing the misleading
+`native_bytes_no_resizing` wording without changing historical artifacts.
 
 ## Budget, recovery and artifacts
 
@@ -119,10 +125,26 @@ checks and technical attempts. Serial arm ledgers inherit preceding committed
 spend. The original account ledger is retained; no account ledger is published.
 Runtime byte-drift shutdown stays disabled as the user previously instructed;
 the original identity, locks and amount checks remain. A shared persistent
-request counter spans restarts and models. SDK retries are zero; at most one
-explicit technical retry per sample is permitted within the phase/global budget.
-An unknown provider outcome is never blindly sent again. A successful saved
-response is reused; all completed terminal records are immutable.
+request counter spans restarts and models. SDK retries are zero. A sample-specific
+definite 400/413/422 rejection becomes a missing terminal and execution continues.
+Only an explicit non-quota 429 can receive at most one technical retry within
+the existing limits. Timeout/connection/408/5xx outcomes are conservatively
+treated as unknown, recorded missing and not resent; the next independent sample
+may proceed. Five consecutive failed samples stop the arm, and the streak survives
+restart. Authentication, quota, model/endpoint/configuration, identity, budget,
+ledger and local persistence failures still stop immediately. A successful reply
+resets the technical-failure streak even when its answer is unparsed; unparsed
+answers remain missing in scoring. Saved terminals are never rewritten.
+Resolved stops can be explicitly acknowledged once by exact arm and stop-event ID.
+The acknowledgement is a separate immutable recovery record: it resets the failure
+streak at that boundary and resumes the next unfinished sample. Ordinary restart
+does not acknowledge a stop, and no acknowledgement bypasses budget/ledger checks
+or repeats a failed request.
+
+The unchanged ledger charges the full reservation when usage is unavailable or
+cannot be settled. A GPT-4o reservation is CNY 2.56384 at the frozen bounds/rates;
+this is conservative budget accounting, not an APIYi invoice. This revision does
+not claim that a 4xx was billed, fabricate zero usage or relax the monetary guard.
 
 The frozen tune inputs contain at most five images per question. Qwen's 131,072
 input-token reservation/hard bound leaves room for five provider high-resolution
