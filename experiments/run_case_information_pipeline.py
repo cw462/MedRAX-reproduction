@@ -34,7 +34,7 @@ def load_manifest(manifest_path):
     manifest_path = Path(manifest_path).resolve()
     manifest = read(manifest_path)
     if (manifest.get('experiment_id') != EXPERIMENT_ID or manifest.get('plan_version') != PLAN_VERSION
-            or manifest.get('status') != 'awaiting_user_confirmation'
+            or manifest.get('status') != 'ready_for_approved_execution'
             or set(manifest.get('models', [])) != MODELS
             or manifest.get('normal_requests') != NORMAL_REQUESTS
             or manifest.get('extra_requests') != EXTRA_REQUESTS
@@ -51,14 +51,14 @@ def load_manifest(manifest_path):
         raise ValueError('new_isolated_experiment_output_required')
     arms = manifest.get('arms', [])
     if [a.get('id') for a in arms] != [s[0] for s in ARM_SPECS]:
-        raise ValueError('fixed_six_arm_order_required')
+        raise ValueError('fixed_eight_arm_order_required')
     configs = {}
     previous = PRIOR_LEDGER
     for arm, (arm_id, model, mode, split, questions, cases, calls, extra) in zip(arms, ARM_SPECS):
         cfg = read(inside(root, arm['config']))
         validate_cfg(cfg)
         if (cfg.get('experiment_id') != EXPERIMENT_ID or cfg.get('plan_version') != PLAN_VERSION
-                or cfg.get('status') != 'awaiting_user_confirmation'
+                or cfg.get('status') != 'ready_for_approved_execution'
                 or Path(cfg['root']).resolve() != root
                 or cfg.get('run_id') != EXPERIMENT_ID+'_'+arm_id
                 or cfg.get('mode') != mode or cfg.get('model') != model
@@ -109,13 +109,16 @@ def evidence_cache_ready(root, cfg):
 
 
 def execute(manifest_path, *, execute=False, approval=None, tune_labels=None, test_labels=None,
-            report_out=None, key=None, run=subprocess.run):
+            report_out=None, key=None, run=subprocess.run, through_arm=None):
     manifest_path, manifest, root, code, out, configs = load_manifest(manifest_path)
     out.mkdir(parents=True, exist_ok=True)
     report = inside(root, report_out or root/'reports'/EXPERIMENT_ID)
     if report.name != EXPERIMENT_ID:
         raise ValueError('new_experiment_report_directory_required')
     state_path = out/'pipeline_status.json'
+    arm_ids = [a['id'] for a in manifest['arms']]
+    if through_arm is not None and through_arm not in arm_ids:
+        raise ValueError('unknown_stage_boundary')
     with exclusive_lock(out/'.pipeline.lock'):
         frozen_write(out/'pipeline_protocol.json', {'manifest': manifest, 'arm_configurations': configs,
                      'default_prepare_only': True, 'approval_required': True,
@@ -144,6 +147,12 @@ def execute(manifest_path, *, execute=False, approval=None, tune_labels=None, te
         active = None
         try:
             for arm in manifest['arms']:
+                if through_arm is not None and arm_ids.index(arm['id']) > arm_ids.index(through_arm):
+                    result = {'status': 'stage_complete', 'completed_arms': completed,
+                              'through_arm': through_arm, 'next_arm': arm['id'],
+                              'scoring_started': False, 'updated_utc': now()}
+                    write(state_path, result)
+                    return result
                 active = arm['id']
                 arm_out = inside(root, arm['out'])
                 child_state = arm_out/'status.json'
@@ -173,14 +182,14 @@ def execute(manifest_path, *, execute=False, approval=None, tune_labels=None, te
                 elif state.get('status') not in ('prepared', 'generation_complete'):
                     raise RuntimeError('preparation_not_complete:'+active)
             if not execute:
-                result = {'status': 'awaiting_user_confirmation', 'completed_arms': completed,
+                result = {'status': 'ready_for_approved_execution', 'completed_arms': completed,
                           'prepared_arms': [a['id'] for a in manifest['arms']],
                           'new_paid_calls_started': 0, 'updated_utc': now()}
                 write(state_path, result)
                 return result
             # No label is opened by this process or passed to an answer worker.
             if any(read(inside(root, a['out'])/'status.json').get('status') != 'generation_complete' for a in manifest['arms']):
-                raise RuntimeError('all_six_generation_arms_required_before_scoring')
+                raise RuntimeError('all_eight_generation_arms_required_before_scoring')
             metrics = report/'metrics.json'
             if metrics.exists():
                 if read(metrics).get('status') != 'completed':
@@ -214,9 +223,11 @@ def main(argv=None):
     parser.add_argument('--tune-labels', type=Path)
     parser.add_argument('--test-labels', type=Path)
     parser.add_argument('--report-out', type=Path)
+    parser.add_argument('--through-arm', help='Finish this arm then exit normally without scoring.')
     args = parser.parse_args(argv)
     result = execute(args.manifest, execute=args.execute, approval=args.approval,
-                     tune_labels=args.tune_labels, test_labels=args.test_labels, report_out=args.report_out)
+                     tune_labels=args.tune_labels, test_labels=args.test_labels, report_out=args.report_out,
+                     through_arm=args.through_arm)
     print(json.dumps(result, ensure_ascii=False))
 
 

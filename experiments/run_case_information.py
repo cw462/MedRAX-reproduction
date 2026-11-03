@@ -22,7 +22,7 @@ EXPERIMENT_ID = 'case_information_20261103'
 MODELS = {'qwen3.7-plus', 'deepseek-v4.1-flash-1017', 'qwen3.8-flash'}
 
 
-def require_approval(path, experiment_id=EXPERIMENT_ID, plan_version='1'):
+def require_approval(path, experiment_id=EXPERIMENT_ID, plan_version='2'):
     if path is None:
         raise ValueError('user_confirmation_required_before_execution')
     approval = read(path)
@@ -39,7 +39,7 @@ def require_approval(path, experiment_id=EXPERIMENT_ID, plan_version='1'):
 
 def validate_arm(cfg):
     worker.validate_cfg(cfg)
-    if cfg.get('experiment_id') != EXPERIMENT_ID or str(cfg.get('plan_version')) != '1':
+    if cfg.get('experiment_id') != EXPERIMENT_ID or str(cfg.get('plan_version')) != '2':
         raise ValueError('case_information_experiment_required')
     mode = cfg.get('mode')
     if mode not in {'independent', 'case_batch', 'case_sequential', 'case_evidence'}:

@@ -1,4 +1,4 @@
-"""Freeze the six-arm case-information plan without inference or ledger access.
+"""Freeze the eight-arm case-information plan without inference or ledger access.
 
 Reads only the prior arm configuration, public profiles/protocol, and frozen
 label-free inputs. Approval is deliberately neither created nor implied here.
@@ -15,22 +15,24 @@ from configure_vote_gain import dump_new
 from run_sampled_vlm import validate_cfg
 
 EXPERIMENT_ID = 'case_information_20261103'
-PLAN_VERSION = '1'
+PLAN_VERSION = '2'
 FIXED_CAP = Decimal('394.252828')
 REL = Path('runs') / EXPERIMENT_ID
 OLD_INPUTS = Path('runs/multimodel_vote_gain_20261102/split_inputs')
 PRIOR_LEDGER = 'runs/qwen37_token_plan_20261102/private_ledgers/p2_Qwen_SC9.json'
 BASELINE_RUN = 'runs/qwen37_token_plan_20261102/phase1/D'
 MODELS = {'qwen3.7-plus', 'deepseek-v4.1-flash-1017', 'qwen3.8-flash'}
-NORMAL_REQUESTS = 2709
-EXTRA_REQUESTS = 140
-HARD_REQUESTS = 2849
+NORMAL_REQUESTS = 3513
+EXTRA_REQUESTS = 182
+HARD_REQUESTS = 3695
 INPUT_FIELDS = {'question_id', 'case_id', 'question', 'images', 'figure_labels'}
 ARM_SPECS = (
-    ('E1_DeepSeek', 'deepseek-v4.1-flash-1017', 'independent', 'tune', 402, 99, 402, 21),
-    ('E1_QwenFlash', 'qwen3.8-flash', 'independent', 'tune', 402, 99, 402, 21),
     ('E2_Batch', 'qwen3.7-plus', 'case_batch', 'tune', 402, 99, 99, 5),
     ('E2_Sequential', 'qwen3.7-plus', 'case_sequential', 'tune', 402, 99, 402, 21),
+    ('E1_DeepSeek', 'deepseek-v4.1-flash-1017', 'independent', 'tune', 402, 99, 402, 21),
+    ('E1_QwenFlash', 'qwen3.8-flash', 'independent', 'tune', 402, 99, 402, 21),
+    ('E3_Classifier', 'qwen3.7-plus', 'case_evidence', 'tune', 402, 99, 402, 21),
+    ('E3_Report', 'qwen3.7-plus', 'case_evidence', 'tune', 402, 99, 402, 21),
     ('E3_Evidence', 'qwen3.7-plus', 'case_evidence', 'tune', 402, 99, 402, 21),
     ('E0_Heldout', 'qwen3.7-plus', 'independent', 'test', 1002, 241, 1002, 51),
 )
@@ -81,7 +83,7 @@ def configure(root, code, previous_arm_config, public_plan=None):
     plan_path = inside(root, public_plan or code/'configs/case_information_protocol.json')
     plan = read(plan_path)
     if (plan.get('experiment_id') != EXPERIMENT_ID or str(plan.get('plan_version')) != PLAN_VERSION
-            or plan.get('status') != 'awaiting_user_confirmation'):
+            or plan.get('status') != 'ready_for_approved_execution'):
         raise ValueError('pending_public_protocol_required')
     if set(plan.get('models', [])) != MODELS:
         raise ValueError('exact_three_model_public_plan_required')
@@ -89,7 +91,7 @@ def configure(root, code, previous_arm_config, public_plan=None):
     actual_plan = [(a.get('id'), a.get('model'), a.get('mode'), a.get('questions'), a.get('cases'),
                     a.get('normal_requests'), a.get('technical_extra_requests')) for a in plan.get('arms', [])]
     if actual_plan != expected_plan:
-        raise ValueError('public_plan_six_arm_contract_mismatch')
+        raise ValueError('public_plan_eight_arm_contract_mismatch')
     previous_path = inside(root, previous_arm_config)
     old = read(previous_path)  # A configuration, never the ledger it references.
     if (old.get('model') != 'qwen3.7-plus' or old.get('credential_slot') != 'token_plan'
@@ -127,7 +129,7 @@ def configure(root, code, previous_arm_config, public_plan=None):
     for arm_id, model, mode, split, questions, cases, calls, extra in ARM_SPECS:
         cfg = {
             'experiment_id': EXPERIMENT_ID, 'plan_version': PLAN_VERSION,
-            'status': 'awaiting_user_confirmation', 'root': str(root),
+            'status': 'ready_for_approved_execution', 'root': str(root),
             'run_id': EXPERIMENT_ID+'_'+arm_id, 'mode': mode,
             'input': (REL/'inputs'/f'{split}.inputs.jsonl').as_posix(),
             'image_root': old['image_root'], 'question_count': questions, 'case_count': cases,
@@ -143,12 +145,16 @@ def configure(root, code, previous_arm_config, public_plan=None):
             'ledger': (REL/'private_ledgers'/f'{arm_id}.json').as_posix(),
             'inherit_ledger': previous, 'cap_cny': str(FIXED_CAP),
             'new_experiment_budget_cny': '200', 'additional_budget_granted_cny': '0',
-            'budget_authorization': 'Original cumulative 200 CNY authorization is retained; new six-arm scope requires a separate explicit user approval file.',
+            'budget_authorization': 'Original cumulative 200 CNY authorization is retained; new eight-arm scope requires a separate explicit user approval file.',
             'shared_public_plan': relative(root, plan_path), 'split': split,
         }
         if mode == 'case_evidence':
             cfg['evidence_cache'] = (REL/'case_tool_evidence').as_posix()
             cfg['evidence_policy'] = 'Prebuilt completed cache required before paid execution; preparation never invokes GPU tools.'
+            cfg['evidence_variant'] = {'E3_Classifier': 'classifier', 'E3_Report': 'report', 'E3_Evidence': 'combined'}[arm_id]
+            cfg['classifier_strong_threshold'] = 0.8
+        if arm_id.startswith('E1_'):
+            cfg['first_real_image_gate'] = True
         validate_cfg(cfg)
         path = config_dir/f'{arm_id}.json'
         configurations.append((path, cfg, {
@@ -159,7 +165,7 @@ def configure(root, code, previous_arm_config, public_plan=None):
         previous = cfg['ledger']
     manifest = {
         'experiment_id': EXPERIMENT_ID, 'plan_version': PLAN_VERSION,
-        'status': 'awaiting_user_confirmation', 'root': str(root), 'code': relative(root, code),
+        'status': 'ready_for_approved_execution', 'root': str(root), 'code': relative(root, code),
         'out': REL.as_posix(), 'arms': [entry for _, _, entry in configurations],
         'models': sorted(MODELS), 'normal_requests': NORMAL_REQUESTS,
         'extra_requests': EXTRA_REQUESTS, 'hard_requests': HARD_REQUESTS,
@@ -181,7 +187,7 @@ def configure(root, code, previous_arm_config, public_plan=None):
         dump_new(path, cfg)
     manifest_path = config_dir/'pipeline.json'
     dump_new(manifest_path, manifest)
-    return {'status': 'awaiting_user_confirmation', 'manifest': relative(root, manifest_path),
+    return {'status': 'ready_for_approved_execution', 'manifest': relative(root, manifest_path),
             'normal_requests': NORMAL_REQUESTS, 'extra_requests': EXTRA_REQUESTS,
             'hard_requests': HARD_REQUESTS, 'new_paid_calls_started': 0,
             'approval_created': False}

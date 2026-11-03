@@ -15,8 +15,8 @@ import random
 from score_votes import (load_complete_run, read, read_labels, totals, paired,
                          vote, error_overlap, resources, quantile, write)
 
-ARM_IDS = ['E1_DeepSeek', 'E1_QwenFlash', 'E2_Batch', 'E2_Sequential',
-           'E3_Evidence', 'E0_Heldout']
+ARM_IDS = ['E2_Batch', 'E2_Sequential', 'E1_DeepSeek', 'E1_QwenFlash',
+           'E3_Classifier', 'E3_Report', 'E3_Evidence', 'E0_Heldout']
 TUNE_IDS = ARM_IDS[:-1]
 
 
@@ -104,7 +104,7 @@ def score(manifest_path, tune_labels, test_labels, out):
     result = compare_views(views, labels, rows)
     held = {q: test['answers'][q, 1] for q in test['qids']}
     held_cases = {str(r['question_id']): str(r['case_id']) for r in test['rows']}
-    result.update(experiment_id=manifest['experiment_id'], plan_version=manifest['plan_version'],
+    result.update(status='completed', experiment_id=manifest['experiment_id'], plan_version=manifest['plan_version'],
         inference_performed_by_scorer=False,
         selection_rule='Exploratory: paired case-bootstrap lower CI endpoint > 0; no fixed 2.5pp count gate',
         multiple_comparisons='Six exploratory tuning views; no independent method validation',
