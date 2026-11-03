@@ -215,3 +215,100 @@ def test_original_pipeline_protocol_unchanged_when_recovery_is_rejected(tmp_path
     with pytest.raises(ValueError):
         unsent_execute(tmp_path, code, fail)
     assert (out/'pipeline_protocol.json').read_bytes() == original
+
+
+def acknowledged_startup_fixture(root):
+    code, out, arm, _ = unsent_fixture(root)
+    event_id = '919_8353802159390__s6__ledger_settlement_error'
+    event = {'event_id': event_id, 'question_id': '919_8353802159390', 'sample_index': 6,
+        'reason': 'ledger_settlement_error', 'consecutive_failed_samples': 1,
+        'occurred_utc': '2026-11-02T18:41:41.572233+00:00', 'failure_policy_version': 'sample-failure-v1'}
+    put(arm/'status.json', {'status': 'stopped', 'error': 'ledger_settlement_error',
+        'stop_event_id': event_id, 'completed_samples': 2670, 'requests_used': 2670})
+    put(arm/'fatal_error.json', {'utc': '2026-11-02T18:44:58.357456+00:00',
+        'error_type': 'LedgerIntegrityError', 'message': 'Invalid existing ledger; refusing to reset it'})
+    put(arm/'stop_events'/f'{event_id}.json', event)
+    put(arm/'stop_acknowledgements'/f'{event_id}.json', {'stop_event': event,
+        'acknowledged_utc': '2026-11-02T18:44:57.948258+00:00',
+        'operator_action': 'explicit_cli_acknowledgement_after_review',
+        'effect': 'continue_unfinished_samples_only_no_prediction_or_cost_rewrite'})
+    put(arm/'checkpoints/919_8353802159390/sample_6/terminal.json', {
+        'question_id': event['question_id'], 'sample_index': 6, 'status': 'request_failed',
+        'answer': None, 'fatal_reason': event['reason'], 'ended_utc': event['occurred_utc']})
+    put(arm/'protocol.json', {'samples': 9})
+    put(arm/'selection.json', {'rows': [{'question_id': event['question_id']}]})
+    put(out/'global_requests.json', {'used': 3536})
+    return code, out, arm, event_id
+
+
+def acknowledged_execute(root, code, event, runner, **overrides):
+    options = dict(acknowledge_phase='phase2', acknowledge_arm='Qwen_SC9', resume_acknowledged_event=event)
+    options.update(overrides)
+    return execute(root, code, root/'labels0', root/'labels1', b'fixture-key', run=runner, **options)
+
+
+def test_existing_ack_resumes_remaining_phase_and_scores_without_reack_or_reconfigure(tmp_path):
+    code, out, arm, event = acknowledged_startup_fixture(tmp_path)
+    evidence = [arm/'stop_acknowledgements'/f'{event}.json', arm/'stop_events'/f'{event}.json',
+                arm/'fatal_error.json', arm/'checkpoints/919_8353802159390/sample_6/terminal.json',
+                out/'global_requests.json']
+    original = {p: p.read_bytes() for p in evidence}
+    calls = []
+    def runner(command, **kwargs):
+        calls.append(Path(command[2]).name)
+        assert not any(arg.startswith('--acknowledge') or arg.startswith('--resume-acknowledged') for arg in command)
+        if calls[-1] == 'run_vote_phase.py':
+            assert Path(command[command.index('--manifest')+1]).stem == 'phase2'
+            put(out/'phase2/status.json', {'status': 'generation_complete'})
+        elif calls[-1] == 'score_votes.py':
+            put(tmp_path/'reports'/NAME/'phase2/metrics.json', {'status': 'completed'})
+        else:
+            pytest.fail('must not reconfigure frozen phases')
+        return SimpleNamespace(returncode=0)
+    acknowledged_execute(tmp_path, code, event, runner)
+    assert calls == ['run_vote_phase.py', 'score_votes.py']
+    assert all(path.read_bytes() == value for path, value in original.items())
+    recovery = json.loads(next((out/'acknowledged_startup_recoveries').glob('*.json')).read_text())
+    assert recovery['next_sample'] == 7 and recovery['terminal_retried'] is False
+    assert recovery['acknowledgement_rewritten'] is False and recovery['ledger_modified'] is False
+    assert not (out/'private_ledgers').exists()
+    assert json.loads((out/'pipeline_status.json').read_text())['status'] == 'completed'
+
+
+@pytest.mark.parametrize('damage', ['ack_absent', 'ack_mismatch', 'terminal_mismatch',
+    'wrong_fatal', 'fatal_before_ack', 'later_started', 'later_terminal', 'wrong_active_arm', 'already_resumed'])
+def test_existing_ack_recovery_rejects_unmatched_or_advanced_state(tmp_path, damage):
+    code, out, arm, event = acknowledged_startup_fixture(tmp_path)
+    if damage == 'ack_absent':
+        (arm/'stop_acknowledgements'/f'{event}.json').unlink()
+    elif damage == 'ack_mismatch':
+        put(arm/'stop_acknowledgements'/f'{event}.json', {'stop_event': {'event_id': 'different'}})
+    elif damage == 'terminal_mismatch':
+        put(arm/'checkpoints/919_8353802159390/sample_6/terminal.json', {'status': 'completed', 'answer': 'A'})
+    elif damage in ('wrong_fatal', 'fatal_before_ack'):
+        fatal = json.loads((arm/'fatal_error.json').read_text())
+        fatal.update({'message': 'A different error'} if damage == 'wrong_fatal' else {'utc': '2026-11-02T18:40:00+00:00'})
+        put(arm/'fatal_error.json', fatal)
+    elif damage in ('later_started', 'later_terminal'):
+        suffix = 'attempt_1/started.json' if damage == 'later_started' else 'terminal.json'
+        put(arm/'checkpoints/919_8353802159390/sample_7'/suffix, {})
+    elif damage == 'wrong_active_arm':
+        put(out/'phase2/status.json', {'status': 'stopped', 'active_arm': 'Other'})
+    else:
+        put(out/'acknowledged_startup_recoveries'/f'phase2__Qwen_SC9__{event}.json', {})
+    def runner(*a, **k): pytest.fail('must reject before any subprocess')
+    with pytest.raises((ValueError, FileNotFoundError)):
+        acknowledged_execute(tmp_path, code, event, runner)
+
+
+def test_existing_ack_recovery_still_stops_if_original_worker_rejects_ledger(tmp_path):
+    code, out, arm, event = acknowledged_startup_fixture(tmp_path)
+    calls = []
+    def runner(command, **kwargs):
+        calls.append(Path(command[2]).name)
+        return SimpleNamespace(returncode=2)
+    with pytest.raises(RuntimeError, match='subprocess_failed'):
+        acknowledged_execute(tmp_path, code, event, runner)
+    assert calls == ['run_vote_phase.py']
+    assert json.loads((out/'pipeline_status.json').read_text())['status'] == 'stopped'
+    assert not (tmp_path/'reports'/NAME/'phase2/metrics.json').exists()

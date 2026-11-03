@@ -7,6 +7,7 @@ configuration is materialized. A stopped worker never advances the pipeline.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -83,9 +84,91 @@ def acknowledge_unsent_failure(root, out, cfg, report, phase, arm_id, target):
         'stop_event_created': False})
 
 
+def resume_acknowledged_startup_failure(root, out, cfg, report, phase, arm_id, event_id):
+    """Reuse an existing terminal acknowledgement after a ledger-open failure.
+
+    Read only the located event, checkpoint and execution metadata. This does
+    not reopen or repair a ledger, acknowledge the terminal again, or retry its
+    request. The original worker remains responsible for all ledger checks.
+    """
+    if (phase not in ('phase0', 'phase1', 'phase2')
+            or not re.fullmatch(r'[A-Za-z0-9_-]+', arm_id)
+            or not re.fullmatch(r'[A-Za-z0-9_.-]{1,200}', event_id)):
+        raise ValueError('invalid_acknowledged_recovery_target')
+    pipeline = read(out/'pipeline_status.json')
+    phase_state = read(out/phase/'status.json')
+    if (pipeline.get('status') != 'stopped' or pipeline.get('phase') != phase
+            or phase_state.get('status') != 'stopped' or phase_state.get('active_arm') != arm_id):
+        raise ValueError('acknowledged_recovery_requires_current_stopped_phase')
+    for prior in range(int(phase[-1])):
+        name = f'phase{prior}'
+        if (read(out/name/'status.json').get('status') != 'generation_complete'
+                or read(report/name/'metrics.json').get('status') != 'completed'):
+            raise ValueError('acknowledged_recovery_requires_complete_prior_phases')
+    manifest = read(cfg/f'{phase}.json')
+    if Path(manifest['root']).resolve() != root or (root/manifest['out']).resolve() != out/phase:
+        raise ValueError('acknowledged_recovery_manifest_location_mismatch')
+    unfinished = []
+    for arm in manifest['arms']:
+        folder = (root/arm['out']).resolve()
+        if not folder.is_relative_to(out/phase):
+            raise ValueError('acknowledged_recovery_arm_outside_phase')
+        state = read(folder/'status.json') if (folder/'status.json').exists() else {}
+        if state.get('status') != 'generation_complete':
+            unfinished.append((arm, folder, state))
+    if not unfinished or unfinished[0][0]['id'] != arm_id:
+        raise ValueError('acknowledged_recovery_requires_first_unfinished_arm')
+    _, folder, state = unfinished[0]
+    event = read(folder/'stop_events'/f'{event_id}.json')
+    ack = read(folder/'stop_acknowledgements'/f'{event_id}.json')
+    fatal = read(folder/'fatal_error.json')
+    if (state.get('status') != 'stopped' or state.get('stop_event_id') != event_id
+            or state.get('error') != 'ledger_settlement_error'
+            or event.get('event_id') != event_id or event.get('reason') != 'ledger_settlement_error'
+            or ack.get('stop_event') != event
+            or ack.get('operator_action') != 'explicit_cli_acknowledgement_after_review'
+            or ack.get('effect') != 'continue_unfinished_samples_only_no_prediction_or_cost_rewrite'):
+        raise ValueError('existing_acknowledgement_must_match_stopped_terminal_event')
+    if (fatal.get('error_type') != 'LedgerIntegrityError'
+            or fatal.get('message') != 'Invalid existing ledger; refusing to reset it'
+            or datetime.fromisoformat(fatal['utc']) < datetime.fromisoformat(ack['acknowledged_utc'])):
+        raise ValueError('acknowledged_recovery_requires_later_ledger_constructor_failure')
+    qid, sample = event.get('question_id'), event.get('sample_index')
+    if not isinstance(qid, str) or not re.fullmatch(r'[A-Za-z0-9_-]+', qid) or type(sample) is not int or sample < 1:
+        raise ValueError('invalid_acknowledged_terminal_identity')
+    terminal = read(folder/'checkpoints'/qid/f'sample_{sample}'/'terminal.json')
+    if (terminal.get('question_id') != qid or terminal.get('sample_index') != sample
+            or terminal.get('status') != 'request_failed' or terminal.get('answer') is not None
+            or terminal.get('fatal_reason') != event['reason'] or terminal.get('ended_utc') != event.get('occurred_utc')):
+        raise ValueError('acknowledged_recovery_terminal_mismatch')
+    protocol = read(folder/'protocol.json')
+    sample_count = protocol.get('config', protocol)['samples']
+    rows = read(folder/'selection.json')['rows']
+    qids = [str(row['question_id']) for row in rows]
+    if qids.count(qid) != 1 or not 1 <= sample <= sample_count:
+        raise ValueError('acknowledged_recovery_selection_mismatch')
+    next_index = qids.index(qid) + (sample == sample_count)
+    if next_index >= len(qids):
+        raise ValueError('acknowledged_recovery_requires_remaining_sample')
+    next_qid, next_sample = qids[next_index], 1 if sample == sample_count else sample + 1
+    checkpoint = folder/'checkpoints'/next_qid/f'sample_{next_sample}'
+    sent_names = ('started.json', 'result.json', 'response.json', 'terminal.json', 'stream_chunks.jsonl')
+    if any((place/name).exists() for place in (checkpoint, *checkpoint.glob('attempt_*')) for name in sent_names):
+        raise ValueError('acknowledged_recovery_rejects_progress_after_acknowledged_terminal')
+    confirmation = out/'acknowledged_startup_recoveries'/f'{phase}__{arm_id}__{event_id}.json'
+    if confirmation.exists():
+        raise ValueError('acknowledged_startup_failure_already_resumed')
+    frozen_write(confirmation, {'utc': now(), 'phase': phase, 'arm': arm_id,
+        'existing_stop_event': event, 'existing_acknowledgement': ack, 'startup_failure': fatal,
+        'next_question_id': next_qid, 'next_sample': next_sample,
+        'action': 'Normal resume through the unchanged original ledger constructor; reuse existing acknowledgement.',
+        'acknowledgement_rewritten': False, 'terminal_retried': False,
+        'predictions_modified': False, 'ledger_modified': False, 'counters_reset': False})
+
+
 def execute(root, code, regression_labels, tune_labels, key, *, run=subprocess.run,
             acknowledge_phase=None, acknowledge_arm=None, acknowledge_event=None,
-            acknowledge_unsent_error=None):
+            acknowledge_unsent_error=None, resume_acknowledged_event=None):
     root = Path(root).resolve(); code = Path(code).resolve()
     if not code.is_relative_to(root):
         raise ValueError('code_must_be_inside_root')
@@ -93,9 +176,9 @@ def execute(root, code, regression_labels, tune_labels, key, *, run=subprocess.r
     cfg = code/'configs'/NAME; report = root/'reports'/NAME
     state_path = out/'pipeline_status.json'
     completed = []
-    if acknowledge_event is not None and acknowledge_unsent_error is not None:
+    if sum(v is not None for v in (acknowledge_event, acknowledge_unsent_error, resume_acknowledged_event)) > 1:
         raise ValueError('terminal_and_unsent_acknowledgements_are_mutually_exclusive')
-    ack = (acknowledge_phase, acknowledge_arm, acknowledge_event or acknowledge_unsent_error)
+    ack = (acknowledge_phase, acknowledge_arm, acknowledge_event or acknowledge_unsent_error or resume_acknowledged_event)
     if any(x is not None for x in ack) and not all(x is not None for x in ack):
         raise ValueError('explicit_phase_arm_and_stop_event_required')
 
@@ -119,6 +202,9 @@ def execute(root, code, regression_labels, tune_labels, key, *, run=subprocess.r
         if acknowledge_unsent_error is not None:
             acknowledge_unsent_failure(root, out, cfg, report, acknowledge_phase,
                                       acknowledge_arm, acknowledge_unsent_error)
+        if resume_acknowledged_event is not None:
+            resume_acknowledged_startup_failure(root, out, cfg, report, acknowledge_phase,
+                                               acknowledge_arm, resume_acknowledged_event)
         phase = 'phase0'
         try:
             for number in (0, 1, 2):
@@ -126,7 +212,8 @@ def execute(root, code, regression_labels, tune_labels, key, *, run=subprocess.r
                 write(state_path, {'status': 'running', 'phase': phase,
                                   'step': 'configure', 'completed_phases': completed,
                                   'updated_utc': now()})
-                if number and (acknowledge_unsent_error is None or number > int(acknowledge_phase[-1])):
+                frozen_resume = acknowledge_unsent_error is not None or resume_acknowledged_event is not None
+                if number and (not frozen_resume or number > int(acknowledge_phase[-1])):
                     args = ['--phase', str(number), '--root', str(root), '--code', str(code),
                             '--phase0-manifest', str(cfg/'phase0.json'),
                             '--phase0-metrics', str(report/'phase0/metrics.json')]
@@ -182,6 +269,8 @@ def main():
     recovery.add_argument('--acknowledge-event')
     recovery.add_argument('--acknowledge-unsent-error', metavar='QUESTION_ID__sN',
         help='One explicit acknowledgement of an exact unsent reservation failure; never resets money or request limits.')
+    recovery.add_argument('--resume-acknowledged-event', metavar='EVENT_ID',
+        help='Resume after a verified ledger-constructor failure using an existing terminal acknowledgement; do not acknowledge again.')
     args = p.parse_args()
     key = sys.stdin.buffer.readline(65537).rstrip(b'\r\n')
     if not key or len(key) > 65536 or any(chr(c).isspace() or c < 32 or c >= 127 for c in key):
