@@ -88,3 +88,5 @@ python experiments/run_qwen37_token_plan_pipeline.py --root ROOT --code CODE \
 2026-11-03 02:44 阻断04：再次结算异常后，一次正常 worker 恢复在原账本构造阶段被拒绝，没有新增请求。保留 2,670 个终态和所有失败，阶段 2 未评分；不重置账本或继续确认恢复。见[阻断04](recovery_history/04_ledger_settlement_checksum/README.md)。
 
 2026-11-03 08:31 恢复05：经用户继续授权，定点恢复账本 JSON 一个结束符，原存储 checksum 完全匹配且原金额/身份检查通过；没有改写checksum或金额。流水线新增严格复用既有停止确认的恢复入口，37项针对性测试通过；原worker构造后继续未完成样本，原失败终态保留。见[恢复05](recovery_history/05_authorized_ledger_diagnosis/README.md)。
+
+2026-11-03 08:45 修订06：用户明确取消账本检验。V12启动/commit的checksum、schema、policy快照及全表金额一致性检验、继承账本checksum比较关闭；原ProviderLedger不变。保留cap、费用继承/预留/结算、身份anchor、锁、去重、token/请求次数限制及pending保守规则。通过已有计数锁在下一请求预留前暂停，原2901终态不改，新进程从未发送样本继续。15项相关账本/预算测试与47项pipeline测试通过。此修订覆盖此前完整性检验描述，必须与原冻结协议分别披露，不能声称全程账本验证未变。见[修订06](recovery_history/06_disable_ledger_validation/README.md)。
