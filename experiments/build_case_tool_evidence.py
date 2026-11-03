@@ -73,6 +73,19 @@ def read(path):
     return json.loads(Path(path).read_text(encoding="utf-8-sig"), object_pairs_hook=pairs)
 
 
+def transport_scalars(value, conversions, path='$'):
+    """Preserve NumPy scalar numeric values as JSON-native Python scalars."""
+    if type(value).__module__.startswith('numpy') and hasattr(value, 'item') and getattr(value, 'ndim', 1) == 0:
+        converted=value.item()
+        conversions.append({'path':path,'source_type':type(value).__name__,
+                            'stored_type':type(converted).__name__,'numeric_value_unchanged':True})
+        return converted
+    if isinstance(value,dict):return {k:transport_scalars(v,conversions,path+'.'+k) for k,v in value.items()}
+    if isinstance(value,tuple):return tuple(transport_scalars(v,conversions,path+f'[{i}]') for i,v in enumerate(value))
+    if isinstance(value,list):return [transport_scalars(v,conversions,path+f'[{i}]') for i,v in enumerate(value)]
+    return value
+
+
 def write(path, value, *, frozen=False):
     path = Path(path)
     if frozen and path.exists():
@@ -299,6 +312,9 @@ def invoke_once(case, image, name, pool, out, plan_sha256):
         # Only this explicit original image path reaches the medical tool.
         record["invoked"] = True
         returned = tool.invoke(identity["arguments"])
+        conversions=[]
+        returned=transport_scalars(returned, conversions)
+        record['serialization_scalar_conversions']=conversions
         record["typed_result"] = encode_value(returned)
         record["result"] = json.loads(json.dumps(returned, ensure_ascii=False, allow_nan=False))
         checked = validate_observation(KINDS[name], returned)
@@ -354,6 +370,9 @@ def generate_cases(plan, out, pool):
             "interrupted_unknown_count": evidence["interrupted_unknown_count"],
             "usable_tool_return_count": evidence["usable_tool_return_count"]})
         index["question_to_case"].update({qid: case["case_id"] for qid in case["question_ids"]})
+        print(json.dumps({'event': 'case_evidence_saved', 'case_id': case['case_id'],
+                          'completed_cases': len(index['cases']),
+                          'usable_tool_return_count': evidence['usable_tool_return_count']}), flush=True)
     for key in ("tool_invocation_count", "interrupted_unknown_count", "usable_tool_return_count"):
         index[key] = sum(c[key] for c in index["cases"])
     index["no_evidence_case_count"] = sum(c["evidence_status"] == "NO_EVIDENCE" for c in index["cases"])
@@ -386,6 +405,10 @@ def main(argv=None):
             pool = LocalToolPool(repo=args.repo, cache_dir=args.cache_dir or runtime / "models/hf_full",
                 classifier_checkpoint=args.classifier_checkpoint or runtime / "models/home/.torchxrayvision/models_data" / CLASSIFIER_FILENAME,
                 report_cache=args.report_cache or runtime / "models/hf_report", out=args.out, device=args.device)
+            # An unavailable tool runtime must not silently turn the entire
+            # planned arm into NO_EVIDENCE. Loading performs no image inference.
+            for name in TOOLS:
+                pool.get(name)
             result = generate_cases(plan, args.out, pool)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

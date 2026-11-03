@@ -1,5 +1,8 @@
 # MedRAX reproduction and research extensions
 
+<!-- case-information-current-milestone -->
+**Latest generation milestone:** [01_E2: full saved evidence](reports/case_information_20261103/01_E2/README.md). Accuracy is deferred until all experiment generation finishes.
+
 **Authorized revision 2 (2026-11-03):** [E0–E3 case-information experiments](reports/case_information_20261103/README.md) run E2 case context first, then DeepSeek-v4.1-Flash-1017/Qwen3.8-Flash with first-real-request image gates, caption-selected CXR evidence in classifier/report/combined branches, and the fixed held-out baseline. 3,513 planned requests use the unchanged cumulative budget. Scoring starts only after all generation; previous results remain unchanged.
 
 **Completed (2026-11-03 09:19:49 Beijing):** [Qwen3.7-Plus / Token Plan stages 0–2](reports/qwen37_token_plan_20261102/README.md) finished all **4,484 requests**, with no extra retries. D and HiRes each scored **295/402**; the preregistered rule selected D. Fixed **K9 scored 296/402 (73.63%)**, a net **+1 question (+0.25 pp)** versus D, with a case-bootstrap 95% CI crossing zero; same-temperature K1 scored 297/402. This is a 99-case tuning set, not independent held-out evidence or a tool-benefit result. Full questions, options, original images, saved requests/responses, failures, costs, timing and all runtime amendments are linked in the report. Three request failures and five unparsed samples remain unchanged. At the user's explicit request, V12 ledger integrity/reconciliation validation was disabled after 2,901 phase-2 terminals; operational budget, lock and duplicate-request protections remained. CNY figures are bookkeeping proxies; actual Token Plan Credits are unknown.

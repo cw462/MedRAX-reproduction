@@ -40,12 +40,12 @@ def accuracy_interval(predictions, labels, qids, cases, repeats=2000, seed=20261
             'accuracy_ci95': [quantile(values, .025), quantile(values, .975)]}
 
 
-def compare_views(views, labels, rows, repeats=2000):
+def compare_views(views, labels, rows, repeats=2000, unavailable=()):
     qids = [str(r['question_id']) for r in rows]
     cases = {str(r['question_id']): str(r['case_id']) for r in rows}
     comparisons = {name: paired(views['D'], values, labels, qids, cases,
                                 repeats, 20261103)
-                   for name, values in views.items() if name != 'D'}
+                   for name, values in views.items() if name != 'D' and name not in unavailable}
     for value in comparisons.values():
         value['passes_exploratory_retention_rule'] = value['bootstrap']['delta_ci95'][0] > 0
     wrong = [q for q in qids if views['D'][q] != labels[q]]
@@ -59,7 +59,43 @@ def compare_views(views, labels, rows, repeats=2000):
                 'oracle_is_not_achieved_ensemble_accuracy': True,
                 'about_15_errors_heuristic_is_diagnostic_only': True,
                 'pairwise': {name: error_overlap(views['D'], views[name], labels, qids)
-                            for name in ('E1_DeepSeek', 'E1_QwenFlash')}}}
+                            for name in ('E1_DeepSeek', 'E1_QwenFlash') if name not in unavailable}}}
+
+
+def load_finished_arm(path):
+    """Unavailable visual arms retain observations, never invent terminals."""
+    state=read(path/'status.json')
+    if state.get('status')!='ineligible_image_input':return load_complete_run(path)
+    rows=read(path/'question_selection.json')['rows']
+    records=[read(p) for p in path.glob('checkpoints/*/sample_1/terminal.json')]
+    return {'path':path,'config':read(path/'protocol.json'),'rows':rows,'qids':[r['question_id'] for r in rows],
+            'samples':1,'records':records,'answers':{(r['question_id'],1):None for r in rows},'ineligible':True}
+
+
+def tool_credits(paths, views, labels, rows):
+    """Question-level credit is an observed paired change, not causal attribution."""
+    coverage={};records=[];cases={r['question_id']:r['case_id'] for r in rows}
+    for arm in ('E3_Classifier','E3_Report','E3_Evidence'):
+        projections={p.stem:read(p) for p in (paths[arm]/'evidence_projection').glob('*.json')}
+        supported=[q for q,c in cases.items() if projections[c]['status']=='UNVERIFIED_TOOL_EVIDENCE']
+        agreement=[q for q,c in cases.items() if any(i.get('positive_tool_agreement') for i in projections[c]['images'])]
+        coverage[arm]={'planned_questions':len(rows),'questions_with_actual_evidence':len(supported),
+            'no_evidence_questions':len(rows)-len(supported),'evidence_case_count':len({cases[q] for q in supported}),
+            'positive_agreement_questions':len(agreement),'evidence_question_ids':supported,
+            'agreement_question_ids':agreement}
+        coverage[arm]['paired_on_evidence_subset']=paired(views['D'],views[arm],labels,supported,cases,2000,20261103) if supported else None
+    for row in rows:
+        q=row['question_id'];gold=labels[q]
+        records.append({'question_id':q,'case_id':row['case_id'],'D_correct':views['D'][q]==gold,
+            'tool_arms':{a:{'answer':views[a][q],'correct':views[a][q]==gold,
+                            'delta_from_D':int(views[a][q]==gold)-int(views['D'][q]==gold),
+                            'received_evidence':q in coverage[a]['evidence_question_ids']}
+                         for a in coverage}})
+    qids=list(cases)
+    contrasts={f'{a}_vs_{b}':paired(views[b],views[a],labels,qids,cases,2000,20261103)
+               for a,b in [('E3_Evidence','E3_Classifier'),('E3_Evidence','E3_Report'),('E3_Classifier','E3_Report')]}
+    return {'coverage':coverage,'pairwise_tool_contrasts':contrasts,'records':records,
+            'interpretation':'Observed tool-arm corrections and harms on tuning cases; no causal credit, learned rule or independent validation.'}
 
 
 def score(manifest_path, tune_labels, test_labels, out):
@@ -77,7 +113,8 @@ def score(manifest_path, tune_labels, test_labels, out):
         if out == p or out.is_relative_to(p):
             raise ValueError('report_must_not_modify_generation_or_old_baseline')
     # No label file is opened until every raw arm AND child view is complete.
-    raw = {name: load_complete_run(p) for name, p in paths.items()}
+    raw = {name: load_finished_arm(p) for name, p in paths.items()}
+    unavailable=[name for name,run in raw.items() if run.get('ineligible')]
     runs = dict(raw)
     runs['E2_Batch'] = load_complete_run(paths['E2_Batch'] / 'question_view')
     runs['D'] = load_complete_run(baseline_path)
@@ -101,13 +138,20 @@ def score(manifest_path, tune_labels, test_labels, out):
     views['E1_Ensemble'] = {q: vote([views[name][q] for name in
                          ('D', 'E1_DeepSeek', 'E1_QwenFlash')],
                          tie_answer=views['D'][q], weights=[1, 1, 1]) for q in qids}
-    result = compare_views(views, labels, rows)
+    result = compare_views(views, labels, rows, unavailable=unavailable)
+    for name in unavailable:
+        result['totals'][name]={'planned_n':402,'correct':None,'accuracy':None,'missing':None,'status':'ineligible_image_input_not_an_accuracy_measurement'}
+    result['E1_ensemble_members']=[name for name in ('D','E1_DeepSeek','E1_QwenFlash') if name not in unavailable]
+    result['image_ineligible_arms']=unavailable
+    credits=tool_credits(paths,views,labels,rows)
+    result['E3_evidence_coverage']=credits['coverage']
+    result['E3_tool_contrasts']=credits['pairwise_tool_contrasts']
     held = {q: test['answers'][q, 1] for q in test['qids']}
     held_cases = {str(r['question_id']): str(r['case_id']) for r in test['rows']}
     result.update(status='completed', experiment_id=manifest['experiment_id'], plan_version=manifest['plan_version'],
         inference_performed_by_scorer=False,
         selection_rule='Exploratory: paired case-bootstrap lower CI endpoint > 0; no fixed 2.5pp count gate',
-        multiple_comparisons='Six exploratory tuning views; no independent method validation',
+        multiple_comparisons='Eight exploratory tuning views; no independent method validation',
         E0_Heldout={**totals(held, held_labels, test['qids']),
                     **accuracy_interval(held, held_labels, test['qids'], held_cases),
                     'interpretation': 'Fixed D baseline only; not validation of an E1-E3 method'},
@@ -115,6 +159,7 @@ def score(manifest_path, tune_labels, test_labels, out):
         reused_D_new_requests=0, actual_token_plan_credits=None)
     result['usage']['scope_note'] = 'Original request units only; no duplicate batch costs from child-question projections.'
     write(out / 'metrics.json', result)
+    write(out / 'tool_credit_table.json', credits)
     write(out / 'per_question.json', {'records': [
         {'question_id': q, 'case_id': str(row['case_id']), 'reference': labels[q],
          'predictions': {name: pred[q] for name, pred in views.items()},
@@ -126,6 +171,9 @@ def score(manifest_path, tune_labels, test_labels, out):
     report = '# Case information experiments: completed offline scoring\n\n'
     report += '|Arm|Correct / planned|Accuracy|Missing|\n|---|---:|---:|---:|\n'
     for name, t in result['totals'].items():
+        if t['accuracy'] is None:
+            report+=f'|{name}|Not eligible|Not measured|Not applicable|\n'
+            continue
         report += f"|{name}|{t['correct']}/{t['planned_n']}|{t['accuracy']:.2%}|{t['missing']}|\n"
     report += '\n|Versus D|Corrections|Harms|Net|Case-bootstrap 95% CI (pp)|\n|---|---:|---:|---:|---|\n'
     for name, p in result['comparisons_to_D'].items():

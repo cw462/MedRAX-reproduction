@@ -112,8 +112,8 @@ def execute(manifest_path, *, execute=False, approval=None, tune_labels=None, te
             report_out=None, key=None, run=subprocess.run, through_arm=None):
     manifest_path, manifest, root, code, out, configs = load_manifest(manifest_path)
     out.mkdir(parents=True, exist_ok=True)
-    report = inside(root, report_out or root/'reports'/EXPERIMENT_ID)
-    if report.name != EXPERIMENT_ID:
+    report = inside(root, report_out or root/'reports'/EXPERIMENT_ID/'final_analysis')
+    if not report.is_relative_to(root/'reports'/EXPERIMENT_ID):
         raise ValueError('new_experiment_report_directory_required')
     state_path = out/'pipeline_status.json'
     arm_ids = [a['id'] for a in manifest['arms']]
@@ -126,7 +126,7 @@ def execute(manifest_path, *, execute=False, approval=None, tune_labels=None, te
         old_state = read(state_path) if state_path.exists() else {}
         if old_state.get('status') == 'completed':
             if (not (report/'metrics.json').exists() or read(report/'metrics.json').get('status') != 'completed'
-                    or any(read(inside(root, a['out'])/'status.json').get('status') != 'generation_complete' for a in manifest['arms'])):
+                    or any(read(inside(root, a['out'])/'status.json').get('status') not in ('generation_complete','ineligible_image_input') for a in manifest['arms'])):
                 raise RuntimeError('completed_pipeline_artifacts_missing_refusing_to_overwrite')
             return old_state
         if execute:
@@ -157,7 +157,7 @@ def execute(manifest_path, *, execute=False, approval=None, tune_labels=None, te
                 arm_out = inside(root, arm['out'])
                 child_state = arm_out/'status.json'
                 state = read(child_state) if child_state.exists() else {}
-                if state.get('status') == 'generation_complete':
+                if state.get('status') in ('generation_complete', 'ineligible_image_input'):
                     completed.append(active)
                     continue
                 if execute and state.get('status') == 'stopped':
@@ -170,6 +170,17 @@ def execute(manifest_path, *, execute=False, approval=None, tune_labels=None, te
                 write(state_path, {'status': 'running' if execute else 'preparing', 'active_arm': active,
                                   'completed_arms': completed, 'updated_utc': now()})
                 result = run(command, cwd=code, input=key+b'\n' if execute else b'', check=False)
+                if result.returncode == 3 and child_state.exists():
+                    stage_state = read(child_state)
+                    if stage_state.get('status') == 'ineligible_image_input':
+                        completed.append(active)
+                        continue
+                    if stage_state.get('status') == 'awaiting_image_review':
+                        result = {'status': 'awaiting_image_review', 'active_arm': active,
+                                  'completed_arms': completed, 'updated_utc': now(),
+                                  'scoring_started': False}
+                        write(state_path, result)
+                        return result
                 if result.returncode:
                     raise RuntimeError('worker_failed:'+active+':exit='+str(result.returncode))
                 if not child_state.exists():
@@ -187,8 +198,14 @@ def execute(manifest_path, *, execute=False, approval=None, tune_labels=None, te
                           'new_paid_calls_started': 0, 'updated_utc': now()}
                 write(state_path, result)
                 return result
+            if through_arm is not None:
+                result = {'status': 'stage_complete', 'completed_arms': completed,
+                          'through_arm': through_arm, 'next_arm': None,
+                          'scoring_started': False, 'updated_utc': now()}
+                write(state_path, result)
+                return result
             # No label is opened by this process or passed to an answer worker.
-            if any(read(inside(root, a['out'])/'status.json').get('status') != 'generation_complete' for a in manifest['arms']):
+            if any(read(inside(root, a['out'])/'status.json').get('status') not in ('generation_complete', 'ineligible_image_input') for a in manifest['arms']):
                 raise RuntimeError('all_eight_generation_arms_required_before_scoring')
             metrics = report/'metrics.json'
             if metrics.exists():
