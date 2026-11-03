@@ -1,5 +1,8 @@
 # MedRAX reproduction and research extensions
 
+**New plan awaiting user confirmation (2026-11-03):** [History and frozen skills experiments](reports/history_skills_20261103/README.md), with H1/H2/S1/HS and C1–C3 controls, case-disjoint skill reflection, fixed selection, held-out confirmation and disclosed full-benchmark overlap. Plan and deterministic fold preparation only; no new experiment has started.
+
+
 <!-- case-information-current-milestone -->
 **Completed E0–E3 (2026-11-03):** [Final analysis and full evidence](reports/case_information_20261103/final_analysis/interpretation.md). All 3,513 model requests finished. On 402 tuning questions, E2 Batch/Sequential scored **354/336**, versus D **295**; E1 DeepSeek/Qwen Flash/fixed ensemble scored **306/320/317**; E3 classifier/report/combined scored **293/293/289**, with all tool gain intervals crossing zero. E0 fixed D scored **793/1002 (79.14%)**, case-bootstrap 95% CI **76.06–82.02%**. This held-out result does not validate E2 or tool methods. [Five milestone records](reports/case_information_20261103/final_analysis/publication_history.json) and the [authorized E2/E1 interim report](reports/case_information_20261103/interim_E2_E1/README.md) are retained.
 
