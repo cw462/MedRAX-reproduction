@@ -1,0 +1,7 @@
+# 已完成运行的状态与修订证据
+
+pipeline_status.json为最终完成状态；phase0/1/2_status.json为各阶段生成完成状态。phaseN_protocol.json保存实际冻结协议，已删除私有路径及账户累计金额。原始实现commit不因后续修订而覆盖；runtime_amendments记录逐次运行修订。
+
+stop_events和stop_acknowledgements保留01、02、04原始已发送失败及一次确认。unsent_recovery_acknowledgements记录03和06未发送请求的合法续接；acknowledged_startup_recoveries保留05复用已有确认的启动恢复；operator_counter_lock_pauses保留06安全切换的精确回执。
+
+历史事件中关于校验的描述代表事件发生时的规则。06之后V12账本完整性与全表一致性检查已按用户授权关闭；没有恢复或新增替代扫描。费用上限、锁、去重等运行保护仍保留。记录中的账户路径已脱敏；没有公开账户账本、私有快照或账户累计金额。

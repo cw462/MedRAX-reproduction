@@ -5,6 +5,8 @@ Writes REPORT/evidence, leaving scorer files alone. All runs must be complete.
 No labels, credentials, provider clients, account ledgers, network or Git access.
 Optional manifest.public_image_map maps source_filename to an explicitly named
 existing public image (relative to manifest); exact request bytes must agree.
+An arm.public_run may reuse an already exported public arm, relative to the
+manifest. Its observable files must match the sanitized source run exactly.
 """
 from __future__ import annotations
 
@@ -34,6 +36,8 @@ DROP_KEYS = {
     'inherit_ledger', 'global_request_counter', 'reservation', 'reservation_id',
     'account_balance', 'balance_cny', 'remaining_cny', 'committed_cny', 'reserved_cny',
     'start_committed_cny', 'end_committed_cny', 'private_ledgers', 'account_ledger',
+    'cap_cny', 'cumulative_cap_cny', 'original_cap_cny',
+    'inherited_committed_snapshot_cny', 'remaining_authorized_budget_snapshot_cny',
 }
 SECRET = re.compile(r'(?i)\b(?:sk-[a-z0-9_-]{12,}|gh[pousr]_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}|AKIA[A-Z0-9]{16})\b|\bBearer\s+[A-Za-z0-9._~+/=-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----')
 ASSIGNMENT = re.compile(r'(?i)\b(?:api[_-]?key|access[_-]?token|authorization|password|client[_-]?secret)\s*[=:]\s*[\"\']?[^\s\"\',;}]+')
@@ -267,7 +271,19 @@ class Publisher:
         cleaned = self.clean(value, path)
         text = ('\n'.join(json.dumps(v, ensure_ascii=False) for v in cleaned) if jsonl
                 else json.dumps(cleaned, ensure_ascii=False, indent=2)) + '\n'
-        if DATA_URI.search(text) or SECRET.search(text) or PRIVATE_PATH.search(text):
+        def strings(item):
+            if isinstance(item, str):
+                yield item
+            elif isinstance(item, dict):
+                for key, child in item.items():
+                    yield str(key)
+                    yield from strings(child)
+            elif isinstance(item, list):
+                for child in item:
+                    yield from strings(child)
+        # Inspect actual strings, not JSON escaping: an option heading "F:"
+        # followed by a newline is not a Windows F:\\n... filesystem path.
+        if any(pattern.search(item) for item in strings(cleaned) for pattern in (DATA_URI, SECRET, PRIVATE_PATH)):
             raise ValueError('outgoing_text_contains_unresolved_private_content')
         path.write_text(text, encoding='utf-8')
         self.files.add(path)
@@ -301,7 +317,19 @@ def export_phase(manifest_path, report_out, image_roots=()):
         if run['rows'] != first['rows']:
             raise ValueError('all_arms_must_publish_same_question_selection')
     publisher = Publisher(out, manifest_path, manifest.get('public_image_map'), image_roots)
-    bindings, artifacts = {}, []
+    bindings, artifacts, public_runs = {}, [], {}
+    for arm in manifest['arms']:
+        arm_id = arm['id']
+        if arm.get('public_run'):
+            declared = Path(arm['public_run'])
+            if declared.is_absolute():
+                raise ValueError('reused_public_arm_requires_relative_path')
+            target = (manifest_path.parent / declared).resolve()
+            if not target.is_dir() or any(target.is_relative_to(run['path']) for run in runs.values()):
+                raise ValueError('reused_public_arm_must_exist_outside_private_runs')
+            public_runs[arm_id] = target
+        else:
+            public_runs[arm_id] = out / 'arms' / arm_id
     for arm_id, run in runs.items():
         terminals = {(str(r['question_id']), r['sample_index']): r for r in run['records']}
         for row in run['rows']:
@@ -321,7 +349,8 @@ def export_phase(manifest_path, report_out, image_roots=()):
                     if source.is_file():
                         if name == 'terminal.json' and read(source) != terminals[qid, sample]:
                             raise ValueError('checkpoint_and_aggregate_terminal_disagree')
-                        artifacts.append((source, out / 'arms' / arm_id / prefix / name))
+                        artifacts.append((source, public_runs[arm_id] / prefix / name,
+                                          public_runs[arm_id] != out / 'arms' / arm_id))
                     elif name == 'terminal.json':
                         raise FileNotFoundError('completed_sample_missing_checkpoint_terminal')
                 for attempt in range(1, int(run['config'].get('max_attempts_per_sample', 2)) + 1):
@@ -329,19 +358,34 @@ def export_phase(manifest_path, report_out, image_roots=()):
                         relative = prefix + f'/attempt_{attempt}/' + name
                         source = source_file(run['path'], relative)
                         if source.is_file():
-                            artifacts.append((source, out / 'arms' / arm_id / relative))
+                            artifacts.append((source, public_runs[arm_id] / relative,
+                                              public_runs[arm_id] != out / 'arms' / arm_id))
     # Originals for text-only arms still belong to the benchmark case archive.
     for row in rows.values():
         for source in row['images']:
             publisher.source_image(source)
-    for source, target in artifacts:
-        publisher.copy_json(source, target)
+    def emit_or_verify(target, value, reused=False, jsonl=False):
+        if not reused:
+            publisher.emit(target, value, jsonl=jsonl)
+            return
+        if not target.is_file():
+            raise FileNotFoundError('reused_public_arm_missing_observable_file')
+        existing = ([json.loads(line) for line in target.read_text(encoding='utf-8-sig').splitlines() if line.strip()]
+                    if jsonl else read(target))
+        if existing != publisher.clean(value, target):
+            raise ValueError('reused_public_arm_content_disagrees_with_source:' + target.name)
+
+    for source, target, reused in artifacts:
+        value = ([json.loads(line) for line in source.read_text(encoding='utf-8-sig').splitlines() if line.strip()]
+                 if source.suffix == '.jsonl' else read(source))
+        emit_or_verify(target, value, reused=reused, jsonl=source.suffix == '.jsonl')
     cost = {}
     for arm_id, run in runs.items():
-        arm_out = out / 'arms' / arm_id
-        publisher.emit(arm_out / 'protocol.json', read(run['path'] / 'protocol.json'))
-        publisher.emit(arm_out / 'status.json', read(run['path'] / 'status.json'))
-        publisher.emit(arm_out / 'predictions.jsonl', run['records'], jsonl=True)
+        arm_out = public_runs[arm_id]
+        reused = arm_out != out / 'arms' / arm_id
+        emit_or_verify(arm_out / 'protocol.json', read(run['path'] / 'protocol.json'), reused)
+        emit_or_verify(arm_out / 'status.json', read(run['path'] / 'status.json'), reused)
+        emit_or_verify(arm_out / 'predictions.jsonl', run['records'], reused, jsonl=True)
         cost[arm_id] = resources(run['records'])
         summary = source_file(run['path'], 'ledger_final_summary.json')
         if summary.is_file():
@@ -361,7 +405,7 @@ def export_phase(manifest_path, report_out, image_roots=()):
         for arm_id, run in runs.items():
             samples = []
             for sample in range(1, run['samples'] + 1):
-                prefix = out / 'arms' / arm_id / 'checkpoints' / qid / f'sample_{sample}'
+                prefix = public_runs[arm_id] / 'checkpoints' / qid / f'sample_{sample}'
                 records = [{**{k: v for k, v in item.items() if k != 'asset'},
                             'image': publisher.rel(item['asset'], cases_path)} for item in bindings[arm_id, qid, sample]]
                 samples.append({'sample_index': sample, 'request': publisher.rel(prefix / 'request.json', cases_path),
@@ -369,8 +413,15 @@ def export_phase(manifest_path, report_out, image_roots=()):
             case['samples'][arm_id] = samples
         cases.append(case)
     publisher.emit(cases_path, {'planned_n': len(cases), 'cases': cases})
-    public_manifest = {k: v for k, v in manifest.items() if k not in ('arms', 'public_image_map')}
-    public_manifest['arms'] = [{**{k: v for k, v in arm.items() if k != 'run'}, 'run': 'arms/' + arm['id']} for arm in manifest['arms']]
+    public_manifest = {k: v for k, v in manifest.items() if k not in ('arms', 'public_image_map', 'public_generation_gate')}
+    if manifest.get('public_generation_gate'):
+        gate = (manifest_path.parent / manifest['public_generation_gate']).resolve()
+        if not gate.is_file() or read(gate).get('status') != 'generation_complete':
+            raise ValueError('public_generation_gate_must_be_complete')
+        public_manifest['generation_gate'] = publisher.rel(gate, out / 'phase_manifest.json')
+    public_manifest['arms'] = [{**{k: v for k, v in arm.items() if k not in ('run', 'public_run')},
+        'run': os.path.relpath(public_runs[arm['id']], out).replace('\\', '/'),
+        **({'reused_existing_public_arm': True} if arm.get('public_run') else {})} for arm in manifest['arms']]
     publisher.emit(out / 'phase_manifest.json', public_manifest)
     publisher.emit(out / 'cost_summary.json', {'arms': cost, 'new_export_inference': 0,
                    'notes': 'Saved per-request settlements and guard run increments are distinct, unchanged accounting sources; neither is a provider invoice.'})
@@ -401,6 +452,7 @@ def export_phase(manifest_path, report_out, image_roots=()):
                    'redactions': dict(publisher.redactions), 'native_image_bytes_preserved': True,
                    'model_content_and_reasoning_retained_except_private_text': True,
                    'request_image_order_and_source_binding_preserved': True,
+                   'reused_public_arms': [arm['id'] for arm in manifest['arms'] if arm.get('public_run')],
                    'private_account_ledgers_read': False, 'reference_labels_read': False, 'new_inference': 0})
     return read(publication_path)
 
