@@ -28,5 +28,6 @@ def episode(runtime,transport,row,cfg,dest,window,source_map):
         'adoption_note':'Explicit IDs in short response only; absence is unknown, not proof of non-adoption. Source-window official analyzer supplies utility adoption feedback.',
         'action':'independent_visual_answer','evidence_target':row['images'],
         'retrieval_candidates':[c.__dict__ for c in retrieval.candidates]}
+    if terminal.get('reused_call'):result['reused_call']=terminal['reused_call']
     frozen_write(dest,result)
     return result

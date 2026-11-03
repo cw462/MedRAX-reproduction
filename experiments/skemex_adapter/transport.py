@@ -3,6 +3,7 @@ from contextlib import redirect_stdout
 from copy import deepcopy
 import io
 import json
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -10,7 +11,8 @@ from types import SimpleNamespace
 import run_sampled_vlm as worker
 from run_direct_vlm import read,write,now
 
-ID='skemex_a1_20261103'
+ID=os.environ.get('MEDRAX_SKEMEX_RUN_ID','skemex_a1_20261103')
+if ID not in ('skemex_a1_20261103','skemex_a1_20261103_r1'):raise ValueError('unapproved_run_namespace')
 
 
 class Halt(BaseException):
@@ -48,11 +50,24 @@ class PaidTransport:
         if self.context is None:raise Halt('missing_operation_context')
         context,row,_=self.context;self.ordinal+=1
         job=context+'__'+str(self.ordinal);out=self.base/'calls'/job
+        if self.cfg.get('reuse_original_run'):
+            original=Path(self.cfg['root'])/self.cfg['reuse_original_run']/'calls'/job
+            request_path=original/'checkpoints'/row['question_id']/'sample_1/request.json'
+            terminal_path=request_path.with_name('terminal.json')
+            expected={'model':self.cfg['model'],'messages':messages,'temperature':temperature,'top_p':self.cfg['top_p'],
+                      'max_tokens':max_tokens,'extra_body':self.cfg.get('extra_body',{}),'stream':False}
+            if request_path.exists() and terminal_path.exists() and read(request_path)==expected:
+                value=read(terminal_path)
+                reference={'original_run':self.cfg['reuse_original_run'],'original_job':job,'question_id':row['question_id'],
+                           'new_requests':0,'exact_payload_match':True,'terminal_status':value['status']}
+                worker.frozen_write(out/'reuse.json',reference)
+                return value.get('raw_response'),dict(value,reused_call=reference)
         counter=Path(self.cfg['root'])/self.cfg['global_request_counter']
         if counter.exists() and not (out/'status.json').exists():
             counts=read(counter)
             if len(counts['request_ids'])-len(counts['extra_request_ids'])>=5000:raise Halt('normal_request_ceiling_5000')
-        cfg=deepcopy(self.cfg);cfg.update(run_id='sa1_'+job,temperature=temperature,max_output_tokens=max_tokens,
+        prefix='sa1r1_' if self.cfg.get('reuse_original_run') else 'sa1_'
+        cfg=deepcopy(self.cfg);cfg.update(run_id=prefix+job,temperature=temperature,max_output_tokens=max_tokens,
             max_requests=2,max_extra_requests=1,question_count=1,case_count=1)
         if len(cfg['run_id'])>64:raise Halt('operation_id_too_long')
         out.mkdir(parents=True,exist_ok=True)

@@ -34,4 +34,30 @@ class Contracts(unittest.TestCase):
         self.assertEqual((c['buffer']['window_size'],c['buffer']['capacity']),(30,20))
 
 
+class AdmissionRegression(unittest.TestCase):
+    def test_provenance_is_not_skill_content(self):
+        from evolve_skemex_a1 import prohibited
+        row={'question_id':'case_123_q','case_id':'123','question':'Which finding is present? A) none B) opacity'}
+        draft={'source_trajectory_ids':['case_123_q'],'name':'Side comparison','description':'Compare both sides before assessing asymmetry','applicable_conditions':'When asymmetry is uncertain','core_action':'Inspect both sides in the original image before comparing candidate findings.'}
+        self.assertTrue(prohibited(json.dumps(draft),row))
+        content=' '.join(str(draft.get(k) or '') for k in ('name','description','applicable_conditions','core_action','Core Action'))
+        self.assertFalse(prohibited(content,row))
+
+class ReuseRegression(unittest.TestCase):
+    def test_exact_completed_request_reuses_without_worker_or_ledger(self):
+        import tempfile
+        from skemex_adapter.transport import PaidTransport
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);row={'question_id':'q','case_id':'c','question':'A) yes\nB) no','images':[]}
+            messages=[{'role':'system','content':'s'},{'role':'user','content':'u'}]
+            request={'model':'qwen3.7-plus','messages':messages,'temperature':.2,'top_p':.95,'max_tokens':2048,'extra_body':{'enable_thinking':False},'stream':False}
+            folder=root/'old/calls/job__1/checkpoints/q/sample_1';folder.mkdir(parents=True)
+            (folder/'request.json').write_text(json.dumps(request));(folder/'terminal.json').write_text(json.dumps({'raw_response':'Answer: A','answer':'A','status':'completed'}))
+            cfg={'root':str(root),'reuse_original_run':'old','model':'qwen3.7-plus','top_p':.95,'extra_body':{'enable_thinking':False}}
+            t=PaidTransport(cfg,'dummy-not-a-real-key',root/'new');t.set_context('job',row)
+            with patch('run_sampled_vlm.run',side_effect=AssertionError('must not call paid worker')):
+                raw,value=t.call(messages,actor=True)
+            self.assertEqual(raw,'Answer: A');self.assertTrue(value['reused_call']['exact_payload_match'])
+
 if __name__=='__main__':unittest.main()

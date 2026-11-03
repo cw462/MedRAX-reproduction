@@ -85,7 +85,7 @@ def run(root,fold,key):
                     draft['source_trajectory_ids']=[trajectory.id]
                     if draft.get('branch')=='action_level' or draft.get('required_tools'):rejected='no_real_tool_trajectory'
                     elif not str(draft.get('applicable_conditions') or '').strip():rejected='missing_applicability'
-                    elif prohibited(json.dumps(draft,ensure_ascii=False),row):rejected='case_identifier_or_question_copy'
+                    elif prohibited(' '.join(str(draft.get(k) or '') for k in ('name','description','applicable_conditions','core_action','Core Action')),row):rejected='case_identifier_or_question_copy'
                 if encoded.patch_content and prohibited(encoded.patch_content,row):rejected='unsafe_patch_content'
                 if rejected:encoded.output_action='NONE'
                 encodes[trajectory.id]=encoded

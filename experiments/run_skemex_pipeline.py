@@ -23,6 +23,8 @@ def run(root,approval,execute=False):
                     cmd=[sys.executable,'-u',str(code/'experiments/evolve_skemex_a1.py'),'--root',str(root),'--source-fold',phase[-1]]
                 elif phase.startswith('target'):
                     if not all((base/'evolution'/f/'complete.json').exists() for f in ('A','B')):raise ValueError('both_libraries_must_freeze_before_targets')
+                    if ID.endswith('_r1') and any(not read(base/'evolution'/f/'complete.json')['active_skill_ids'] for f in ('A','B')):
+                        raise ValueError('empty_source_library_no_valid_memory_effect_evaluation')
                     cmd=[sys.executable,'-u',str(code/'experiments/run_skemex_a1.py'),'--root',str(root),'--target-fold',phase[-1]]
                 else:cmd=[sys.executable,str(code/'experiments/score_skemex_a1.py'),'--root',str(root)]
                 result=subprocess.run(cmd,cwd=code,input=key+b'\n' if phase!='scoring' else b'',check=False)
