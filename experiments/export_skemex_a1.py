@@ -24,7 +24,10 @@ class EvidencePublisher(Publisher):
 
 def export(root,out):
     root=Path(root);out=Path(out);run=root/'runs'/ID
-    if read(run/'pipeline_status.json')['status']!='completed':raise ValueError('complete_A1_pipeline_required')
+    state=read(run/'pipeline_status.json')
+    source_only=(ID.endswith('_r1') and state.get('status')=='stopped' and state.get('error')=='empty_source_library_no_valid_memory_effect_evaluation'
+                 and all((run/'evolution'/f/'complete.json').exists() for f in ('A','B')) and not list((run/'predictions').glob('*.json')))
+    if state['status']!='completed' and not source_only:raise ValueError('complete_A1_pipeline_or_terminal_empty_library_required')
     if out.exists() and any(out.iterdir()):raise ValueError('refuse_existing_public_export')
     cfg=read(run/'config.json');publisher=EvidencePublisher(out,run/'pipeline_status.json',image_roots=[root/cfg['image_root']]);publisher.validation_failures=[]
     rows=read(run/'inputs/rows.json');mapping={r['question_id']:r for r in rows};cases=[];index={q:[] for q in mapping}
@@ -65,10 +68,17 @@ def export(root,out):
         elif source.name=='README.md':
             target=out/'analysis/README.md';target.parent.mkdir(parents=True,exist_ok=True);target.write_text(source.read_text(encoding='utf-8'),encoding='utf-8');publisher.files.add(target)
     publisher.emit(out/'query_to_calls.json',index)
+    reuses=[]
+    for reuse in (run/'calls').glob('*/reuse.json'):
+        value=read(reuse);q=value['question_id'];job=value['original_job']
+        # Public relative reference to the separately preserved original evidence.
+        target=out.parent.parent/'skemex_a1_20261103'/'results'/'calls'/job/'checkpoints'/q/'sample_1/request.json'
+        reuses.append(dict(value,original_public_request=publisher.rel(target,out/'reused_calls.json')))
+    publisher.emit(out/'reused_calls.json',{'records':reuses,'new_paid_calls':0,'original_cost_not_charged_again':True})
     publisher.emit(out/'request_image_variants.json',{'records':variants,'original_requests_and_source_files_unchanged':True})
     publisher.emit(out/'invalid_image_bytes.json',{'records':publisher.validation_failures,'interpretation':'Saved bytes preserved as evidence, not repaired or certified as valid input. Provider decoding and physical cause unknown.'})
     publisher.emit(out/'assets.json',{'assets':[{k:v for k,v in a.items() if k!='target'}|{'path':publisher.rel(a['target'],out/'assets.json')} for a in publisher.assets.values()]})
-    publisher.emit(out/'publication_manifest.json',{'experiment_id':ID,'files':sorted(p.relative_to(out).as_posix() for p in publisher.files),'new_inference':0,'ledgers_copied':False})
+    publisher.emit(out/'publication_manifest.json',{'experiment_id':ID,'source_only_terminal':source_only,'files':sorted(p.relative_to(out).as_posix() for p in publisher.files),'new_inference':0,'ledgers_copied':False})
     print({'public_files':len(publisher.files)})
 
 
