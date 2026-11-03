@@ -1,5 +1,8 @@
 # MedRAX reproduction and research extensions
 
+**Authorized A1-only experiment:** [Official SkeMex memory on the existing direct-answer baseline](reports/skemex_a1_20261103/README.md). User clarified A0=D295/402. New A1 only; no history/tools/new controls, same qwen3.7-plus actor, source-fold memory evolution and frozen crossfit evaluation.
+
+
 **Completed Plus history/skills round:** [Full results](reports/history_skills_plus_20261103/results/analysis/README.md). D 295/402; H1 316/402; S1 279/402; HS 300/402. All gates failed (H1 overall positive, clean-history CI crosses zero); fixed fallback D. Same 99 tuning cases; Flash, controls, heldout and full benchmark deferred.
 
 
