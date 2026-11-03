@@ -22,12 +22,19 @@ from run_direct_vlm import SYSTEM_PROMPT, now, read, read_lines, write
 from official_gain_answer_scoring import explicit_answer
 from v12_evidence import build_images, multimodal_content, question_parts
 
-MODELS = {'qwen3-vl-plus', 'qwen3.7-plus', 'qwen3.8-max-0902', 'gpt-4o'}
+TOKEN_PLAN_FLASH_MODELS = {'deepseek-v4.1-flash-1017', 'qwen3.8-flash'}
+TOKEN_PLAN_MODELS = {'qwen3.7-plus'} | TOKEN_PLAN_FLASH_MODELS
+MODELS = {'qwen3-vl-plus', 'qwen3.8-max-0902', 'gpt-4o'} | TOKEN_PLAN_MODELS
 TOKEN_PLAN_BASE_URL = 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1'
 TOKEN_PLAN_ACCOUNTING_NOTE = (
     'Token Plan usage is measured in provider Credits; these CNY rates are a conservative '
     'budget proxy, not a provider invoice or Credits-to-CNY conversion. '
     'This runner never purchases additional quota automatically.')
+TOKEN_PLAN_FLASH_ACCOUNTING_NOTE = (
+    'Inherited 4/12 CNY-per-million bookkeeping rates are a budget proxy only: '
+    'they are not actual provider prices, a verified upper bound, or a Credits-to-CNY conversion. '
+    'Token Plan Credits remain authoritative. The original cumulative budget cap is unchanged; '
+    'this runner never purchases additional quota automatically.')
 VARIANTS = {'answer', 'cot', 'think', 'text_only'}
 ROW_FIELDS = {'question_id', 'case_id', 'question', 'images', 'figure_labels'}
 FAILURE_POLICY = {
@@ -109,6 +116,13 @@ def profile_for(cfg):
                 return isinstance(returned, str) and (
                     returned == 'qwen3.7-plus' or
                     re.fullmatch(r'qwen3\.7-plus-\d{4}-\d{2}-\d{2}', returned) is not None)
+            if self.model == 'deepseek-v4.1-flash-1017':
+                # A requested dated snapshot must not silently become another alias.
+                return returned == 'deepseek-v4.1-flash-1017'
+            if self.model == 'qwen3.8-flash':
+                return isinstance(returned, str) and (
+                    returned == 'qwen3.8-flash' or
+                    re.fullmatch(r'qwen3\.8-flash-\d{4}-\d{2}-\d{2}', returned) is not None)
             return super().identity_ok(returned)
     p = cfg['profile']
     required = {'base_url', 'identity_prefixes', 'input_cny_per_million',
@@ -135,6 +149,13 @@ def profile_for(cfg):
             raise ValueError('qwen37_exact_family_identity_required')
         if TOKEN_PLAN_ACCOUNTING_NOTE not in price_basis:
             price_basis += ' ' + TOKEN_PLAN_ACCOUNTING_NOTE
+    if cfg['model'] in TOKEN_PLAN_FLASH_MODELS:
+        if p['base_url'] != TOKEN_PLAN_BASE_URL:
+            raise ValueError('token_plan_endpoint_required')
+        if p['identity_prefixes'] != [cfg['model']]:
+            raise ValueError('token_plan_exact_family_identity_required')
+        if TOKEN_PLAN_FLASH_ACCOUNTING_NOTE not in price_basis:
+            price_basis += ' ' + TOKEN_PLAN_FLASH_ACCOUNTING_NOTE
     return SamplingProfile(name=cfg['model'], base_url=p['base_url'], model=cfg['model'],
         identity_prefixes=tuple(p['identity_prefixes']), input_cny_per_million=rates[0],
         output_cny_per_million=rates[1], price_basis=price_basis,
@@ -145,7 +166,8 @@ def profile_for(cfg):
 def validate_cfg(cfg):
     if cfg['model'] not in MODELS or cfg['prompt_variant'] not in VARIANTS:
         raise ValueError('unsupported_model_or_variant')
-    expected_slot = {'gpt-4o':'apiyi', 'qwen3.7-plus':'token_plan'}.get(cfg['model'], 'dashscope')
+    expected_slot = ('token_plan' if cfg['model'] in TOKEN_PLAN_MODELS
+                     else 'apiyi' if cfg['model'] == 'gpt-4o' else 'dashscope')
     if cfg.get('credential_slot') != expected_slot:
         raise ValueError('explicit_model_provider_credential_slot_required')
     if not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', cfg['run_id']):
@@ -169,6 +191,10 @@ def validate_cfg(cfg):
         raise ValueError('think_variant_requires_explicit_enable_thinking')
     if cfg['model'].startswith('qwen') and cfg['prompt_variant'] != 'think' and extra.get('enable_thinking') is not False:
         raise ValueError('pin_qwen_non_thinking_explicitly')
+    if cfg['model'] in TOKEN_PLAN_FLASH_MODELS and (
+        cfg['prompt_variant'] == 'think' or extra.get('enable_thinking') is not False
+    ):
+        raise ValueError('token_plan_flash_non_thinking_required')
     if cfg['model'] == 'gpt-4o':
         if extra or cfg['prompt_variant'] == 'think':
             raise ValueError('gpt4o_no_provider_thinking_or_highres_parameters')
@@ -413,7 +439,8 @@ def invoke(client, payload, attempt_dir):
     return raw
 
 
-def recover_attempt(folder, legal, profile=None):
+def recover_attempt(folder, legal, profile=None, parse_fn=None):
+    parse_fn = parse_answer if parse_fn is None else parse_fn
     if (folder/'result.json').exists():
         return read(folder/'result.json')
     if not (folder/'started.json').exists():
@@ -422,7 +449,7 @@ def recover_attempt(folder, legal, profile=None):
     if (folder/'response.json').exists():
         raw = read(folder/'response.json'); message = raw.get('choices',[{}])[0].get('message',{})
         result.update(response_received=True, raw_content=message.get('content'), usage=raw.get('usage'),
-            reasoning_content=message.get('reasoning_content'), parsed=parse_answer(message.get('content'),legal),
+            reasoning_content=message.get('reasoning_content'), parsed=parse_fn(message.get('content'),legal),
             response_model=raw.get('model'), finish_reason=raw.get('choices',[{}])[0].get('finish_reason'),
             recovery='saved_response_reused_no_new_request',
             recovered_cost_note='Original ledger recovery determines charge; response usage is preserved without rewriting the ledger.')
@@ -436,8 +463,20 @@ def recover_attempt(folder, legal, profile=None):
     return result
 
 
-def run(args, cfg, out):
-    rows = prepare(cfg, out); root = Path(cfg['root']); profile = profile_for(cfg)
+def run(args, cfg, out, adapter=None):
+    """Execute samples with optional input/request/parser adaptation only.
+
+    Adapters do not receive a client, ledger, request counter, or persistence
+    callback. Request accounting, identity checks and recovery remain here.
+    """
+    if adapter is None:
+        rows = prepare(cfg, out)
+        parse_fn = parse_answer
+    else:
+        validate_cfg(cfg)
+        rows = adapter.prepare(cfg, out)
+        parse_fn = adapter.parse
+    root = Path(cfg['root']); profile = profile_for(cfg)
     records = {}
     for row in rows:
         for sample in range(1,cfg['samples']+1):
@@ -498,12 +537,12 @@ def run(args, cfg, out):
             write(out/'ledger_final_summary.json',{'utc':now(),'run_increment_cny':str(cap-ledger.remaining-Decimal(read(out/'ledger_start.json')['committed_cny'])),
                 'price_basis':profile.price_basis,'provider_invoice':False})
         for index,row in enumerate(rows,1):
-            legal=question_parts(row['question'])[1]
+            legal=question_parts(row['question'])[1] if adapter is None else adapter.legal(row)
             for sample in range(1,cfg['samples']+1):
                 qid=row['question_id']
                 if (qid,sample) in records:continue
                 folder=out/'checkpoints'/qid/f'sample_{sample}'
-                messages,images=request_for(row,cfg)
+                messages,images=request_for(row,cfg) if adapter is None else adapter.request(row,cfg,out)
                 payload={'model':cfg['model'],'messages':messages,'temperature':cfg['temperature'],'top_p':cfg['top_p'],
                     'max_tokens':cfg['max_output_tokens'],'extra_body':cfg.get('extra_body',{}),'stream':cfg.get('stream',False)}
                 if payload['stream']:payload['stream_options']={'include_usage':True}
@@ -516,7 +555,7 @@ def run(args, cfg, out):
                 stop=None
                 for attempt_number in range(1,cfg.get('max_attempts_per_sample',2)+1):
                     attempt_dir=folder/f'attempt_{attempt_number}'
-                    result=recover_attempt(attempt_dir,legal,profile)
+                    result=recover_attempt(attempt_dir,legal,profile,parse_fn=parse_fn)
                     if result is None:
                         if used>=cfg['max_requests'] or (attempt_number>1 and extras>=cfg['max_extra_requests']):
                             stop='phase_request_limit';break
@@ -548,7 +587,7 @@ def run(args, cfg, out):
                             raw=invoke(client,payload,attempt_dir);usage=raw.get('usage')
                             message=raw.get('choices',[{}])[0].get('message',{})
                             result.update(response_received=True,raw_content=message.get('content'),reasoning_content=message.get('reasoning_content'),
-                                response_model=raw.get('model'),usage=usage,finish_reason=raw.get('choices',[{}])[0].get('finish_reason'),parsed=parse_answer(message.get('content'),legal))
+                                response_model=raw.get('model'),usage=usage,finish_reason=raw.get('choices',[{}])[0].get('finish_reason'),parsed=parse_fn(message.get('content'),legal))
                             if not profile.identity_ok(raw.get('model')):raise RuntimeError('returned_model_identity_mismatch')
                         except Exception as exc:
                             error=exc
@@ -568,7 +607,7 @@ def run(args, cfg, out):
                     if result.get('settlement_error'):stop='ledger_settlement_error'
                     if result.get('fatal'):stop=result.get('failure_class','fatal_execution_failure')
                     if result.get('response_received'):
-                        terminal.update(result.get('parsed') or parse_answer(result.get('raw_content'),legal))
+                        terminal.update(result.get('parsed') or parse_fn(result.get('raw_content'),legal))
                         terminal['raw_response']=result.get('raw_content')
                         if result.get('error_type')=='RuntimeError' and 'identity' in result.get('error_message',''):
                             terminal.update(answer=None,status='request_failed');stop='returned_model_identity_mismatch'

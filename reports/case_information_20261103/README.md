@@ -1,0 +1,68 @@
+# E0–E3 后续实验计划与代码（等待用户确认）
+
+**当前仅发布计划与代码，没有启动新实验、没有发起新的付费模型请求或 GPU 工具推理。用户确认后才执行。**
+
+依据用户提供的《Qwen3.7 voting experiment report.pdf》第6–7页后续实验方案。用户将 E1 的其他模型明确改为 **`deepseek-v4.1-flash-1017` 和 `qwen3.8-flash`**，替换原文的 Qwen-Max/GPT-4o；随后要求先上传计划与代码，确认后再运行。文档内的建议不是独立的启动授权。
+
+## 实验安排
+
+|实验|固定模型与做法|数据|新增模型请求|
+|---|---|---|---:|
+|E1_DeepSeek|DeepSeek-v4.1-Flash-1017，每题独立单答|原99病例/402题调参集|402|
+|E1_QwenFlash|Qwen3.8-Flash，每题独立单答|同上|402|
+|E1_Ensemble|离线组合上述两模型与已有 Qwen3.7-Plus D；三者各1票|同上|0|
+|E2_Batch|Qwen3.7-Plus，一次呈现一个病例的全部题干、选项及去重原图，按原题号输出JSON|同上|99|
+|E2_Sequential|Qwen3.7-Plus，每病例一个对话；按原顺序逐题提问，保留该病例此前实际回复，病例之间重置|同上|402|
+|E3_Evidence|每病例一次建立分类器＋报告生成器证据文件；Qwen3.7-Plus结合原图和明确标注“可能错误”的工具证据逐题单答|同上|402＋本地工具|
+|E0_Heldout|固定 Qwen3.7-Plus D 单答，仅验证基线表现|原241病例/1,002题留出集|1,002|
+
+正常总计 **2,709 次模型请求**。仅明确非额度 HTTP429 可额外重试一次；各臂技术额外额度21/21/5/21/21/51，总140，硬上限 **2,849**。不会另发付费探测；新模型第一个正式样本同时保存实际返回模型、图像请求与usage证据。未确认的接口行为不能写成已实测支持。
+
+执行顺序为 E1 两臂 → E2 两臂 → E3 → E0，只有一个串行生成流程。**所有生成结束后才独立评分**，生成worker不接收答案文件。E0提示、参数和数据在生成前固定，不因E1–E3表现调整；留出集只评估原D，不用于选方法或集成权重。本轮不运行GPT-4o、Qwen-Max、九次同模型投票、Thinking/TextOnly或2500题全量。
+
+## 固定规则与报告中的补充解释
+
+- 主对照是上一轮 **phase1 D：295/402，107道错题**，直接引用保存结果，不重跑。原报告的“106道错误”来自K9（296/402），两个分母口径分开。
+- 报告未指定加权投票权重。本计划在生成前固定为 **1:1:1**；D仅在其答案属于并列领先选项时裁决，否则按固定选项顺序；全缺答仍记缺答。不做事后权重搜索。
+- 单答温度0.2、top_p 0.95、max_tokens 2048、timeout120秒、SDK重试0、enable_thinking=false。E2整病例需要回答多题，单次输出上限单独固定为8192；如截断或JSON不合法，缺失题目按缺答计入402分母，不补发批次。
+- E2顺序对话借用官方notebook的病例内历史思路，但不执行官方Agent、工具或额外的字母提取请求，因此不称为严格官方复现。顺序模式只看到此前问题，不提前注入后续题。
+- E3的“每病例一次”指建立一次证据缓存。病例内每张唯一、明确为胸片的原图，每工具至多调用一次；多图病例的实际工具次数据实记录。CT/MRI/未知模态跳过胸片专用工具。无可用结果时记录`NO_EVIDENCE`，仍保留原图完成问题，不把工具执行失败写成患者阴性发现。
+- 不改写任何旧预测或失败终态；未知已发结果不重发。5次连续失败及身份、认证、权限、额度等系统错误停止并保留现场，不自动反复恢复。
+
+## 统计与判定
+
+每个E1–E3单独配置及离线集成均报告完整402分母的正确数、缺答、纠正、误改与净增；与D进行按病例配对bootstrap（2,000次，seed20261103，95%区间）及双侧精确McNemar检验。保留标准为**净增的病例bootstrap区间下界大于0**。原文“约+2.5pp”仅是近似说明，不替代区间判定。
+
+同时报告E1对D的107道错题能覆盖多少，以及新增误改；原文“约15道”作为互补性诊断，不单独决定优劣。六个方法视图均为调参集探索，全部公开，不只报告最优者，也不声称独立泛化。E0报告固定D在1,002题的准确率及病例bootstrap区间，不把不同数据集上的差异解释成方法提升。
+
+## 预算与运行状态
+
+原新增 **¥200记账授权不增加**，沿用上一轮最终账本和累计cap，不清账本、不重置费用。上一轮公开剩余记账代理173.265944，本次没有重新扫描账户账本。所有模型暂沿用输入4/输出12 CNY每百万token的记账代理；这不是实际费率、费用上界或Credits换算。Token Plan真实Credits用量仍需供应商证据，不能用PDF的预估费用充当实际支出。运行器不会购买额度。
+
+依用户要求，V12已取消的checksum、schema、policy和全表金额一致性检查保持关闭，不恢复、不增加替代扫描。原身份、锁、cap、预留/结算算术、去重和token/请求次数上限继续沿用。当前发布阶段不再增加校验或对齐工作。
+
+## 代码入口
+
+|内容|文件|
+|---|---|
+|机器可读固定计划|[case_information_protocol.json](../../configs/case_information_protocol.json)|
+|无推理的配置生成器|[configure_case_information.py](../../experiments/configure_case_information.py)|
+|串行流程，默认prepare-only|[run_case_information_pipeline.py](../../experiments/run_case_information_pipeline.py)|
+|病例上下文worker与批次题级投影|[run_case_information.py](../../experiments/run_case_information.py)|
+|E2提示、图像去重、病例历史和解析|[case_answering.py](../../experiments/case_answering.py)|
+|E3证据缓存，默认prepare-only|[build_case_tool_evidence.py](../../experiments/build_case_tool_evidence.py)|
+|独立离线评分|[score_case_information.py](../../experiments/score_case_information.py)|
+|DeepSeek公开profile|[deepseek_v41_flash_1017_token_plan_profile.json](../../configs/deepseek_v41_flash_1017_token_plan_profile.json)|
+|Qwen Flash公开profile|[qwen38_flash_token_plan_profile.json](../../configs/qwen38_flash_token_plan_profile.json)|
+
+配置生成器只读取上一轮配置、公开profile和已冻结的无标签输入，在新`runs/case_information_20261103`命名空间建立配置；不读取密钥或账户账本。真正执行要求显式`--execute`和后续用户确认记录；**本次不创建批准文件，也不启动自动监控或远端任务**。
+
+E3缓存单独生成，pipeline要求其完成后才能进入E3推理。模态清单只能来自不含参考答案的图像元数据、图注或人工图像复核，记录来源；不会假设全部图像都是胸片。命令入口均提供`--help`，实际服务器路径和凭据不发布。
+
+已经完成的本地模拟测试：新模型路由/adapter12项、E2纯函数23项、E3缓存6项、配置/pipeline8项。共49项，无付费API、GPU推理或真实账本测试；这不代表新模型端点或整套真实实验已通过实测。用户要求停止额外校验后，不再扩大测试范围。
+
+## 后续发布
+
+确认执行并完成后，继续依[AGENTS.md](../../AGENTS.md)发布完整题干/选项、原图、实际请求响应、病例工具证据、每题结果、失败记录、usage和耗时，以及费用口径与局限；原始请求单位和E2题级投影分别保存，整病例费用只计一次。凭据、账户账本、私有路径、权重和无关文件不进入GitHub。
+
+历史基线与完整证据：[Qwen3.7-Plus完成报告](../qwen37_token_plan_20261102/README.md)。本页为待确认计划，不包含新准确率结果。
