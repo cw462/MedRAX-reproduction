@@ -13,6 +13,9 @@ def run(root,approval,execute=False):
     if not execute:return
     approved=read(approval)
     if approved.get('status')!='approved' or approved.get('experiment_id')!=ID or approved.get('A0')!='D' or approved.get('model')!='qwen3.7-plus':raise ValueError('user_clarified_A0_D_approval_required')
+    cfg=read(base/'config.json')
+    if cfg.get('tool_agent') and (approved.get('tool_agent') is not True or approved.get('plan_version')!='tools-v1'):
+        raise ValueError('explicit_tools_v1_approval_required')
     key=sys.stdin.buffer.readline().strip()
     if not key:raise ValueError('stdin_key_required')
     with exclusive_lock(base/'.pipeline.lock'):
@@ -23,8 +26,10 @@ def run(root,approval,execute=False):
                     cmd=[sys.executable,'-u',str(code/'experiments/evolve_skemex_a1.py'),'--root',str(root),'--source-fold',phase[-1]]
                 elif phase.startswith('target'):
                     if not all((base/'evolution'/f/'complete.json').exists() for f in ('A','B')):raise ValueError('both_libraries_must_freeze_before_targets')
-                    if ID.endswith('_r1') and any(not read(base/'evolution'/f/'complete.json')['active_skill_ids'] for f in ('A','B')):
+                    if (ID.endswith('_r1') or cfg.get('tool_agent')) and any(not read(base/'evolution'/f/'complete.json')['active_skill_ids'] for f in ('A','B')):
                         raise ValueError('empty_source_library_no_valid_memory_effect_evaluation')
+                    if cfg.get('tool_agent') and any(not any(any(o.get('usable') for o in read(p).get('tool_observations',[])) for p in (base/'source_predictions'/f).glob('*.json')) for f in ('A','B')):
+                        raise ValueError('no_usable_real_tool_evidence_in_source_fold')
                     cmd=[sys.executable,'-u',str(code/'experiments/run_skemex_a1.py'),'--root',str(root),'--target-fold',phase[-1]]
                 else:cmd=[sys.executable,str(code/'experiments/score_skemex_a1.py'),'--root',str(root)]
                 result=subprocess.run(cmd,cwd=code,input=key+b'\n' if phase!='scoring' else b'',check=False)

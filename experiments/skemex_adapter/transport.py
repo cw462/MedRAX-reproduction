@@ -12,7 +12,7 @@ import run_sampled_vlm as worker
 from run_direct_vlm import read,write,now
 
 ID=os.environ.get('MEDRAX_SKEMEX_RUN_ID','skemex_a1_20261103')
-if ID not in ('skemex_a1_20261103','skemex_a1_20261103_r1'):raise ValueError('unapproved_run_namespace')
+if ID not in ('skemex_a1_20261103','skemex_a1_20261103_r1','skemex_tools_20261103'):raise ValueError('unapproved_run_namespace')
 
 
 class Halt(BaseException):
@@ -66,7 +66,7 @@ class PaidTransport:
         if counter.exists() and not (out/'status.json').exists():
             counts=read(counter)
             if len(counts['request_ids'])-len(counts['extra_request_ids'])>=5000:raise Halt('normal_request_ceiling_5000')
-        prefix='sa1r1_' if self.cfg.get('reuse_original_run') else 'sa1_'
+        prefix='sa1t_' if self.cfg.get('tool_agent') else ('sa1r1_' if self.cfg.get('reuse_original_run') else 'sa1_')
         cfg=deepcopy(self.cfg);cfg.update(run_id=prefix+job,temperature=temperature,max_output_tokens=max_tokens,
             max_requests=2,max_extra_requests=1,question_count=1,case_count=1)
         if len(cfg['run_id'])>64:raise Halt('operation_id_too_long')

@@ -35,6 +35,10 @@ def run(root,fold,key):
     if marker.exists():return
     transport=PaidTransport(cfg,key,base);emb=LocalEmbeddings(root,base/'embedding_cache'/('source_'+fold+'.json'))
     runtime=components(workspace,fold,emb,transport.factory,model=cfg['model'])
+    if cfg.get('tool_agent'):
+        from skemex_adapter.tool_episode import RealTools,episode as tool_episode,TOOLS_TEXT,skill_rejection
+        tools=RealTools(cfg,base)
+        if any(tools.eligible(row) for row in rows):tools.initialize()
     categories=read(base/'inputs/official_categories.json')
     windows=list(case_windows(rows,runtime['config'].buffer.window_size))
     for index,window in enumerate(windows):
@@ -51,12 +55,12 @@ def run(root,fold,key):
             for row in case_rows:
                 q=row['question_id'];transport.set_context('s'+fold+'w'+str(index)+'q'+q,row)
                 target=base/'source_predictions'/fold/(q+'.json')
-                if index==0:
+                if index==0 and not cfg.get('tool_agent'):
                     old=read(base/'cached_D'/(q+'.json'))
                     prediction=dict(old,task_category=categories[q],injected_skill_ids=[],reused_D=True)
                     frozen_write(target,prediction)
                 else:
-                    prediction=episode(runtime,transport,row,cfg,target,index,source_map)
+                    prediction=tool_episode(runtime,transport,row,cfg,target,index,source_map,tools) if cfg.get('tool_agent') else episode(runtime,transport,row,cfg,target,index,source_map)
                 predicted[q]=prediction
                 write(base/'progress.json',{'phase':'source_evolution','fold':fold,'window':index,'question_id':q,'updated_utc':now()})
             # Only this case's reference file is opened, after all its predictions.
@@ -66,10 +70,10 @@ def run(root,fold,key):
             for row in case_rows:
                 q=row['question_id'];p=predicted[q]
                 trajectory=runtime['modules']['types'].Trajectory(id=q,dataset='ChestAgentBench',query=row['question'],images=row['images'],task_category=p['task_category'],
-                    steps=[{'step':1,'action':'answer','reasoning':p.get('raw_response') or '',
+                    steps=p.get('trajectory_steps') or [{'step':1,'action':'answer','reasoning':p.get('raw_response') or '',
                             'observation':'Original input image bindings: '+','.join(row['images']),'answer':p['answer']}],
                     injected_skill_ids=p['injected_skill_ids'],prediction=p['answer'],ground_truth=refs[q],eval_result=float(p['answer']==refs[q]),
-                    metadata={'case_id':case,'source_fold':fold,'prediction_saved_before_feedback':True,'reused_D':index==0})
+                    metadata={'case_id':case,'source_fold':fold,'prediction_saved_before_feedback':True,'reused_D':index==0 and not cfg.get('tool_agent')})
                 trajectories.append(trajectory)
         runtime['buffer'].clear()
         for trajectory in trajectories:runtime['buffer'].add(trajectory)
@@ -78,13 +82,16 @@ def run(root,fold,key):
             for trajectory in runtime['buffer'].all_items():
                 row=next(r for r in window if r['question_id']==trajectory.id)
                 transport.set_context('e'+fold+'w'+str(index)+'q'+trajectory.id,row)
-                encoded=runtime['encoder'].encode(trajectory,'No medical tools in this direct-answer baseline. Do not create action/tool skills. General/task skills should state specific checks, evidence requirements and when not applicable.')
+                encoded=runtime['encoder'].encode(trajectory,TOOLS_TEXT if cfg.get('tool_agent') else 'No medical tools in this direct-answer baseline. Do not create action/tool skills. General/task skills should state specific checks, evidence requirements and when not applicable.')
                 draft=encoded.skill_draft
                 rejected=None
                 if draft:
                     draft['source_trajectory_ids']=[trajectory.id]
-                    if draft.get('branch')=='action_level' or draft.get('required_tools'):rejected='no_real_tool_trajectory'
-                    elif not str(draft.get('applicable_conditions') or '').strip():rejected='missing_applicability'
+                    if cfg.get('tool_agent'):
+                        saved=read(base/'source_predictions'/fold/(trajectory.id+'.json'))
+                        rejected=skill_rejection(draft,row,saved.get('executed_tool_names',[]))
+                    elif draft.get('branch')=='action_level' or draft.get('required_tools'):rejected='no_real_tool_trajectory'
+                    if not str(draft.get('applicable_conditions') or '').strip():rejected='missing_applicability'
                     elif prohibited(' '.join(str(draft.get(k) or '') for k in ('name','description','applicable_conditions','core_action','Core Action')),row):rejected='case_identifier_or_question_copy'
                 if encoded.patch_content and prohibited(encoded.patch_content,row):rejected='unsafe_patch_content'
                 if rejected:encoded.output_action='NONE'

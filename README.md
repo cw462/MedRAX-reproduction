@@ -1,5 +1,7 @@
 # MedRAX reproduction and research extensions
 
+**Pending confirmation: tool-enabled SkeMex A1.** [Plan and executable code](reports/skemex_tools_20261103/README.md) add bounded real local CXR tool selection/execution before answering, preserving official skill review. No paid call or GPU inference has started; combined tool+memory effects will be distinguished from memory-only claims.
+
 **SkeMex A1 reached a protocol validity limit:** [Full repair report](reports/skemex_a1_20261103_r1/results/analysis/README.md). The provenance bug was fixed, but all16 eligible drafts failed official quality review; both libraries remained empty, so repair target calls were stopped. Original295/402 injected zero skills and is not a memory-effect estimate. Original and repair evidence retained; no budget increase.
 
 

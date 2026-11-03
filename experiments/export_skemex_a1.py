@@ -25,7 +25,7 @@ class EvidencePublisher(Publisher):
 def export(root,out):
     root=Path(root);out=Path(out);run=root/'runs'/ID
     state=read(run/'pipeline_status.json')
-    source_only=(ID.endswith('_r1') and state.get('status')=='stopped' and state.get('error')=='empty_source_library_no_valid_memory_effect_evaluation'
+    source_only=((ID.endswith('_r1') or ID=='skemex_tools_20261103') and state.get('status')=='stopped' and state.get('error') in ('empty_source_library_no_valid_memory_effect_evaluation','no_usable_real_tool_evidence_in_source_fold')
                  and all((run/'evolution'/f/'complete.json').exists() for f in ('A','B')) and not list((run/'predictions').glob('*.json')))
     if state['status']!='completed' and not source_only:raise ValueError('complete_A1_pipeline_or_terminal_empty_library_required')
     if out.exists() and any(out.iterdir()):raise ValueError('refuse_existing_public_export')
@@ -53,7 +53,7 @@ def export(root,out):
         for source in job.rglob('*'):
             if source.is_file() and source.suffix in ('.json','.jsonl') and not source.name.startswith('ledger_'):
                 publisher.copy_json(source,out/source.relative_to(run))
-    for dirname in ('inputs','training','cached_D','predictions','source_predictions','feedback_releases','window_records','evolution'):
+    for dirname in ('inputs','training','cached_D','predictions','source_predictions','feedback_releases','window_records','evolution','tool_cache'):
         for source in (run/dirname).rglob('*'):
             if not source.is_file() or source.suffix not in ('.json','.jsonl','.md'):continue
             target=out/source.relative_to(run)

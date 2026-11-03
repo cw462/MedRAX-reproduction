@@ -17,11 +17,16 @@ def run(root,fold,key):
     transport=PaidTransport(cfg,key,base);emb=LocalEmbeddings(root,base/'embedding_cache'/('target_'+fold+'.json'))
     runtime=components(base/'evolution'/source/'current',source,emb,transport.factory,read_only=True,model=cfg['model'])
     source_map=freeze['source_trajectory_to_case']
+    if cfg.get('tool_agent'):
+        from skemex_adapter.tool_episode import RealTools,episode as tool_episode
+        tools=RealTools(cfg,base)
+        if any(tools.eligible(row) for row in rows):tools.initialize()
     for i,row in enumerate(rows):
         target=base/'predictions'/(row['question_id']+'.json')
         if target.exists():continue
         transport.set_context('t'+fold+'q'+row['question_id'],row)
-        episode(runtime,transport,row,cfg,target,freeze['window_count'],source_map)
+        if cfg.get('tool_agent'):tool_episode(runtime,transport,row,cfg,target,freeze['window_count'],source_map,tools)
+        else:episode(runtime,transport,row,cfg,target,freeze['window_count'],source_map)
         write(base/'progress.json',{'phase':'target_A1','target_fold':fold,'completed_in_fold':i+1,'planned_in_fold':len(rows),'updated_utc':now()})
     emb.flush()
 

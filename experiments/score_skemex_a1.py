@@ -35,6 +35,19 @@ def score(root):
        'declared_adoption_questions':sum(bool(p['declared_applied_skill_ids']) for p in pred.values()),
        'skill_context_questions':sum(bool(p['injected_skill_ids']) for p in pred.values()),
        'interpretation':'Development-set paired evidence after prior uses. Bootstrap conditions on these frozen predictions, not on memory training randomness. Old S1/HS not a retrieval-only ablation.'}
+    if read(base/'config.json').get('tool_agent'):
+        observations=[o for p in pred.values() for o in p.get('tool_observations',[])]
+        m['interpretation']='Tool-enabled A1 vs direct D combines tools, extra decision calls and memory. No matched tool-agent without-memory control was run; memory-only gain cannot be identified. Development-set evidence only.'
+        m['tool_usage']={'questions_with_selected_tools':sum(bool(p.get('tool_observations')) for p in pred.values()),
+            'questions_with_usable_evidence':sum(any(o['usable'] for o in p.get('tool_observations',[])) for p in pred.values()),
+            'selected_tool_calls':len(observations),'same_round_cache_hits':sum(o['same_round_cache_hit'] for o in observations),
+            'fresh_inference_attempted':sum(o['fresh_inference_attempted'] for o in observations),
+            'tool_plan_errors':sum(bool(p.get('tool_plan_error')) for p in pred.values())}
+        source=[read(p) for p in (base/'source_predictions').glob('*/*.json')]
+        backend=[read(p) for p in (base/'tool_cache/invocations').glob('*/*/*/result.json')]
+        m['tool_usage']['source_questions_with_usable_evidence']=sum(any(o['usable'] for o in p.get('tool_observations',[])) for p in source)
+        m['tool_usage']['unique_backend_inference_attempts']=sum(r.get('invoked') is True for r in backend)
+        m['tool_usage']['backend_interrupted_unknown']=sum(r.get('invoked') is None for r in backend)
     write(out/'metrics.json',m)
     write(out/'per_question.json',{'records':[{'question_id':q,'case_id':cases[q],'reference':labels[q],'predictions':{n:v[q] for n,v in views.items()},'A1_details':pred[q]} for q in qids]})
     cats=read(base/'inputs/official_categories.json');by={}
@@ -47,7 +60,7 @@ def score(root):
     text+='\n|A1 versus|Corrections|Harms|Net|Case CI pp|\n|---|---:|---:|---:|---|\n'
     for n,p in comparisons.items():
         lo,hi=p['bootstrap']['delta_ci95_pp'];text+=f"|{n}|{p['legal_wrong_to_correct']+p['missing_to_correct']}|{p['correct_to_legal_wrong']+p['correct_to_missing']}|{p['net']:+d}|{lo:+.2f} to {hi:+.2f}|\n"
-    text+='\n[Metrics/usage](metrics.json) · [Per-question predictions](per_question.json) · [Official categories](categories.json). New Skills use official modules with explicit local neural embedding/model-service adapters. No history or new tools. Source-fold supervised evolution and all meta calls count toward cost. Target utility is frozen. CNY is an inherited accounting proxy, not actual Token Plan Credits.\n'
+    text+='\n[Metrics/usage](metrics.json) · [Per-question predictions](per_question.json) · [Official categories](categories.json). '+m['interpretation']+' Source-fold supervised evolution and all meta calls count toward cost. Target utility is frozen. CNY is an inherited accounting proxy, not actual Token Plan Credits.\n'
     (out/'README.md').write_text(text,encoding='utf-8');write(out/'scoring_complete.json',{'status':'completed','new_inference_calls':0})
 
 
