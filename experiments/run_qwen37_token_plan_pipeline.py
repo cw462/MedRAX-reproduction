@@ -21,6 +21,45 @@ from run_sampled_vlm import exclusive_lock, frozen_write
 NAME = 'qwen37_token_plan_20261102'
 
 
+def validate_operator_counter_pause(out, phase, arm_id, qid, sample, manifest, folder,
+                                    state, fatal, reservation):
+    """Validate the exact operator-held counter-lock pause, without a ledger read."""
+    target = f'{qid}__s{sample}'
+    receipt_path = out/'operator_counter_lock_pauses'/f'{phase}__{arm_id}__{target}.json'
+    receipt = read(receipt_path)
+    counter_relative = f'runs/{NAME}/global_requests.json'
+    required = {'schema_version': 'operator-counter-lock-pause-v1', 'experiment': NAME,
+        'phase': phase, 'arm': arm_id, 'question_id': qid, 'sample': sample,
+        'operator_action': 'hold_existing_global_counter_lock_until_worker_stops_before_reservation',
+        'counter_path': counter_relative, 'lock_path': counter_relative+'.lock', 'worker_exitcode': 2}
+    if (any(receipt.get(k) != v for k, v in required.items())
+            or manifest.get('global_request_counter') != counter_relative
+            or read(out/phase/'status.json').get('exitcode') != 2
+            or receipt.get('fatal_error') != fatal or receipt.get('reserve_error') != reservation):
+        raise ValueError('operator_pause_requires_exact_explicit_lock_receipt')
+    locked = datetime.fromisoformat(receipt['lock_acquired_utc'])
+    rejected = datetime.fromisoformat(reservation['utc'])
+    released = datetime.fromisoformat(receipt['lock_release_confirmed_utc'])
+    if not locked <= rejected <= released:
+        raise ValueError('operator_pause_lock_interval_mismatch')
+    counts = {key: state.get(key) for key in ('completed_samples', 'requests_used', 'extra_requests_used')}
+    if any(type(v) is not int or v < 0 for v in counts.values()) or receipt.get('arm_counts') != counts:
+        raise ValueError('operator_pause_arm_counts_changed')
+    # Only the existing request counter is read. No ledger, image, or hash scan.
+    counter = read(out/'global_requests.json')
+    global_counts = {'requests_used': len(counter['request_ids']),
+        'extra_requests_used': len(counter['extra_request_ids']),
+        'max_requests': counter['max_requests'], 'max_extra_requests': counter['max_extra_requests']}
+    if receipt.get('global_counts') != global_counts:
+        raise ValueError('operator_pause_global_counts_changed')
+    protocol = read(folder/'protocol.json')
+    run_id = protocol.get('config', protocol)['run_id']
+    request_id = f'sample:{run_id}:{qid}:{sample}:1'
+    if request_id in counter['request_ids'] or request_id in counter['extra_request_ids']:
+        raise ValueError('operator_pause_request_was_already_claimed')
+    return receipt_path.relative_to(out).as_posix()
+
+
 def acknowledge_unsent_failure(root, out, cfg, report, phase, arm_id, target):
     """Confirm one located, unsent reservation failure without changing its evidence.
 
@@ -65,10 +104,19 @@ def acknowledge_unsent_failure(root, out, cfg, report, phase, arm_id, target):
     checkpoint = folder/'checkpoints'/qid/f'sample_{sample}'
     reservation = read(checkpoint/'attempt_1/reserve_error.json')
     expected = 'LedgerIntegrityError:Ledger checksum mismatch'
-    if (fatal.get('error') != expected or arm_state.get('error') != expected
+    operator_pause_receipt = None
+    if reservation.get('request_sent') is not False:
+        raise ValueError('unsent_recovery_requires_exact_unsent_reservation_error')
+    if reservation.get('error_type') == 'BlockingIOError':
+        expected = 'BlockingIOError:[Errno 11] Resource temporarily unavailable'
+        if (fatal.get('error') != expected or arm_state.get('error') != expected
+                or reservation.get('message') != '[Errno 11] Resource temporarily unavailable'):
+            raise ValueError('unsent_recovery_requires_exact_operator_lock_error')
+        operator_pause_receipt = validate_operator_counter_pause(out, phase, arm_id, qid, sample,
+            manifest, folder, arm_state, fatal, reservation)
+    elif (fatal.get('error') != expected or arm_state.get('error') != expected
             or reservation.get('error_type') != 'LedgerIntegrityError'
-            or reservation.get('message') != 'Ledger checksum mismatch'
-            or reservation.get('request_sent') is not False):
+            or reservation.get('message') != 'Ledger checksum mismatch'):
         raise ValueError('unsent_recovery_requires_exact_unsent_reservation_error')
     sent_names = ('started.json', 'result.json', 'response.json', 'terminal.json', 'stream_chunks.jsonl')
     if any((place/name).exists() for place in (checkpoint, *checkpoint.glob('attempt_*')) for name in sent_names):
@@ -76,7 +124,8 @@ def acknowledge_unsent_failure(root, out, cfg, report, phase, arm_id, target):
     confirmation = out/'unsent_recovery_acknowledgements'/f'{phase}__{arm_id}__{target}.json'
     if confirmation.exists():
         raise ValueError('unsent_failure_already_acknowledged')
-    frozen_write(confirmation, {'utc': now(), 'phase': phase, 'arm': arm_id,
+    evidence = {'operator_pause_receipt': operator_pause_receipt} if operator_pause_receipt else {}
+    frozen_write(confirmation, {'utc': now(), 'phase': phase, 'arm': arm_id, **evidence,
         'question_id': qid, 'sample': sample, 'fatal_error': fatal,
         'reserve_error': reservation, 'request_sent': False,
         'action': 'Resume the unfinished sample through the unchanged original ledger constructor.',

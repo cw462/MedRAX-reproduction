@@ -312,3 +312,90 @@ def test_existing_ack_recovery_still_stops_if_original_worker_rejects_ledger(tmp
     assert calls == ['run_vote_phase.py']
     assert json.loads((out/'pipeline_status.json').read_text())['status'] == 'stopped'
     assert not (tmp_path/'reports'/NAME/'phase2/metrics.json').exists()
+
+
+def operator_pause_fixture(root):
+    code, out, arm, checkpoint = unsent_fixture(root)
+    error = 'BlockingIOError:[Errno 11] Resource temporarily unavailable'
+    counts = {'completed_samples': 1, 'requests_used': 1, 'extra_requests_used': 0}
+    put(arm/'status.json', {'status': 'stopped', 'error': error, **counts})
+    put(out/'phase2/status.json', {'status': 'stopped', 'active_arm': 'Qwen_SC9', 'exitcode': 2})
+    reserve = {'utc': '2026-11-03T00:42:53.404309+00:00', 'error_type': 'BlockingIOError',
+        'message': '[Errno 11] Resource temporarily unavailable', 'request_sent': False}
+    fatal = {'utc': '2026-11-03T00:42:53.417267+00:00', 'error': error,
+        'question_id': '6314_8353801558296', 'sample': 4}
+    put(checkpoint/'attempt_1/reserve_error.json', reserve)
+    put(arm/'fatal_error.json', fatal)
+    run_id = NAME+'_p2_Qwen_SC9'
+    put(arm/'protocol.json', {'run_id': run_id})
+    counter_path = f'runs/{NAME}/global_requests.json'
+    manifest_path = code/'configs'/NAME/'phase2.json'
+    manifest = json.loads(manifest_path.read_text()); manifest['global_request_counter'] = counter_path
+    put(manifest_path, manifest)
+    put(out/'global_requests.json', {'request_ids': ['previous0', 'previous1', 'previous2'],
+        'extra_request_ids': [], 'max_requests': 4714, 'max_extra_requests': 230})
+    receipt_path = out/'operator_counter_lock_pauses/phase2__Qwen_SC9__6314_8353801558296__s4.json'
+    put(receipt_path, {'schema_version': 'operator-counter-lock-pause-v1', 'experiment': NAME,
+        'phase': 'phase2', 'arm': 'Qwen_SC9', 'question_id': '6314_8353801558296', 'sample': 4,
+        'operator_action': 'hold_existing_global_counter_lock_until_worker_stops_before_reservation',
+        'counter_path': counter_path, 'lock_path': counter_path+'.lock', 'worker_exitcode': 2,
+        'lock_acquired_utc': '2026-11-03T00:42:50+00:00',
+        'lock_release_confirmed_utc': '2026-11-03T00:43:00+00:00',
+        'fatal_error': fatal, 'reserve_error': reserve, 'arm_counts': counts,
+        'global_counts': {'requests_used': 3, 'extra_requests_used': 0,
+                          'max_requests': 4714, 'max_extra_requests': 230}})
+    return code, out, arm, checkpoint, receipt_path
+
+
+def test_operator_counter_pause_resumes_without_fake_stop_event_or_count_reset(tmp_path):
+    code, out, arm, checkpoint, receipt = operator_pause_fixture(tmp_path)
+    paths = [out/'global_requests.json', receipt, arm/'fatal_error.json', checkpoint/'attempt_1/reserve_error.json']
+    original = {p: p.read_bytes() for p in paths}
+    calls = []
+    def runner(command, **kwargs):
+        calls.append(Path(command[2]).name)
+        assert not any(arg.startswith('--acknowledge') for arg in command)
+        if calls[-1] == 'run_vote_phase.py':
+            put(out/'phase2/status.json', {'status': 'generation_complete'})
+        elif calls[-1] == 'score_votes.py':
+            put(tmp_path/'reports'/NAME/'phase2/metrics.json', {'status': 'completed'})
+        else:
+            pytest.fail('must not reconfigure or rerun complete phases')
+        return SimpleNamespace(returncode=0)
+    unsent_execute(tmp_path, code, runner)
+    assert calls == ['run_vote_phase.py', 'score_votes.py']
+    assert all(p.read_bytes() == value for p, value in original.items())
+    confirmation = json.loads(next((out/'unsent_recovery_acknowledgements').glob('*.json')).read_text())
+    assert confirmation['operator_pause_receipt'] == receipt.relative_to(out).as_posix()
+    assert not (arm/'stop_events').exists() and not (out/'private_ledgers').exists()
+
+
+@pytest.mark.parametrize('damage', ['no_receipt', 'wrong_action', 'wrong_target', 'wrong_error',
+    'outside_lock_interval', 'arm_counts_changed', 'global_counts_changed', 'already_claimed', 'started'])
+def test_operator_counter_pause_rejects_missing_or_nonmatching_evidence(tmp_path, damage):
+    code, out, arm, checkpoint, receipt_path = operator_pause_fixture(tmp_path)
+    receipt = json.loads(receipt_path.read_text())
+    if damage == 'no_receipt':
+        receipt_path.unlink()
+    elif damage in ('wrong_action', 'wrong_target', 'wrong_error', 'outside_lock_interval'):
+        if damage == 'wrong_action': receipt['operator_action'] = 'unexplained lock conflict'
+        if damage == 'wrong_target': receipt['sample'] = 3
+        if damage == 'wrong_error': receipt['reserve_error']['message'] = 'Different error'
+        if damage == 'outside_lock_interval': receipt['lock_acquired_utc'] = '2026-11-03T00:45:00+00:00'
+        put(receipt_path, receipt)
+    elif damage == 'arm_counts_changed':
+        state = json.loads((arm/'status.json').read_text()); state['requests_used'] += 1
+        put(arm/'status.json', state)
+    elif damage in ('global_counts_changed', 'already_claimed'):
+        counter = json.loads((out/'global_requests.json').read_text())
+        counter['request_ids'].append(f'sample:{NAME}_p2_Qwen_SC9:6314_8353801558296:4:1')
+        put(out/'global_requests.json', counter)
+        if damage == 'already_claimed':
+            receipt['global_counts']['requests_used'] += 1
+            put(receipt_path, receipt)
+    else:
+        put(checkpoint/'attempt_1/started.json', {})
+    def runner(*a, **k): pytest.fail('must reject before a subprocess/API')
+    with pytest.raises((ValueError, FileNotFoundError)):
+        unsent_execute(tmp_path, code, runner)
+    assert not (out/'unsent_recovery_acknowledgements').exists()
