@@ -1,7 +1,7 @@
 # MedRAX reproduction and research extensions
 
 <!-- case-information-current-milestone -->
-**Latest generation milestone:** [03_E3: full saved evidence](reports/case_information_20261103/03_E3/README.md). E3/E0 scoring waits for all generation; [authorized E2/E1 interim results](reports/case_information_20261103/interim_E2_E1/README.md) are already published.
+**Latest generation milestone:** [04_E0: full saved evidence](reports/case_information_20261103/04_E0/README.md). E3/E0 scoring waits for all generation; [authorized E2/E1 interim results](reports/case_information_20261103/interim_E2_E1/README.md) are already published.
 
 **Authorized revision 2 (2026-11-03):** [E0–E3 case-information experiments](reports/case_information_20261103/README.md) run E2 case context first, then DeepSeek-v4.1-Flash-1017/Qwen3.8-Flash with first-real-request image gates, caption-selected CXR evidence in classifier/report/combined branches, and the fixed held-out baseline. 3,513 planned requests use the unchanged cumulative budget. E2/E1 interim scoring is now explicitly authorized; E3/E0 scoring still waits for all generation. Previous results remain unchanged.
 
