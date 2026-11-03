@@ -29,3 +29,17 @@
 实现：[纯历史/技能合同](../../experiments/history_skills.py)、[准备器](../../experiments/configure_history_skills.py)、[回答/训练适配器](../../experiments/run_history_skills.py)、[串行pipeline](../../experiments/run_history_skills_pipeline.py)、[隔离评分](../../experiments/score_history_skills.py)、[完整公共导出](../../experiments/export_history_skills.py)。沿用run_sampled_vlm的原始请求、usage、预算预留/结算和恢复语义。9个针对性离线测试通过，覆盖禁止字段、跨病例/跨折、反思解析与缺答、固定抽样及效用顺序；未使用付费测试。
 
 生成全部完成才评分。发布全部402题干选项和原图、实际请求响应、训练反思与过滤记录、技能库/检索/效用、历史允许字段/风险标记、配置冻结与修订、usage和耗时，排除凭据/账户账本/私有路径/权重。GitHub显式清单推送并确认远端SHA后报告完成。
+
+## 本轮已完成
+
+[完整分析与评分](results/analysis/interpretation.md) · [402题全部题干原图与请求响应](results/cases.json) · [逐题预测](results/analysis/per_question.json) · [类别分层](results/analysis/categories.json) · [技能效用](results/analysis/skill_utility.json)。
+
+D: 295/402 (73.38%), missing 0.
+
+H1: 316/402 (78.61%), missing 0.
+
+S1: 279/402 (69.40%), missing 0.
+
+HS: 300/402 (74.63%), missing 0.
+
+这是99病例调参结果；未自动运行Flash、控制臂、保留集或全量。CNY为代理记账，实际Credits未知。

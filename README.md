@@ -1,6 +1,6 @@
 # MedRAX reproduction and research extensions
 
-**Authorized Plus-first round (2026-11-03):** [H1 history, S1 cross-fit skills, HS combined](reports/history_skills_plus_20261103/README.md), all qwen3.7-plus versus saved D295/402. Three tuning arms only; Flash, controls, heldout and full benchmark deferred. 1,411 normal requests retain the original cumulative budget.
+**Completed Plus history/skills round:** [Full results](reports/history_skills_plus_20261103/results/analysis/README.md). D 295/402; H1 316/402; S1 279/402; HS 300/402. All gates failed (H1 overall positive, clean-history CI crosses zero); fixed fallback D. Same 99 tuning cases; Flash, controls, heldout and full benchmark deferred.
 
 
 <!-- case-information-current-milestone -->
