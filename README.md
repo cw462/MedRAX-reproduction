@@ -1,6 +1,6 @@
 # MedRAX reproduction and research extensions
 
-**New plan awaiting user confirmation (2026-11-03):** [History and frozen skills experiments](reports/history_skills_20261103/README.md), with H1/H2/S1/HS and C1–C3 controls, case-disjoint skill reflection, fixed selection, held-out confirmation and disclosed full-benchmark overlap. Plan and deterministic fold preparation only; no new experiment has started.
+**Authorized Plus-first round (2026-11-03):** [H1 history, S1 cross-fit skills, HS combined](reports/history_skills_plus_20261103/README.md), all qwen3.7-plus versus saved D295/402. Three tuning arms only; Flash, controls, heldout and full benchmark deferred. 1,411 normal requests retain the original cumulative budget.
 
 
 <!-- case-information-current-milestone -->

@@ -1,0 +1,336 @@
+{
+  "experiment_id": "history_skills_plus_20261103",
+  "plan_version": "2",
+  "status": "user_authorized_plus_tuning_only",
+  "execution_authorized": true,
+  "source_document": {
+    "title": "MedRAX next experiments plan",
+    "pages": 6,
+    "date": "2026-11-03",
+    "status": "User-supplied proposal; not an execution approval"
+  },
+  "models": [
+    "qwen3.7-plus"
+  ],
+  "credential_slot": "token_plan",
+  "datasets": {
+    "tune": {
+      "questions": 402,
+      "cases": 99
+    }
+  },
+  "baselines": {
+    "D": {
+      "model": "qwen3.7-plus",
+      "correct": 295,
+      "n": 402,
+      "heldout_correct": 793,
+      "heldout_n": 1002,
+      "new_calls": 0
+    }
+  },
+  "arms": [
+    {
+      "id": "H1",
+      "model": "qwen3.7-plus",
+      "mode": "independent_history",
+      "baseline": "D",
+      "requests": 402,
+      "candidate": true
+    },
+    {
+      "id": "S1",
+      "model": "qwen3.7-plus",
+      "mode": "independent_crossfit_skills",
+      "baseline": "D",
+      "requests": 402,
+      "candidate": true
+    },
+    {
+      "id": "HS",
+      "model": "qwen3.7-plus",
+      "mode": "independent_history_crossfit_skills",
+      "baseline": "D",
+      "requests": 402,
+      "candidate": true
+    }
+  ],
+  "history": {
+    "allowed_fields": [
+      "age",
+      "gender",
+      "history"
+    ],
+    "excluded_fields": [
+      "title",
+      "diagnosis",
+      "differential_diagnosis",
+      "image_finding",
+      "discussion"
+    ],
+    "risk_terms": [
+      "radiograph",
+      "radiographic",
+      "x-ray",
+      "xray",
+      "ct",
+      "computed tomography",
+      "mri",
+      "ultrasound",
+      "opacity",
+      "opacities",
+      "mass",
+      "effusion",
+      "nodule",
+      "shadow",
+      "consolidation",
+      "infiltrate",
+      "pneumothorax"
+    ],
+    "diagnosis_overlap": {
+      "processor": "isolated_pre_run_flagger_only",
+      "tokenizer": "ASCII alphabetic words, casefold, length >= 4",
+      "stopwords": [
+        "about",
+        "after",
+        "also",
+        "been",
+        "before",
+        "being",
+        "both",
+        "case",
+        "could",
+        "during",
+        "from",
+        "have",
+        "into",
+        "most",
+        "other",
+        "patient",
+        "patients",
+        "present",
+        "presented",
+        "showed",
+        "showing",
+        "some",
+        "such",
+        "than",
+        "that",
+        "their",
+        "there",
+        "these",
+        "they",
+        "this",
+        "through",
+        "under",
+        "very",
+        "were",
+        "which",
+        "with",
+        "without",
+        "would",
+        "year",
+        "years",
+        "history",
+        "clinical"
+      ],
+      "output": [
+        "case_id",
+        "flagged",
+        "rule_codes"
+      ],
+      "diagnosis_to_generation": false
+    },
+    "freeze_before_calls": true,
+    "history_gate": "overall and unflagged-subset paired CI lower bounds > 0",
+    "minimum_unflagged_cases": 2
+  },
+  "skills": {
+    "fold_manifest": "reports/history_skills_plus_20261103/prepared/folds_and_reflections.json",
+    "fold_sizes": [
+      50,
+      49
+    ],
+    "fold_seed": 20261103,
+    "correct_sample_seed": 20261104,
+    "reflection_calls": 205,
+    "wrong_count": 107,
+    "sampled_correct_count": 98,
+    "reflection_inputs": [
+      "source_fold_images",
+      "current_question_and_options",
+      "saved_D_answer_and_rationale",
+      "source_fold_reference"
+    ],
+    "reflection_model": "qwen3.7-plus",
+    "max_skills_per_reflection": 2,
+    "max_skills_per_fold": 40,
+    "max_final_skills": 60,
+    "filter": "Reject source case IDs, option-letter instructions, figure IDs, source-specific patient identifiers/numbers, copied questions, and reference-label-only rules lacking general image checks.",
+    "merge": "Greedy TF-IDF cosine >=0.90; stable skill_id first representative; cap40 each fold. Final diagnostic merge utility descending first.",
+    "retrieval": {
+      "category_source": "official question metadata",
+      "category_top_k": 3,
+      "general_top_k": 2,
+      "matching": "fixed term TF-IDF cosine on current question and skill trigger/steps; no references or sibling questions",
+      "tie": "stable skill_id",
+      "initial_general": "same pre-scoring matching order, equal utility priors",
+      "final_general": "crossfit utility descending then skill_id",
+      "warning": "experience from other cases; may not apply"
+    },
+    "HS_uses_same_preutility_crossfit_store_as_S1": true,
+    "utility_after_S1_and_HS_complete": "S1 corrections minus harms on actual retrievals; associational credit only",
+    "negative_utility": "drop",
+    "zero_utility": "keep",
+    "unretrieved_utility": "null; exclude from final store",
+    "freeze_final_before_heldout": true,
+    "one_time_sha256_artifacts": [
+      "fold_manifest",
+      "history_risk_flags",
+      "final_skill_store",
+      "retrieval_config",
+      "selection_and_prompts"
+    ],
+    "ledger_hashing": false
+  },
+  "selection": {
+    "candidates": [
+      "H1",
+      "S1",
+      "HS"
+    ],
+    "H2_role": "not_run",
+    "primary_baseline": "D",
+    "gate": "paired case-bootstrap lower 95% endpoint > 0",
+    "additional_history_gate": [
+      "H1",
+      "HS"
+    ],
+    "rank": "largest correct-count gain vs F",
+    "ties": [
+      "H1",
+      "S1",
+      "HS"
+    ],
+    "fallback": "D",
+    "controls_eligible": false,
+    "heldout_feedback_changes_selection": false
+  },
+  "statistics": {
+    "bootstrap_repeats": 2000,
+    "seed": 20261103,
+    "level": 0.95,
+    "sampling_unit": "case",
+    "weight": "question count",
+    "method": "paired percentile bootstrap",
+    "mcnemar": "question-level exact two-sided; dependence handled separately",
+    "multiplicity": "exploratory tuning comparisons unadjusted; publish all arms",
+    "reports": [
+      "accuracy",
+      "case_CI",
+      "corrections",
+      "harms",
+      "missing_recovery",
+      "new_missing",
+      "net",
+      "official_category",
+      "unflagged_history",
+      "within_case_position",
+      "first_question",
+      "case_all_questions_correct"
+    ],
+    "unknown_category": "separate",
+    "primary_baseline": "D"
+  },
+  "stages": [
+    "H1",
+    "Reflection",
+    "build_crossfit_stores",
+    "S1",
+    "HS",
+    "isolated_scoring",
+    "publish_and_report_to_user"
+  ],
+  "reuse": "Only identical question/input/model/prompt/temperature/store/context semantics; use relative references. Crossfit skills differ from final merged store; never count them as identical full-run answers.",
+  "calls": {
+    "tuning_answers": 1206,
+    "reflections": 205,
+    "normal_ceiling": 1411,
+    "technical_extra_ceiling": 74,
+    "hard_ceiling": 1485
+  },
+  "budget": {
+    "existing_authorization_cny": "200",
+    "new_authorization_cny": "0",
+    "inherited_cumulative_cap_unchanged": true,
+    "estimated_round_proxy_cny": "approximately 8-12; not a price or upper bound",
+    "publicly_derived_remaining_proxy_cny": "152.852332",
+    "remaining_not_verified_against_private_ledger": true,
+    "proxy_input_per_million": "4",
+    "proxy_output_per_million": "12",
+    "actual_credits": null,
+    "proxy_is_actual_price_or_upper_bound": false,
+    "automatic_purchase": false
+  },
+  "sampling": {
+    "samples": 1,
+    "temperature": 0.2,
+    "top_p": 0.95,
+    "max_tokens": 2048,
+    "batch_max_tokens": 8192,
+    "reflection_max_tokens": 2048,
+    "timeout_seconds": 120,
+    "sdk_retries": 0,
+    "enable_thinking": false
+  },
+  "failure_policy": "Unknown sent outcome not resent; explicit isolated rejection missing; only non-quota 429 one technical retry; five consecutive failures or systemic error stop for targeted evidence-based repair; original terminals retained.",
+  "ledger_policy": "Do not restore cancelled V12 checksum/schema/policy/full-table validation or substitute scans. Keep operational identity, locks, arithmetic, cap, token/request bounds and deduplication.",
+  "not_in_scope": [
+    "Flash",
+    "H2 duplicate Plus history",
+    "C1 C2 C3",
+    "heldout1002",
+    "full2500",
+    "tools",
+    "voting",
+    "thinking",
+    "new budget"
+  ],
+  "execution": {
+    "default": "prepare_only",
+    "authorized": true,
+    "arms": [
+      "H1",
+      "Reflection",
+      "S1",
+      "HS"
+    ],
+    "controls": false,
+    "heldout": false,
+    "full": false,
+    "Flash": false,
+    "no_automatic_expansion": true
+  },
+  "publication": {
+    "explicit_allowlist": true,
+    "remote_SHA_required": true,
+    "stage_publication": true,
+    "include": [
+      "protocol",
+      "all saved requests/responses",
+      "skills/provenance/retrieval/utility",
+      "history allowed fields and flags",
+      "references in isolated score reports",
+      "images",
+      "all denominators/failures",
+      "usage/timing"
+    ],
+    "exclude": [
+      "credentials",
+      "private ledger",
+      "private paths",
+      "weights"
+    ]
+  },
+  "authorization": "User: OK, first use qwen3.7-plus for H1 history, S1 skills, HS history plus skills; assess results before qwen3.8-flash."
+}
