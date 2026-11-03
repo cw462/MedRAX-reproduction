@@ -26,6 +26,8 @@ HiRes与D净差0题，未达到至少多对7题的晋级标准，因此自动选
 
 343题九票全体一致，其中78题仍然错误。这提示一致性不能代替正确性；≤6/9主分歧阈值、≤5/9和≤7/9敏感性分析，以及7–8/9高一致、技术不完整分组和AUROC见[分析报告](results_analysis.md)。没有定义的AUROC保留null。
 
+106道K9错题的[官方任务类别细分](official_category_errors.md)已补充：保留ChestAgentBench多标签，提供七类分布、五种互斥标签组合及106题逐题清单；[原生标签](official_category_labels.json)与[机器可读统计](official_category_errors.json)可直接复核。
+
 ## 可逐题检查的公开证据
 
 |内容|评分与完整证据|
