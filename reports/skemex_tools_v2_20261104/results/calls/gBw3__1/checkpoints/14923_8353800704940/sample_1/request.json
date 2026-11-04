@@ -1,0 +1,20 @@
+{
+  "model": "qwen3.7-plus",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Return only the merged markdown body."
+    },
+    {
+      "role": "user",
+      "content": "You are merging two similar medical agent skills into one concise skill.\n\n## Dominant Skill (preserve its structure)\n### Core Action\nIf the `chest_xray_classifier` indicates high probability for 'Effusion', 'Mass', or 'Pneumothorax' but visual inspection reveals ambiguous features (e.g., total hemithorax opacity/white-out) or contradictory structural signs (e.g., mediastinal shift): (1) Do NOT select the diagnosis based solely on the highest classifier score. (2) MANDATORILY call `chest_xray_report_generator` to obtain detailed morphological descriptions. (3) Explicitly check the report for specific morphological markers: 'meniscus sign' (indicating simple fluid/effusion), 'air-fluid level' or 'visceral pleural line' (indicating pyopneumothorax/hydropneumothorax), 'discrete mass borders' (indicating solid tumor), or 'displacement of cardiac silhouette/mediastinal structures'. (4) Integrate clinical history (e.g., infection, trauma) with these morphological findings to differentiate between simple effusion, complex empyema/pyopneumothorax, mass, and herniation. Prioritize these combined findings over the classifier's categorical label.\n\n## Secondary Skill (extract non-redundant additions only)\n### Core Action\nIf `chest_xray_classifier` returns no strong findings (e.g., all scores < threshold) but clinical context (e.g., recent surgery, trauma) and visual inspection suggest structural pathology (e.g., mediastinal widening, abnormal contours):\n\n1. **Accept Tool Limitation**: Explicitly acknowledge that the classifier did not detect strong visual evidence. Do NOT hallucinate radiological signs to match the clinical suspicion.\n2. **Prioritize Clinical Timeline & Structural Markers**: Give precedence to the patient's clinical history (e.g., post-operative status) and visible gross structural anomalies over the classifier's negative output when inferring acute complications (e.g., hematoma, effusion) rather than chronic or malignant processes.\n3. **Invoke Objective Reporting for Ambiguity**: If the structural anomaly is subtle or requires precise morphological description to rule out artifacts, call `chest_xray_report_generator` to obtain an objective, structured description of the region of interest. Use this report to confirm the presence of the structural marker before finalizing the differential diagnosis.\n\n## Instructions\n1. **Keep**: The dominant skill's Core Action structure and all existing content.\n2. **Add**: Only content from the secondary skill that is non-redundant and actionable —\n   new decision steps, tool recommendations, parameter details, or failure modes not already covered.\n3. **Discard**: Anything that overlaps, contradicts, or is implied by existing content.\n4. **Condense**: After merging, tighten the language. Remove filler phrases, merge similar\n   bullet points, and ensure each line earns its place.\n5. **Output**: Return the merged skill body only (the `### Core Action` section and any optional\n   boundary note — no front matter, no commentary)."
+    }
+  ],
+  "temperature": 0.0,
+  "top_p": 0.95,
+  "max_tokens": 1000,
+  "extra_body": {
+    "enable_thinking": false
+  },
+  "stream": false
+}

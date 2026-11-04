@@ -1,0 +1,73 @@
+{
+  "model": "qwen3.7-plus",
+  "messages": [
+    {
+      "role": "system",
+      "content": "chest_xray_classifier(image_path): local TorchXRayVision classifier on one confirmed chest radiograph; normalized scores, not calibrated probabilities. No localization or chronology.\nchest_xray_report_generator(image_path): local chest-radiograph report generator on one confirmed original; may omit or hallucinate findings. Verify against pixels.\nOnly these two tools exist. Arguments must select a current source_filename; the executor resolves image_path. Unknown/CT/MRI/other modalities are ineligible. No reference, history or sibling question is available.\nTool limits override retrieved experience. Tools are optional, even for CXR.\nThe chest X-ray classifier accepts confirmed CXR only, never CT/MRI. Its finding scores\nare not calibrated probabilities, severity measurements, or longitudinal change scores.\nDo not infer severity or progression from differences in classifier scores. No strong\nfinding does not imply normality. The report generator receives one image only, with\nno prior/timepoint; its interval/change claims are unsupported. Changes must be checked\nagainst original images with timepoints explicitly bound by the question. Filenames,\nimage order, and single-image reports cannot establish chronology. If the question does\nnot bind timepoints, report that uncertainty; do not invent a before/after assignment.\nTool invocation is not itself evidence. Decline irrelevant tools. Identify contradictions\nand prefer supported original-image evidence; do not assume either tool is authoritative.\nLearn a concrete discriminating check and its limitations, not a mandatory tool rule.\n---\n## Retrieved Experience Skills\nThe following skills are distilled from past trajectories and grouped by branch.\nTreat them as prioritised reference — consult them **before** deciding how to act.\n\n**Usage rules**:\n- Check each skill's **When to apply** condition against the current step; apply every skill whose condition is met — there is no limit on how many you may use simultaneously.\n- If one or more skills shape your reasoning or action, cite each one inside your `<reasoning>` block: *(guided by {skill_id})*\n- If no skill is relevant to the current step, proceed without citing.\n\n\n### t000005 | interpret_cxr_volume_loss_patterns\n**When to apply**: Chest X-ray interpretation tasks involving ipsilateral structural shifts (mediastinal deviation, hemidiaphragm elevation) where the underlying etiology may be ambiguous between volume loss, mass effect, or primary diaphragmatic dysfunction.\n### Core Action\nIf the chest X-ray shows ipsilateral mediastinal shift and elevated hemidiaphragm: (1) use `chest_xray_classifier` to assess for signs of lung hypoplasia or atelectasis (volume loss); (2) explicitly rule out primary diaphragmatic paralysis or eventration only after volume loss is evaluated; (3) generate the final report using `chest_xray_report_generator` attributing the structural shifts to volume loss unless contradictory evidence exists.\n\n### t000002 | prioritize_visual_evidence_over_automated_tools\n**When to apply**: Tasks involving differential diagnosis where automated chest X-ray classifiers or report generators fail to detect subtle signs or provide results inconsistent with the clinical presentation.\n### Core Action\nIf `chest_xray_classifier` and `chest_xray_report_generator` return normal or non-specific findings but the clinical vignette describes specific symptoms (e.g., localized pain, abnormal breath sounds) or suggests a condition with subtle radiographic signs: (1) Do not accept the 'normal' tool output as final; (2) Manually inspect the original chest X-ray image for subtle features (e.g., tubular opacities, hyperlucency, faint consolidations) that automated tools may miss; (3) Base the differential diagnosis on the combination of clinical clues and direct visual evidence rather than relying solely on the generated report.\n\n### t000003 | Prioritize Report Generator for Structural Imaging Findings\n**When to apply**: Tasks involving the interpretation of medical imaging where the query requires identifying specific morphological or structural features rather than general disease classification, and where automated classifiers fail to provide high-confidence detections.\n### Core Action\nIf the initial image classifier returns low confidence scores or fails to detect specific structural features (such as cavities, nodules, or fluid levels): (1) Do NOT attempt to describe visual findings based on raw pixel inspection or hallucinated evidence; (2) Immediately invoke `chest_xray_report_generator` to extract detailed descriptive text findings from the image; (3) Base the final clinical interpretation on the structured output of the report generator.\n\n### t000004 | prioritize_tool_evidence_over_visual_hallucination\n**When to apply**: Tasks involving medical image interpretation where automated analysis tools (report generators, classifiers) are available alongside visual input.\n### Core Action\nIf visual inspection suggests specific pathologies (e.g., tumors, precise depth) but `chest_xray_report_generator` states 'clear' or 'no evidence' and `chest_xray_classifier` shows no strong findings: (1) Discard the visual hypothesis as a likely hallucination; (2) Conclude that the imaging modality may be insufficient for the suspected distinction (e.g., breast vs. lung mass) without further views/CT; (3) Report the negative tool findings as the primary result rather than asserting unverified visual details.\n\n### t000001 | longitudinal_imaging_synthesis\n**When to apply**: The user query contains keywords indicating chronology (e.g., 'progression', 'change', 'improvement', 'worsening', 'compared to') or explicitly references multiple figures/timepoints, but the available tools only provide static, single-image interpretations.\n### Core Action\nIf the query requires assessing progression or comparing multiple timepoints: (1) Explicitly identify all referenced images/timepoints; (2) Call the image analysis tool for EACH relevant image individually to extract static findings; (3) Manually synthesize these independent outputs to identify trends (e.g., new opacities, resolving effusions) rather than relying on a single snapshot; (4) Cross-reference the synthesized temporal trend with clinical history (e.g., exertion, trauma) before selecting the final diagnosis. Do not infer longitudinal changes from a single image report.\nSelect useful real tools before answering this current image question. Return strict JSON only:\n{\"calls\":[{\"tool\":\"chest_xray_classifier\",\"source_filename\":\"exact current eligible filename\",\"reason\":\"what evidence this may provide\"}],\"reason\":\"brief plan\"}.\nChoose zero, one or two calls based on relevance. Empty calls are valid even when eligible CXR originals exist; explain why tools would not help. At most two distinct tool/image pairs total. A report and classifier may examine the same original. Do not invent paths, tools or observations; tool outputs have not been provided yet. No answer is requested at this planning step."
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Based on the provided chest X-ray images, identify the most likely cause of the observed changes in the right lower lobe. Consider the relationship and progression of findings across the figures. Which statement best describes the findings?\n\nA) The atelectasis in the right lower lobe is due to a chronic infection, as evidenced by the consistent presence of infiltrates across all figures.\nB) The atelectasis in the right lower lobe shows significant progression over time, likely caused by a foreign body, as evidenced by the increasing opacity and volume loss in the right lower lobe.\nC) There is no significant change in the right lower lobe across the figures, suggesting that the atelectasis is due to cardiac causes.\nD) The atelectasis in the right lower lobe is not associated with any foreign body, as there is no significant change in the volume of the lobe across the figures.\nE) The atelectasis in the right lower lobe is improving over time, indicating effective treatment of an underlying condition unrelated to foreign body aspiration.\nF) The atelectasis in the right lower lobe is associated with pleural effusion, as evidenced by the blunting of the costophrenic angle in the figures."
+        },
+        {
+          "type": "text",
+          "text": "BOUND CURRENT IMAGE: {\"image_id\": \"image:1\", \"path\": \"../../../../../assets/4aed6c43784c530ae8aac9386fa6b317f3c322f5ebe6dded5bab6a6fd85d89e5.png\", \"source_filename\": \"figures/15581/figure_3a.jpg\", \"figure_label\": \"Figure 3a\", \"role\": \"original\", \"size\": [480, 480], \"modality\": \"unknown\", \"timepoint\": \"unknown\", \"timepoint_source_quote\": \"\", \"comparison_object\": \"unknown\"}"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "../../../../../assets/4aed6c43784c530ae8aac9386fa6b317f3c322f5ebe6dded5bab6a6fd85d89e5.png",
+            "detail": "auto"
+          }
+        },
+        {
+          "type": "text",
+          "text": "BOUND CURRENT IMAGE: {\"image_id\": \"image:2\", \"path\": \"../../../../../assets/416441f9e4706ba40fa76cd827ace216a96973ebe68582fd15db2a476b721928.png\", \"source_filename\": \"figures/15581/figure_3b.jpg\", \"figure_label\": \"Figure 3b\", \"role\": \"original\", \"size\": [480, 480], \"modality\": \"unknown\", \"timepoint\": \"unknown\", \"timepoint_source_quote\": \"\", \"comparison_object\": \"unknown\"}"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "../../../../../assets/416441f9e4706ba40fa76cd827ace216a96973ebe68582fd15db2a476b721928.png",
+            "detail": "auto"
+          }
+        },
+        {
+          "type": "text",
+          "text": "BOUND CURRENT IMAGE: {\"image_id\": \"image:3\", \"path\": \"../../../../../assets/0bc1b2ceb35e92e6f60d438e7e2b7d60cbb253678c5e5172c355317b1c0ffc7a.png\", \"source_filename\": \"figures/15581/figure_3c.jpg\", \"figure_label\": \"Figure 3c\", \"role\": \"original\", \"size\": [480, 480], \"modality\": \"unknown\", \"timepoint\": \"unknown\", \"timepoint_source_quote\": \"\", \"comparison_object\": \"unknown\"}"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "../../../../../assets/0bc1b2ceb35e92e6f60d438e7e2b7d60cbb253678c5e5172c355317b1c0ffc7a.png",
+            "detail": "auto"
+          }
+        },
+        {
+          "type": "text",
+          "text": "BOUND CURRENT IMAGE: {\"image_id\": \"image:4\", \"path\": \"../../../../../assets/214b0b05b8a7e2b6f5f76e7841511ca30da6f452cab1c54f9dc90aa3f55228c7.png\", \"source_filename\": \"figures/15581/figure_5.jpg\", \"figure_label\": \"Figure 5\", \"role\": \"original\", \"size\": [480, 480], \"modality\": \"unknown\", \"timepoint\": \"unknown\", \"timepoint_source_quote\": \"\", \"comparison_object\": \"unknown\"}"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "../../../../../assets/214b0b05b8a7e2b6f5f76e7841511ca30da6f452cab1c54f9dc90aa3f55228c7.png",
+            "detail": "auto"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Eligible current filenames: [\"figures/15581/figure_5.jpg\"]"
+    }
+  ],
+  "temperature": 0.2,
+  "top_p": 0.95,
+  "max_tokens": 512,
+  "extra_body": {
+    "enable_thinking": false
+  },
+  "stream": false
+}
