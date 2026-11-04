@@ -1,6 +1,6 @@
 # SkeMex tools-v2：纠错上下文与证据使用修订计划
 
-**状态：代码与计划待确认；尚未部署、生成技能或发送新请求。** 模型继续使用 `qwen3.7-plus`。本计划修复已观察到的实现问题，不承诺准确率提升。
+**状态：用户已确认“开始跑”；2026-11-04北京时间20:37:49启动，当前为源折A学习。** [启动回执](execution_start.json)记录冻结实现、进程与首批调用；这不是完成结果。 模型继续使用 `qwen3.7-plus`。本计划修复已观察到的实现问题，不承诺准确率提升。
 
 ## 范围与依据
 
@@ -47,6 +47,6 @@
 - [pipeline](../../experiments/run_skemex_pipeline.py)：默认不执行；运行须匹配本轮确认记录与无限累计请求次数授权。
 - [离线定向测试](../../tests/test_skemex_evidence_revision.py)：包含执行原官方编码器并捕获最终分析请求的测试，无API或GPU初始化。
 
-批准后的准备入口为 `configure_skemex_tools.py ... --revision-v2`；执行环境 `MEDRAX_SKEMEX_RUN_ID=skemex_tools_v2_20261104`，确认记录须指定 `plan_version=tools-v2`、`tool_agent=true`、`model=qwen3.7-plus`、`A0=D`、`request_count_unbounded=true`。此文档不是确认记录；本次没有调用这些执行入口。
+批准后的准备入口为 `configure_skemex_tools.py ... --revision-v2`；执行环境 `MEDRAX_SKEMEX_RUN_ID=skemex_tools_v2_20261104`，确认记录须指定 `plan_version=tools-v2`、`tool_agent=true`、`model=qwen3.7-plus`、`A0=D`、`request_count_unbounded=true`。此文档不是运行批准文件；用户确认后已调用这些执行入口；原提案JSON的待确认状态作为计划历史保留，实际批准与启动以回执为准。
 
 所有原图、真实请求/响应、工具原始返回与投影、源反馈上下文、技能演化、费用耗时、失败及完整分母分析在结束后按显式清单发布。凭据、私有账本、权重和私有路径不出站。已发未知请求、工具started_unknown不重发；失败仅必要定位，脏源窗口不重复反馈，不盲目确认恢复。
