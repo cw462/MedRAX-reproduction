@@ -53,9 +53,10 @@ def export(root,out):
         for source in job.rglob('*'):
             if source.is_file() and source.suffix in ('.json','.jsonl') and not source.name.startswith('ledger_'):
                 publisher.copy_json(source,out/source.relative_to(run))
-    for dirname in ('inputs','training','cached_D','predictions','source_predictions','feedback_releases','window_records','evolution','tool_cache'):
+    for dirname in ('inputs','training','cached_D','predictions','source_predictions','feedback_releases','window_records','evolution','tool_cache','startup_recoveries','recovery_history'):
         for source in (run/dirname).rglob('*'):
-            if not source.is_file() or source.suffix not in ('.json','.jsonl','.md'):continue
+            allowed=('.json','.jsonl','.md','.log','.pid','.exitcode') if dirname=='recovery_history' else ('.json','.jsonl','.md')
+            if not source.is_file() or source.suffix not in allowed or any(p.startswith('private_') for p in source.relative_to(run).parts) or source.name.startswith('ledger_'):continue
             target=out/source.relative_to(run)
             if source.suffix in ('.json','.jsonl'):publisher.copy_json(source,target)
             else:
