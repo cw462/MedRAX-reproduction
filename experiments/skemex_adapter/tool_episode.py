@@ -1,6 +1,7 @@
 """Bounded real-tool decision -> execution -> answer, with no reference access."""
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 from run_sampled_vlm import request_for, frozen_write
@@ -55,6 +56,9 @@ class RealTools:
     def eligible(self,row):return [s for s in row['images'] if s in self.cxr]
 
     def initialize(self):
+        # Existing wrappers import experiments.worker_bridge in direct-script runs.
+        code_root=str(Path(__file__).resolve().parents[2])
+        if code_root not in sys.path:sys.path.insert(0,code_root)
         from build_case_tool_evidence import LocalToolPool,CLASSIFIER_FILENAME
         root=Path(self.cfg['root'])
         if self.pool is None:
