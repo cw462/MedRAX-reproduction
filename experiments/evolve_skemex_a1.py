@@ -39,6 +39,10 @@ def run(root,fold,key):
         from skemex_adapter.tool_episode import RealTools,episode as tool_episode,TOOLS_TEXT,skill_rejection
         tools=RealTools(cfg,base)
         if any(tools.eligible(row) for row in rows):tools.initialize()
+    revised=cfg.get('evidence_revision')=='tools-v2'
+    if revised:
+        from skemex_adapter.evidence_revision import reflection_steps,TOOL_CONTRACT,skill_policy_rejection,require_safe_library
+        TOOLS_TEXT+='\n'+TOOL_CONTRACT
     categories=read(base/'inputs/official_categories.json')
     windows=list(case_windows(rows,runtime['config'].buffer.window_size))
     for index,window in enumerate(windows):
@@ -74,6 +78,14 @@ def run(root,fold,key):
                             'observation':'Original input image bindings: '+','.join(row['images']),'answer':p['answer']}],
                     injected_skill_ids=p['injected_skill_ids'],prediction=p['answer'],ground_truth=refs[q],eval_result=float(p['answer']==refs[q]),
                     metadata={'case_id':case,'source_fold':fold,'prediction_saved_before_feedback':True,'reused_D':index==0 and not cfg.get('tool_agent')})
+                if revised:
+                    raw_tools=[]
+                    for observation in p.get('tool_observations',[]):
+                        record=read(base/'tool_cache'/observation['record'])
+                        raw_tools.append({'tool':observation['tool'],'source_filename':observation['source_filename'],
+                                          'status':record['status'],'result':record.get('result'),'error_type':record.get('error_type')})
+                    trajectory.steps=reflection_steps(row,p,refs[q],raw_tools)
+                    frozen_write(base/'reflection_contexts'/fold/(q+'.json'),trajectory.to_dict())
                 trajectories.append(trajectory)
         runtime['buffer'].clear()
         for trajectory in trajectories:runtime['buffer'].add(trajectory)
@@ -94,6 +106,9 @@ def run(root,fold,key):
                     if not str(draft.get('applicable_conditions') or '').strip():rejected='missing_applicability'
                     elif prohibited(' '.join(str(draft.get(k) or '') for k in ('name','description','applicable_conditions','core_action','Core Action')),row):rejected='case_identifier_or_question_copy'
                 if encoded.patch_content and prohibited(encoded.patch_content,row):rejected='unsafe_patch_content'
+                if revised:
+                    candidate=json.dumps(draft or {},ensure_ascii=False)+'\n'+(encoded.patch_content or '')
+                    rejected=rejected or skill_policy_rejection(candidate)
                 if rejected:encoded.output_action='NONE'
                 encodes[trajectory.id]=encoded
                 created=runtime['governance'].apply_encode_result(encoded)
@@ -103,6 +118,7 @@ def run(root,fold,key):
             governed=runtime['governance'].manage() if (index+1)%runtime['config'].governance.manage_every_n_windows==0 else None
         emb.flush()
         frozen_write(base/'window_records'/fold/('w'+str(index)+'.json'),{'index':index,'cases':list(case_groups),'trajectory_n':len(trajectories),'buffer_n':len(runtime['buffer'].all_items()),'events':events,'utility':update,'governance':governed})
+        if revised:require_safe_library(runtime['store'])
         snapshot.parent.mkdir(parents=True,exist_ok=True);shutil.copytree(workspace,snapshot)
         progress.unlink()
     # No target-fold answers or feedback have been observed at freeze time.

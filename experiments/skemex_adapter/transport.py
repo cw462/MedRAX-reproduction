@@ -12,7 +12,7 @@ import run_sampled_vlm as worker
 from run_direct_vlm import read,write,now
 
 ID=os.environ.get('MEDRAX_SKEMEX_RUN_ID','skemex_a1_20261103')
-if ID not in ('skemex_a1_20261103','skemex_a1_20261103_r1','skemex_tools_20261103'):raise ValueError('unapproved_run_namespace')
+if ID not in ('skemex_a1_20261103','skemex_a1_20261103_r1','skemex_tools_20261103','skemex_tools_v2_20261104'):raise ValueError('unapproved_run_namespace')
 
 
 class Halt(BaseException):
@@ -20,13 +20,17 @@ class Halt(BaseException):
 
 
 class RequestAdapter:
-    def __init__(self,payload,row,actor,images):self.payload=payload;self.row=row;self.actor=actor;self.images=images
+    def __init__(self,payload,row,actor,images,bound_options=False):
+        self.payload=payload;self.row=row;self.actor=actor;self.images=images;self.bound_options=bound_options
     def prepare(self,cfg,out):
         worker.frozen_write(out/'selection.json',{'rows':[self.row]})
         worker.frozen_write(out/'protocol.json',dict(cfg,actor=self.actor,implementation_commit=__import__('os').environ.get('MEDRAX_CODE_COMMIT','unrecorded')))
         return [self.row]
     def legal(self,row):return worker.question_parts(row['question'])[1] if self.actor else None
     def parse(self,text,legal):
+        if self.actor and self.bound_options:
+            from .evidence_revision import parse_bound_answer
+            return parse_bound_answer(text,legal)
         if self.actor:return worker.parse_answer(text,legal)
         return {'answer':'TEXT' if isinstance(text,str) and text.strip() else None,'status':'completed' if isinstance(text,str) and text.strip() else 'unparsed'}
     def request(self,row,cfg,out):return self.payload,self.images
@@ -63,10 +67,10 @@ class PaidTransport:
                 worker.frozen_write(out/'reuse.json',reference)
                 return value.get('raw_response'),dict(value,reused_call=reference)
         counter=Path(self.cfg['root'])/self.cfg['global_request_counter']
-        if counter.exists() and not (out/'status.json').exists():
+        if not worker.unbounded_request_count(self.cfg) and counter.exists() and not (out/'status.json').exists():
             counts=read(counter)
             if len(counts['request_ids'])-len(counts['extra_request_ids'])>=5000:raise Halt('normal_request_ceiling_5000')
-        prefix='sa1t_' if self.cfg.get('tool_agent') else ('sa1r1_' if self.cfg.get('reuse_original_run') else 'sa1_')
+        prefix='sa2t_' if self.cfg.get('evidence_revision')=='tools-v2' else 'sa1t_' if self.cfg.get('tool_agent') else ('sa1r1_' if self.cfg.get('reuse_original_run') else 'sa1_')
         cfg=deepcopy(self.cfg);cfg.update(run_id=prefix+job,temperature=temperature,max_output_tokens=max_tokens,
             max_requests=2,max_extra_requests=1,question_count=1,case_count=1)
         if len(cfg['run_id'])>64:raise Halt('operation_id_too_long')
@@ -76,7 +80,7 @@ class PaidTransport:
         try:
             sys.stdin=io.StringIO(self.key+'\n')
             with worker.exclusive_lock(out/'.generation.lock'):
-                code=worker.run(args,cfg,out,adapter=RequestAdapter(messages,row,actor,images or []))
+                code=worker.run(args,cfg,out,adapter=RequestAdapter(messages,row,actor,images or [],bound_options=self.cfg.get('evidence_revision')=='tools-v2'))
         except BaseException as exc:
             if isinstance(exc,Halt):raise
             raise Halt('request_worker_failed:'+type(exc).__name__) from exc

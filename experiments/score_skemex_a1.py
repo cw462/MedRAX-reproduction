@@ -19,6 +19,9 @@ def score(root):
     views={'D_A0':old,'A1':{q:p['answer'] for q,p in pred.items()}}
     previous=read(root/'reports/history_skills_plus_20261103/analysis/per_question.json')['records']
     for name in ('S1','HS'):views['old_'+name]={r['question_id']:r['predictions'][name] for r in previous}
+    if read(base/'config.json').get('evidence_revision')=='tools-v2':
+        prior=read(root/'reports/skemex_tools_20261103/analysis/per_question.json')['records']
+        views['tools_v1_A1']={r['question_id']:r['predictions']['A1'] for r in prior}
     comparisons={name:paired(values,views['A1'],labels,qids,cases,2000,20261103) for name,values in views.items() if name!='A1'}
     calls=[read(p) for p in (base/'calls').glob('*/checkpoints/*/sample_1/terminal.json')]
     usage_by_stage={stage:resources([r for r in calls if r.get('operation_stage')==stage]) for stage in []}
@@ -38,11 +41,16 @@ def score(root):
     if read(base/'config.json').get('tool_agent'):
         observations=[o for p in pred.values() for o in p.get('tool_observations',[])]
         m['interpretation']='Tool-enabled A1 vs direct D combines tools, extra decision calls and memory. No matched tool-agent without-memory control was run; memory-only gain cannot be identified. Development-set evidence only.'
+        m['answer_contract_errors']=dict(Counter(p.get('answer_contract_error') for p in pred.values() if p.get('answer_contract_error')))
         m['tool_usage']={'questions_with_selected_tools':sum(bool(p.get('tool_observations')) for p in pred.values()),
             'questions_with_usable_evidence':sum(any(o['usable'] for o in p.get('tool_observations',[])) for p in pred.values()),
             'selected_tool_calls':len(observations),'same_round_cache_hits':sum(o['same_round_cache_hit'] for o in observations),
             'fresh_inference_attempted':sum(o['fresh_inference_attempted'] for o in observations),
-            'tool_plan_errors':sum(bool(p.get('tool_plan_error')) for p in pred.values())}
+            'tool_plan_errors':sum(bool(p.get('tool_plan_error')) for p in pred.values()),
+            'withheld_temporal_clauses':sum(o.get('model_observation',{}).get('withheld_temporal_clause_count',0) for o in observations)}
+        if read(base/'config.json').get('evidence_revision')=='tools-v2':
+            events=[e for path in (base/'window_records').glob('*/*.json') for e in read(path)['events']]
+            m['source_skill_admission_rejections']=dict(Counter(e['admission_rejection'] for e in events if e.get('admission_rejection')))
         source=[read(p) for p in (base/'source_predictions').glob('*/*.json')]
         backend=[read(p) for p in (base/'tool_cache/invocations').glob('*/*/*/result.json')]
         m['tool_usage']['source_questions_with_usable_evidence']=sum(any(o['usable'] for o in p.get('tool_observations',[])) for p in source)

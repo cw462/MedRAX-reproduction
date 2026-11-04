@@ -163,6 +163,17 @@ def profile_for(cfg):
         supports_vision=True, notes='Frozen sampling-phase profile; costs are disclosed accounting rates.')
 
 
+def unbounded_request_count(cfg):
+    """User-authorized cumulative count exemption for this new revision only."""
+    if cfg.get('request_count_unbounded') is not True:
+        return False
+    if (cfg.get('experiment_id') != 'skemex_tools_v2_20261104' or
+        cfg.get('evidence_revision') != 'tools-v2' or
+        cfg.get('request_limit_authorization') != 'user_20261104_request_count_unlimited'):
+        raise ValueError('unbounded_count_requires_explicit_skemex_v2_scope')
+    return True
+
+
 def validate_cfg(cfg):
     if cfg['model'] not in MODELS or cfg['prompt_variant'] not in VARIANTS:
         raise ValueError('unsupported_model_or_variant')
@@ -177,6 +188,8 @@ def validate_cfg(cfg):
     if not 0 <= cfg['temperature'] <= 2 or not 0 < cfg['top_p'] <= 1:
         raise ValueError('invalid_sampling_parameters')
     for field in ('max_requests', 'max_extra_requests', 'global_max_requests', 'global_max_extra_requests'):
+        if field.startswith('global_') and cfg[field] is None and unbounded_request_count(cfg):
+            continue
         if type(cfg[field]) is not int or cfg[field] < 0:
             raise ValueError('explicit_nonnegative_request_bounds_required')
     if cfg.get('max_attempts_per_sample', 2) not in (1, 2):
@@ -280,12 +293,23 @@ def claim_global(cfg, request_id, extra, reserve=None):
     with exclusive_lock(str(path)+'.lock'):
         state = read(path) if path.exists() else {'request_ids':[], 'extra_request_ids':[],
             'max_requests':cfg['global_max_requests'], 'max_extra_requests':cfg['global_max_extra_requests']}
-        if (state['max_requests'], state['max_extra_requests']) != (cfg['global_max_requests'], cfg['global_max_extra_requests']):
+        unlimited = unbounded_request_count(cfg)
+        if not unlimited and (state['max_requests'], state['max_extra_requests']) != (cfg['global_max_requests'], cfg['global_max_extra_requests']):
             raise ValueError('global_request_policy_conflict')
         if request_id in state['request_ids']:
             raise ValueError('global_request_id_already_claimed_no_reissue')
-        if len(state['request_ids']) >= state['max_requests'] or (extra and len(state['extra_request_ids']) >= state['max_extra_requests']):
+        if not unlimited and (len(state['request_ids']) >= state['max_requests'] or (extra and len(state['extra_request_ids']) >= state['max_extra_requests'])):
             raise ValueError('global_request_limit_reached')
+        if unlimited:
+            # Preserve historical limits/counts; scope the explicit override to v2.
+            overrides = state.setdefault('scoped_request_limits', {})
+            override = {'normal': None, 'hard': None,
+                        'authorization': cfg['request_limit_authorization'],
+                        'monetary_cap_changed': False}
+            previous = overrides.get(cfg['experiment_id'])
+            if previous is not None and previous != override:
+                raise ValueError('scoped_request_authorization_conflict')
+            overrides[cfg['experiment_id']] = override
         reservation = reserve() if reserve is not None else None
         state['request_ids'].append(request_id)
         if extra: state['extra_request_ids'].append(request_id)

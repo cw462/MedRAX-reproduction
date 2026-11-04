@@ -14,8 +14,10 @@ def run(root,approval,execute=False):
     approved=read(approval)
     if approved.get('status')!='approved' or approved.get('experiment_id')!=ID or approved.get('A0')!='D' or approved.get('model')!='qwen3.7-plus':raise ValueError('user_clarified_A0_D_approval_required')
     cfg=read(base/'config.json')
-    if cfg.get('tool_agent') and (approved.get('tool_agent') is not True or approved.get('plan_version')!='tools-v1'):
-        raise ValueError('explicit_tools_v1_approval_required')
+    if cfg.get('tool_agent') and (approved.get('tool_agent') is not True or approved.get('plan_version')!=cfg.get('plan_version','tools-v1')):
+        raise ValueError('explicit_matching_tools_plan_approval_required')
+    if cfg.get('evidence_revision')=='tools-v2' and approved.get('request_count_unbounded') is not True:
+        raise ValueError('tools_v2_unlimited_request_authorization_required')
     key=sys.stdin.buffer.readline().strip()
     if not key:raise ValueError('stdin_key_required')
     with exclusive_lock(base/'.pipeline.lock'):
