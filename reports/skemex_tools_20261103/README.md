@@ -1,6 +1,6 @@
-# SkeMex A1 加入真实工具调用：已启动
+# 工具增强 SkeMex A1：已完成并评分
 
-状态：用户于2026年11月4日确认开始，已于北京时间10:52:32恢复进入源折A。**正在生成，尚无目标评分**。[启动记录](execution_start.json)。[完整协议](../../configs/skemex_tools_protocol.json) · [工具决策与执行代码](../../experiments/skemex_adapter/tool_episode.py) · [无推理准备器](../../experiments/configure_skemex_tools.py)。
+状态：2026年11月4日13:41:41全部402题生成和评分完成，进程退出0。**A1为276/402（68.66%），D为295/402；纠正11、误改30，净少19题。** [完整分析与原始证据](results/analysis/README.md) · [完成记录](execution_complete.json) · [启动记录](execution_start.json)。[完整协议](../../configs/skemex_tools_protocol.json) · [工具决策与执行代码](../../experiments/skemex_adapter/tool_episode.py) · [无推理准备器](../../experiments/configure_skemex_tools.py)。
 
 ## 一题怎么运行
 
@@ -40,3 +40,7 @@ A0继续保留D295/402，不自动加新的对照臂。**新增工具后，A1相
 ## 启动恢复记录
 
 第一次启动在工具模块导入前因部署依赖缺失退出，没有新API请求、医学推理或脏源窗口。已补齐既有工具模块并处理直接脚本入口的包导入路径，[修订01](runtime_amendments/01_startup_dependencies.json)保留原因与边界；旧日志、status、PID和退出码保留。当前生成实现固定为`a77206cb465c5c66a9bbc565354a339940ac83e2`。两工具已初始化，首批分类器调用返回可用，缓存命中与新推理区分记录。完成全部生成后再隔离评分并发布完整证据。
+
+## 本轮结论与边界
+
+[完整报告](results/analysis/README.md)：配对病例95% CI为−7.92至−1.76个百分点。实际267题有工具证据、273题注入技能，两源库8/5条。新增2257次API调用、741次原载荷复用，21.050140 CNY仅本轮记账代理，真实Credits未知。源折反思没有显式完整题干选项、仅参考字母；还保存了一条源折图像载荷变体且PNG CRC失败，时点和原因未知，见[完成后观察](runtime_amendments/02_publication_observations.json)。这轮为工具＋规划＋记忆组合的开发集结果，不能将退步单归因于SkeMex。原始预测、终态和计数均保留，未自动补跑或增额。

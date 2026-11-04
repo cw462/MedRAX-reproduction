@@ -1,0 +1,51 @@
+{
+  "model": "qwen3.7-plus",
+  "messages": [
+    {
+      "role": "system",
+      "content": "chest_xray_classifier(image_path): local TorchXRayVision classifier on one confirmed chest radiograph; normalized scores, not calibrated probabilities. No localization or chronology.\nchest_xray_report_generator(image_path): local chest-radiograph report generator on one confirmed original; may omit or hallucinate findings. Verify against pixels.\nOnly these two tools exist. Arguments must select a current source_filename; the executor resolves image_path. Unknown/CT/MRI/other modalities are ineligible. No reference, history or sibling question is available.\n---\n## Retrieved Experience Skills\nThe following skills are distilled from past trajectories and grouped by branch.\nTreat them as prioritised reference — consult them **before** deciding how to act.\n\n**Usage rules**:\n- Check each skill's **When to apply** condition against the current step; apply every skill whose condition is met — there is no limit on how many you may use simultaneously.\n- If one or more skills shape your reasoning or action, cite each one inside your `<reasoning>` block: *(guided by {skill_id})*\n- If no skill is relevant to the current step, proceed without citing.\n\n\n### t000002 | verify_negative_classifier_with_visual_morphology\n**When to apply**: Chest imaging interpretation tasks where automated classification tools yield negative or low-confidence results for images containing obvious structural abnormalities.\n### Core Action\nIf `chest_xray_classifier` returns empty `strong_findings` but clinical suspicion for structural pathology (e.g., calcification, pericardial thickening, effusion, mass) remains high: (1) Do not accept the negative classifier output as final; (2) Explicitly invoke `chest_xray_report_generator` to analyze specific views (especially lateral) for morphological details (e.g., curvilinear calcifications, silhouette abnormalities) and obtain radiologist-style interpretations; (3) Formulate diagnosis and inform treatment planning based on the generated report rather than relying on internal visual inspection or the initial classifier's strong findings. CRITICAL PRECONDITION CHECK: This skill MUST NOT be invoked if `chest_xray_classifier` has already returned non-empty `strong_findings`. In cases with positive classifier findings, prioritize those findings and use visual morphology only for refinement or confirmation, not to override explicit positive detections with negative-verification logic.\n\n### t000003 | Prioritize Explicit Negative Imaging Findings\n**When to apply**: Tasks involving the interpretation of medical imaging reports where the tool output contains explicit negative findings (e.g., 'clear lungs', 'no acute abnormalities') that contradict the agent's prior expectations or visual heuristics.\n### Core Action\nIf the `chest_xray_report_generator` returns a report stating that the relevant anatomy is 'clear', 'normal', or 'unremarkable': (1) Cross-reference this with quantitative scores from `chest_xray_classifier` for major structural abnormalities (e.g., Consolidation, Effusion, Cardiomegaly); (2) If classifier confidence scores are high (>0.5 or defined threshold) and contradict the text report's negative finding, prioritize the classifier's quantitative evidence over the vague textual description; (3) Do NOT accept the 'normal' label if high-confidence classifier signals indicate pathology; (4) Formulate the final answer reflecting the severity indicated by the classifier scores.\n\n### t000001 | verify_temporal_resolution_for_transient_pathology\n**When to apply**: Tasks involving the interpretation of serial medical imaging where the differential diagnosis includes both transient (e.g., hemorrhage, edema) and persistent (e.g., infection, fibrosis) causes of similar radiographic appearances.\n### Core Action\nIf the initial image analysis reveals high-confidence diffuse bilateral opacities: (1) explicitly retrieve and analyze available follow-up imaging using `chest_xray_classifier`; (2) compare the severity and extent of findings between the initial and follow-up timepoints; (3) if findings show rapid normalization or significant improvement, prioritize transient etiologies (e.g., hemorrhage, flash pulmonary edema) over slower-resolving pathologies (e.g., pneumonia, ARDS) in the final diagnosis.\n\n### t000004 | mandatory_image_tool_invocation_for_radiology_tasks\n**When to apply**: Any medical task where the input includes or implies the need for chest X-ray, CT, or other radiological image interpretation to support a diagnosis or differential diagnosis.\n### Core Action\nIf the task requires analyzing chest imaging findings (e.g., opacities, nodules, patterns) to support a diagnosis: (1) Immediately call `chest_xray_report_generator` to obtain a structured radiological description; (2) Call `chest_xray_classifier` to identify specific pathological features if available. Do NOT generate specific radiological findings or diagnoses based on text prompts alone without first executing these tools.\n\n### t000005 | Integrate Clinical Context with Imaging Findings in Differential Diagnosis\n**When to apply**: Tasks involving differential diagnosis where radiological findings are ambiguous or overlap between conditions (e.g., infectious vs. cardiogenic causes), and specific patient history (devices, fever, labs) provides critical discriminative evidence.\n### Core Action\nIf `chest_xray_classifier` returns high scores for overlapping pathologies (e.g., 'Consolidation' and 'Enlarged Cardiomediastinum'): (1) Do not rely solely on visual patterns like 'bat-wing' appearance; (2) Explicitly cross-reference patient history (e.g., prosthetic valves, fever, immunosuppression) against the differential list; (3) Prioritize diagnoses that explain both the imaging and the specific clinical risk factors (e.g., septic emboli from endocarditis causing consolidations); (4) Use `chest_xray_report_generator` to synthesize a conclusion that weighs clinical context higher than non-specific radiological signs.\nSelect useful real tools before answering this current image question. Return strict JSON only:\n{\"calls\":[{\"tool\":\"chest_xray_classifier\",\"source_filename\":\"exact current eligible filename\",\"reason\":\"what evidence this may provide\"}],\"reason\":\"brief plan\"}.\nChoose one or two calls when eligible CXR originals exist; use an empty list only when none exist. At most two distinct tool/image pairs total. A report and classifier may examine the same original. Do not invent paths, tools or observations; tool outputs have not been provided yet. No answer is requested at this planning step."
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Based on the chest X-ray findings, which of the following best describes the location and characteristics of the foreign body, and why might it have gone unnoticed for four years in this patient?\n\nA. The foreign body is located in the left hilum, appears as a high-density object, and its small size resulted in it being overlooked on initial examination.\nB. The foreign body is located in the right hilum, presents as a high-density structure, and its alignment with the bronchus allowed for normal air passage, preventing symptoms.\nC. The foreign body is located in the right hilum, appears as a low-density object, and its soft tissue composition made it difficult to detect on X-ray.\nD. The foreign body is located in the left hilum, appears as a high-density structure, and the absence of symptoms was due to its non-obstructive position.\nE. The foreign body is located in the right upper lobe, presents as a high-density object, and its misalignment with the bronchus caused it to remain asymptomatic.\nF. The foreign body is located in the right hilum, appears as a high-density structure, and its longitudinal alignment with the bronchus allowed for normal air passage, preventing symptoms."
+        },
+        {
+          "type": "text",
+          "text": "BOUND CURRENT IMAGE: {\"image_id\": \"image:1\", \"path\": \"../../../../../assets/0084496c8ba00c059a69ba2867c83e13d9400a5220047acb7e3e6aae49b1b24c.png\", \"source_filename\": \"figures/6314/figure_3.jpg\", \"figure_label\": \"Figure 3\", \"role\": \"original\", \"size\": [480, 480], \"modality\": \"unknown\", \"timepoint\": \"unknown\", \"timepoint_source_quote\": \"\", \"comparison_object\": \"unknown\"}"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "../../../../../assets/0084496c8ba00c059a69ba2867c83e13d9400a5220047acb7e3e6aae49b1b24c.png",
+            "detail": "auto"
+          }
+        },
+        {
+          "type": "text",
+          "text": "BOUND CURRENT IMAGE: {\"image_id\": \"image:2\", \"path\": \"../../../../../assets/810ee886c831fd90127fbf92d7a2a5e38498d3e69776351ab20829edc8b3662c.png\", \"source_filename\": \"figures/6314/figure_6.jpg\", \"figure_label\": \"Figure 6\", \"role\": \"original\", \"size\": [480, 480], \"modality\": \"unknown\", \"timepoint\": \"unknown\", \"timepoint_source_quote\": \"\", \"comparison_object\": \"unknown\"}"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "../../../../../assets/810ee886c831fd90127fbf92d7a2a5e38498d3e69776351ab20829edc8b3662c.png",
+            "detail": "auto"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Eligible current filenames: [\"figures/6314/figure_3.jpg\"]"
+    }
+  ],
+  "temperature": 0.2,
+  "top_p": 0.95,
+  "max_tokens": 512,
+  "extra_body": {
+    "enable_thinking": false
+  },
+  "stream": false
+}

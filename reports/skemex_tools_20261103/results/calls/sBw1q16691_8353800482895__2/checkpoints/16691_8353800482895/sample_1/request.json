@@ -1,0 +1,40 @@
+{
+  "model": "qwen3.7-plus",
+  "messages": [
+    {
+      "role": "system",
+      "content": "chest_xray_classifier(image_path): local TorchXRayVision classifier on one confirmed chest radiograph; normalized scores, not calibrated probabilities. No localization or chronology.\nchest_xray_report_generator(image_path): local chest-radiograph report generator on one confirmed original; may omit or hallucinate findings. Verify against pixels.\nOnly these two tools exist. Arguments must select a current source_filename; the executor resolves image_path. Unknown/CT/MRI/other modalities are ineligible. No reference, history or sibling question is available.\n---\n## Retrieved Experience Skills\nThe following skills are distilled from past trajectories and grouped by branch.\nTreat them as prioritised reference — consult them **before** deciding how to act.\n\n**Usage rules**:\n- Check each skill's **When to apply** condition against the current step; apply every skill whose condition is met — there is no limit on how many you may use simultaneously.\n- If one or more skills shape your reasoning or action, cite each one inside your `<reasoning>` block: *(guided by {skill_id})*\n- If no skill is relevant to the current step, proceed without citing.\n\n\n### t000002 | validate_mediastinal_shift_direction\n**When to apply**: Any task involving the interpretation of chest X-rays or CT scans where a large unilateral opacity, consolidation, or pleural abnormality is detected.\n### Core Action\nIf a large unilateral opacity is identified: (1) Use `chest_xray_report_generator` to specifically extract descriptions of mediastinal position (trachea, heart border); (2) Cross-reference this with `chest_xray_classifier` findings for effusion vs. collapse/atelectasis probabilities; (3) Apply the rule: Contralateral shift suggests space-occupying pathology (e.g., massive effusion), while Ipsilateral shift suggests volume loss (e.g., atelectasis/collapse). Do not assume shift direction based on opacity alone; confirm via explicit report extraction.\n\n### t000003 | fallback_visual_analysis_for_low_confidence_classifier\n**When to apply**: Applicable in diagnostic imaging tasks where initial automated tool outputs (e.g., classifiers) do not provide high-confidence positive results despite clinical suspicion or ambiguous presentation.\n### Core Action\nIf the `chest_xray_classifier` returns no strong findings (scores < threshold) or negative results for a suspected condition: (1) Do not accept the negative result as final; (2) Call `chest_xray_report_generator` to produce a detailed textual description of the image; (3) Analyze the generated report or inspect the image directly for specific subtle signs (e.g., visceral pleural lines, absent lung markings) that classifiers may miss. Proceed with diagnosis based on this secondary visual evidence.\n\n### t000001 | cross_verify_findings_with_multi_view_reports\n**When to apply**: Tasks involving interpretation of multi-view medical imaging (e.g., Chest X-ray PA and Lateral) where spatial localization or visibility of a specific feature needs confirmation.\n### Core Action\nIf the presence of a specific finding (e.g., vessel, nodule, consolidation) is unclear or requires spatial verification: (1) call `chest_xray_report_generator` for the primary view (e.g., PA); (2) call `chest_xray_report_generator` for the orthogonal view (e.g., Lateral); (3) compare the generated textual reports to check for consistent mentions or explicit exclusions of the finding. Conclude based on the concordance or discordance between the two views.\nSelect useful real tools before answering this current image question. Return strict JSON only:\n{\"calls\":[{\"tool\":\"chest_xray_classifier\",\"source_filename\":\"exact current eligible filename\",\"reason\":\"what evidence this may provide\"}],\"reason\":\"brief plan\"}.\nChoose one or two calls when eligible CXR originals exist; use an empty list only when none exist. At most two distinct tool/image pairs total. A report and classifier may examine the same original. Do not invent paths, tools or observations; tool outputs have not been provided yet. No answer is requested at this planning step."
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Based on the chest X-ray provided in Figure 1, which of the following statements best describes the findings and their clinical significance in the context of this patient's presentation?\nA) The chest X-ray shows left upper lobe consolidations, which are indicative of a bacterial pneumonia, requiring immediate antibiotic treatment.\nB) The chest X-ray shows right lower lobe consolidations, which suggest viral pneumonia, consistent with the patient's symptoms and recent positive COVID-19 test.\nC) The chest X-ray shows right upper lobe and left lower lobe consolidations, which are characteristic of viral pneumonia, consistent with the patient's symptoms and recent positive COVID-19 test.\nD) The chest X-ray shows bilateral lower lobe consolidations, which are suggestive of opportunistic pneumonia, likely due to the patient's diabetes mellitus.\nE) The chest X-ray shows right middle lobe and left upper lobe consolidations, which are typical of neoplastic lesions, necessitating further oncological assessment.\nF) The chest X-ray shows right upper lobe consolidations sharply defined at the fissure, and lower zone of the left lung, consistent with the clinical suspicion of bilateral pneumonia, likely due to COVID-19."
+        },
+        {
+          "type": "text",
+          "text": "BOUND CURRENT IMAGE: {\"image_id\": \"image:1\", \"path\": \"../../../../../assets/88978c6055a5f12d7634c920b77c69d906e54c81727529d39c9503b832d5ed0d.jpg\", \"source_filename\": \"figures/16691/figure_1.jpg\", \"figure_label\": \"Figure 1\", \"role\": \"original\", \"size\": [480, 480], \"modality\": \"unknown\", \"timepoint\": \"unknown\", \"timepoint_source_quote\": \"\", \"comparison_object\": \"unknown\"}"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "../../../../../assets/88978c6055a5f12d7634c920b77c69d906e54c81727529d39c9503b832d5ed0d.jpg",
+            "detail": "auto"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Eligible current filenames: [\"figures/16691/figure_1.jpg\"]"
+    }
+  ],
+  "temperature": 0.2,
+  "top_p": 0.95,
+  "max_tokens": 512,
+  "extra_body": {
+    "enable_thinking": false
+  },
+  "stream": false
+}

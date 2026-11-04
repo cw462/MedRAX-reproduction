@@ -1,6 +1,6 @@
 # MedRAX reproduction and research extensions
 
-**Running: tool-enabled SkeMex A1 (2026-11-04).** [Plan, startup and recovery](reports/skemex_tools_20261103/README.md). User-confirmed Plus source-fold evolution and402target questions with bounded real CXR tool selection/execution; actual initial classifier returns observed. Official skill review retained. Generation implementation a77206cb4; no target score read.
+**Completed tool-enabled SkeMex A1 (2026-11-04):** [Full analysis and evidence](reports/skemex_tools_20261103/results/analysis/README.md). A1 **276/402 (68.66%)** vs D295/402;11corrections/30harms, net−19, paired case95% CI−7.92 to−1.76pp.267questions had usable tool returns;273injected skills. Source libraries8/5. Tools/planning/memory are confounded, and source-feedback context and stored-image limitations are disclosed. All predictions retained; no heldout, extra control or automatic rerun.
 
 **SkeMex A1 reached a protocol validity limit:** [Full repair report](reports/skemex_a1_20261103_r1/results/analysis/README.md). The provenance bug was fixed, but all16 eligible drafts failed official quality review; both libraries remained empty, so repair target calls were stopped. Original295/402 injected zero skills and is not a memory-effect estimate. Original and repair evidence retained; no budget increase.
 

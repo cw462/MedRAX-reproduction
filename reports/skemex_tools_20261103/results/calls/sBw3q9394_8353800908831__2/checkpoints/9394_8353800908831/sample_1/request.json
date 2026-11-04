@@ -1,0 +1,51 @@
+{
+  "model": "qwen3.7-plus",
+  "messages": [
+    {
+      "role": "system",
+      "content": "chest_xray_classifier(image_path): local TorchXRayVision classifier on one confirmed chest radiograph; normalized scores, not calibrated probabilities. No localization or chronology.\nchest_xray_report_generator(image_path): local chest-radiograph report generator on one confirmed original; may omit or hallucinate findings. Verify against pixels.\nOnly these two tools exist. Arguments must select a current source_filename; the executor resolves image_path. Unknown/CT/MRI/other modalities are ineligible. No reference, history or sibling question is available.\n---\n## Retrieved Experience Skills\nThe following skills are distilled from past trajectories and grouped by branch.\nTreat them as prioritised reference — consult them **before** deciding how to act.\n\n**Usage rules**:\n- Check each skill's **When to apply** condition against the current step; apply every skill whose condition is met — there is no limit on how many you may use simultaneously.\n- If one or more skills shape your reasoning or action, cite each one inside your `<reasoning>` block: *(guided by {skill_id})*\n- If no skill is relevant to the current step, proceed without citing.\n\n\n### t000002 | validate_mediastinal_shift_direction\n**When to apply**: Any task involving the interpretation of chest X-rays or CT scans where a large unilateral opacity, consolidation, or pleural abnormality is detected.\n### Core Action\nIf a large unilateral opacity is identified: (1) Use `chest_xray_report_generator` to specifically extract descriptions of mediastinal position (trachea, heart border); (2) Cross-reference this with `chest_xray_classifier` findings for effusion vs. collapse/atelectasis probabilities; (3) Apply the rule: Contralateral shift suggests space-occupying pathology (e.g., massive effusion), while Ipsilateral shift suggests volume loss (e.g., atelectasis/collapse). CRITICAL CONSTRAINT: Do not infer or hallucinate shift direction based on visual opacity patterns or diagnostic suspicion if the report generator does not explicitly state it. If the report generator fails to describe the shift or states 'no shift', accept this textual evidence as the ground truth for shift direction, even if it contradicts the expected pattern for the suspected diagnosis. Only use explicit textual confirmation from the report.\n\n### t000001 | cross_verify_findings_with_multi_view_reports\n**When to apply**: Tasks involving interpretation of multi-view medical imaging (e.g., Chest X-ray PA and Lateral) where spatial localization or visibility of a specific feature needs confirmation.\n### Core Action\nIf the presence of a specific finding (e.g., vessel, nodule, consolidation) is unclear or requires spatial verification: (1) call `chest_xray_report_generator` for the primary view (e.g., PA); (2) call `chest_xray_report_generator` for the orthogonal view (e.g., Lateral); (3) compare the generated textual reports to check for consistent mentions or explicit exclusions of the finding. Conclude based on the concordance or discordance between the two views. IMPORTANT: Do NOT apply this skill to tasks involving multiple time points (temporal sequences). If the input involves comparing images from different dates to assess progression or resolution, use a temporal analysis strategy instead of cross-view verification.\nSelect useful real tools before answering this current image question. Return strict JSON only:\n{\"calls\":[{\"tool\":\"chest_xray_classifier\",\"source_filename\":\"exact current eligible filename\",\"reason\":\"what evidence this may provide\"}],\"reason\":\"brief plan\"}.\nChoose one or two calls when eligible CXR originals exist; use an empty list only when none exist. At most two distinct tool/image pairs total. A report and classifier may examine the same original. Do not invent paths, tools or observations; tool outputs have not been provided yet. No answer is requested at this planning step."
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Based on the chest X-ray findings, which of the following statements accurately describes the progression of the mediastinal mass and its impact on the trachea?\nA) The mass initially dislocates the trachea to the left, and post-surgery, there is no significant change in tracheal position.\nB) The mass initially dislocates the trachea to the right, and post-surgery, there is no significant change in tracheal position.\nC) The mass initially dislocates the trachea to the left, and post-surgery, the trachea returns to the midline position.\nD) The mass initially dislocates the trachea to the left, and post-surgery, the trachea remains dislocated to the left.\nE) The mass initially dislocates the trachea to the right, and post-surgery, the trachea remains dislocated to the right.\nF) The mass initially dislocates the trachea to the left, and post-surgery, the trachea dislocates further to the left."
+        },
+        {
+          "type": "text",
+          "text": "BOUND CURRENT IMAGE: {\"image_id\": \"image:1\", \"path\": \"../../../../../assets/60e0fa3429bdf3ab04da00b3a560c4fb18a551d80ecb359a1336d7f44857f172.png\", \"source_filename\": \"figures/9394/figure_1a.jpg\", \"figure_label\": \"Figure 1a\", \"role\": \"original\", \"size\": [480, 480], \"modality\": \"unknown\", \"timepoint\": \"unknown\", \"timepoint_source_quote\": \"\", \"comparison_object\": \"unknown\"}"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "../../../../../assets/60e0fa3429bdf3ab04da00b3a560c4fb18a551d80ecb359a1336d7f44857f172.png",
+            "detail": "auto"
+          }
+        },
+        {
+          "type": "text",
+          "text": "BOUND CURRENT IMAGE: {\"image_id\": \"image:2\", \"path\": \"../../../../../assets/f62f1e2e558ac2d8ac0ed3fae2e1c25f83d2001baad9128a7d5ce02c77f8c6ef.png\", \"source_filename\": \"figures/9394/figure_3a.jpg\", \"figure_label\": \"Figure 3a\", \"role\": \"original\", \"size\": [480, 480], \"modality\": \"unknown\", \"timepoint\": \"unknown\", \"timepoint_source_quote\": \"\", \"comparison_object\": \"unknown\"}"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "../../../../../assets/f62f1e2e558ac2d8ac0ed3fae2e1c25f83d2001baad9128a7d5ce02c77f8c6ef.png",
+            "detail": "auto"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Eligible current filenames: [\"figures/9394/figure_1a.jpg\", \"figures/9394/figure_3a.jpg\"]"
+    }
+  ],
+  "temperature": 0.2,
+  "top_p": 0.95,
+  "max_tokens": 512,
+  "extra_body": {
+    "enable_thinking": false
+  },
+  "stream": false
+}

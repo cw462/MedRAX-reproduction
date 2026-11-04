@@ -44,7 +44,8 @@ def export(root,out):
             q=req.parent.parent.name;request=read(req)
             has_image=any(isinstance(m.get('content'),list) and any(b.get('type')=='image_url' for b in m['content']) for m in request['messages'])
             if has_image:
-                bindings=publisher.bind_request(request,mapping[q])
+                try:bindings=publisher.bind_request(request,mapping[q])
+                except ValueError as exc:raise ValueError('request_binding:'+job.name+':'+q+':'+str(exc)) from exc
                 for binding in bindings:
                     source=binding['source_filename']
                     if native_sources.get(source)!=binding['sha256']:
