@@ -143,24 +143,26 @@ def execute_extended(req):
         from transformers import AutoProcessor,AutoModelForImageTextToText,FineGrainedFP8Config
         model_path=Path(cfg['knowledge_model']);processor=AutoProcessor.from_pretrained(model_path,local_files_only=True)
         model=AutoModelForImageTextToText.from_pretrained(model_path,local_files_only=True,dtype=torch.bfloat16,
-            device_map='auto',max_memory={0:'20GiB',1:'20GiB','cpu':'35GiB'},
+            device_map='auto',max_memory={0:'22GiB',1:'22GiB','cpu':'35GiB'},
             quantization_config=FineGrainedFP8Config(dequantize=True),offload_folder=str(folder/'offload'),attn_implementation='eager')
         query=args.get('query') or args.get('conditions')
         if not isinstance(query,str) or not query.strip() or len(query)>1800:raise ValueError('condition_knowledge_query_required')
-        instruction = ('Provide concise general chest-radiograph knowledge only: characteristic findings, distribution '
-                       'and discriminating features. No patient-specific diagnosis. No invented citations.')
+        instruction = ('Give at most three short bullets of general chest-radiograph knowledge, covering relevant '
+                       'findings, distribution or distinguishing features. No patient-specific diagnosis or invented citations.')
         messages = [
             {'role': 'system', 'content': [{'type': 'text', 'text': instruction}]},
             {'role': 'user', 'content': [{'type': 'text', 'text': query}]},
         ]
         inputs=processor.apply_chat_template(messages,tokenize=True,add_generation_prompt=True,return_dict=True,return_tensors='pt',enable_thinking=False).to(model.device)
         length=inputs['input_ids'].shape[-1]
-        with torch.inference_mode():generated=model.generate(**inputs,max_new_tokens=512,do_sample=False)
+        max_tokens = 96
+        with torch.inference_mode():generated=model.generate(**inputs,max_new_tokens=max_tokens,do_sample=False)
         answer=processor.decode(generated[0,length:],skip_special_tokens=True)
         raw=obs={'knowledge':answer,'knowledge_source':'local model knowledge; not literature retrieval','citations':[],
             'model':'Qwen/Qwen3.5-27B-FP8','revision':'97f5941bf617e31c5e237364a8602ce3f03a551a',
             'deployment_adaptation':'official FP8 checkpoint dequantized for 3090, split GPU/CPU; not a replacement main model',
-            'backend_input_tokens':length,'backend_output_tokens':int(generated.shape[-1]-length)}
+            'backend_input_tokens':length,'backend_output_tokens':int(generated.shape[-1]-length),
+            'backend_max_new_tokens':max_tokens}
     elif name=='medvlm_r1':
         import torch
         from PIL import Image
