@@ -109,15 +109,14 @@ class PaidCalls:
     def open_ledger(self):
         cfg = self.cfg
         root = Path(cfg['root'])
-        deadline = time.monotonic() + 240
         while True:
             try:
                 return V12ProviderLedger(root / cfg['ledger'], self.profile,
                                          cap_cny=str(cfg['cap_cny']),
                                          inherit_ledger_path=root / cfg['inherit_ledger'])
             except LedgerLocked:
-                if time.monotonic() >= deadline:
-                    raise
+                # The current holder can be settling a paid call. This call
+                # has made no reservation and will wait before sending.
                 time.sleep(1)
 
     def call(self, row, arm, ordinal, messages):
