@@ -12,6 +12,7 @@ import json
 import mimetypes
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -39,6 +40,31 @@ def save(p, obj):
         if temp.exists():temp.unlink()
 
 
+IMAGE_DATA_URI = re.compile(r'data:(image/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)\Z')
+
+
+def archive_request(payload, asset_dir):
+    """Represent each original request image with a lossless content reference."""
+    def visit(value):
+        if isinstance(value, dict):
+            return {k: visit(v) for k,v in value.items()}
+        if isinstance(value, list):
+            return [visit(item) for item in value]
+        match = IMAGE_DATA_URI.fullmatch(value) if isinstance(value, str) else None
+        if match:
+            media_type, encoded = match.groups()
+            digest = hashlib.sha256(encoded.encode('ascii')).hexdigest()
+            asset = asset_dir / digest
+            if not asset.is_file():
+                asset_dir.mkdir(parents=True, exist_ok=True)
+                temp = asset.with_name('.'+digest+'.tmp')
+                temp.write_bytes(encoded.encode('ascii'))
+                os.replace(temp, asset)
+            return {'cxr_request_image_base64_sha256': digest, 'media_type': media_type}
+        return value
+    return visit(payload)
+
+
 ANSWER = ('Answer the current question using the original image. Return exactly one JSON object '
           'with two string fields: {"answer":"short direct answer","reason":"one short sentence"}. '
           'Do not add options or change the question. Do not put the answer only in reason. '
@@ -63,6 +89,38 @@ EDV = ('Evidence-driven validation: compare every tool claim with the original i
        '"collaboration_needed":true/false,"expert_task":"one focused unresolved clinical question"}. '
        'No tool call or final answer is required at this validation stage.')
 
+MANUAL_EVIDENCE_RULES = ('do not treat classifier scores as severity, and do not infer temporal change '
+                         'from a single-image report.')
+M_MINUS_R_SYSTEM = AGENT_SYSTEM.replace(
+    'Tool claims are unverified: inspect original pixels, ' + MANUAL_EVIDENCE_RULES,
+    'Tool claims are unverified: inspect original pixels.')
+M_MINUS_R_TOOL_DESCRIPTIONS = {
+    'chest_xray_classifier': ('args={}. Single original CXR finding scores, never severity or localization.',
+                              'args={}. Single original CXR finding scores.'),
+    'chest_xray_report_generator': ('args={}. Single original CXR report; temporal claims unsupported.',
+                                    'args={}. Single original CXR report.'),
+}
+
+
+def agent_system(arm):
+    if arm == 'D-H':
+        return ANSWER.replace('No prior patient history is supplied.', 'Use only the independently supplied history.')
+    if arm == 'M-H':
+        return AGENT_SYSTEM.replace('No cross-case skills, sibling question context or additional patient history is available.',
+                                    'Use only the independently supplied history. No cross-case skills or sibling questions are available.')
+    return ANSWER if arm == 'D' else M_MINUS_R_SYSTEM if arm == 'M-R' else AGENT_SYSTEM
+
+
+def evidence_catalog(runtime, arm):
+    catalog = {k: runtime['tools'][k]['description'] for k in runtime['arms'][arm]['tools']}
+    if arm == 'M-R':
+        for name, (before, after) in M_MINUS_R_TOOL_DESCRIPTIONS.items():
+            if name in catalog:
+                if catalog[name] != before:
+                    raise ValueError('unexpected_manual_rule_catalog:' + name)
+                catalog[name] = after
+    return catalog
+
 
 def parse_final(raw):
     try:
@@ -75,7 +133,11 @@ def parse_final(raw):
 
 
 def content(row, data_root):
-    result = [{'type': 'text', 'text': 'Question ID: ' + row['question_id'] + '\nQuestion: ' + row['question']}]
+    question = 'Question ID: ' + row['question_id'] + '\nQuestion: ' + row['question']
+    if 'options' in row:
+        question += '\n' + '\n'.join(f'{key}. {value}' for key, value in row['options'].items())
+        question += '\nUse an original option letter or the complete original option text as answer.'
+    result = [{'type': 'text', 'text': question}]
     for i, relative in enumerate(row['images'], 1):
         path = (data_root / relative).resolve()
         if not path.is_relative_to(data_root.resolve()): raise ValueError('image_outside_data_root')
@@ -85,8 +147,17 @@ def content(row, data_root):
     return result
 
 
-def append_observations(messages, observations, out):
-    parts=[{'type':'text','text':'Bound tool observations (untrusted):\n'+json.dumps(observations,ensure_ascii=False)}]
+def append_observations(messages, observations, out, arm=None):
+    presented = observations
+    if arm == 'M-R':
+        presented = []
+        for item in observations:
+            value = item.get('observation')
+            if item['tool'] in M_MINUS_R_TOOL_DESCRIPTIONS and isinstance(value, dict):
+                value = {k: v for k, v in value.items() if k != 'limitations'}
+                item = dict(item, observation=value)
+            presented.append(item)
+    parts=[{'type':'text','text':'Bound tool observations (untrusted):\n'+json.dumps(presented,ensure_ascii=False)}]
     for observation in observations:
         for name in observation.get('derived_images',[]):
             path=Path(name).resolve()
@@ -119,19 +190,30 @@ class PaidCalls:
                 # has made no reservation and will wait before sending.
                 time.sleep(1)
 
-    def call(self, row, arm, ordinal, messages):
+    def call(self, row, arm, ordinal, messages, *, api_tools=None):
         folder = self.out / 'calls' / arm / row['question_id'] / str(ordinal)
-        if (folder / 'response.json').exists():
+        stored_response = (folder / 'response.json').exists()
+        dedup = self.protocol.get('request_archive') == 'image_base64_content_addressed_v1'
+        if stored_response and not dedup:
             raw = read(folder / 'response.json')
             if not self.profile.identity_ok(raw.get('model')): raise RuntimeError('returned_model_identity_mismatch')
-            return raw['choices'][0]['message']['content']
-        if (folder / 'started.json').exists(): raise RuntimeError('unknown_sent_no_reissue:' + row['question_id'])
+            message = raw['choices'][0]['message']
+            return message if api_tools is not None else message['content']
+        if not stored_response and (folder / 'started.json').exists(): raise RuntimeError('unknown_sent_no_reissue:' + row['question_id'])
         payload = {'model': self.protocol['model'], 'messages': messages, 'temperature': self.protocol['temperature'],
                    'top_p': self.protocol['top_p'], 'max_tokens': self.protocol['max_output_tokens'],
                    'extra_body': {'enable_thinking': False}, 'stream': False}
+        if api_tools is not None:
+            payload['tools'] = api_tools
+        archived = archive_request(payload, self.out/'request_image_base64') if dedup else payload
         # Request saved before reservation, and send intent saved before network access.
-        if not (folder / 'request.json').exists(): save(folder / 'request.json', payload)
-        elif read(folder / 'request.json') != payload: raise ValueError('frozen_request_changed')
+        if not (folder / 'request.json').exists(): save(folder / 'request.json', archived)
+        elif read(folder / 'request.json') != archived: raise ValueError('frozen_request_changed')
+        if stored_response:
+            raw = read(folder / 'response.json')
+            if not self.profile.identity_ok(raw.get('model')): raise RuntimeError('returned_model_identity_mismatch')
+            message = raw['choices'][0]['message']
+            return message if api_tools is not None else message['content']
         cfg = self.cfg; root = Path(cfg['root'])
         request_id = f"cxrvqa:{self.protocol['experiment_id']}:{self.out.name}:{arm}:{row['question_id']}:{ordinal}"
         with self.open_ledger() as ledger:
@@ -160,7 +242,8 @@ class PaidCalls:
                  'elapsed_s': time.monotonic() - tick, 'error': safe_error(error, self.key) if error else None,
                  'response_received': raw is not None, 'utc': now(), 'ledger_remaining_proxy_cny': str(ledger.remaining)})
             if error: raise error
-        return raw['choices'][0]['message']['content']
+        message = raw['choices'][0]['message']
+        return message if api_tools is not None else message['content']
 
 
 class Tools:
@@ -173,7 +256,10 @@ class Tools:
         if selection.exists(): return read(selection)
         name, args = call['tool'], call.get('args', {})
         spec = self.runtime['tools'][name]
-        image = (self.data_root / row['images'][0]).resolve()
+        index = call.get('image_index', 1)
+        if type(index) is not int or not 1 <= index <= len(row['images']):
+            raise ValueError('invalid_bound_image_index')
+        image = (self.data_root / row['images'][index-1]).resolve()
         if not image.is_relative_to(self.data_root.resolve()): raise ValueError('invalid_bound_image')
         identity = {'backend': spec['backend'], 'revision': spec.get('revision'), 'image': hashlib.sha256(image.read_bytes()).hexdigest(), 'args': args}
         key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
@@ -188,7 +274,10 @@ class Tools:
             tick = time.monotonic()
             try:
                 command = [spec['python'], str(Path(__file__).with_name('cxr_vqa_tool_worker.py'))]
+                if spec.get('cpu_affinity') is not None:
+                    command = ['taskset', '-c', str(spec['cpu_affinity']), *command]
                 env = dict(os.environ, CUDA_VISIBLE_DEVICES=spec.get('gpu', '1'), MPLBACKEND='Agg', TOKENIZERS_PARALLELISM='false')
+                env.update(spec.get('worker_env', {}))
                 completed = subprocess.run(command, input=json.dumps(request), capture_output=True, text=True, env=env, timeout=spec.get('timeout', 600))
                 (folder / 'backend.stderr.log').write_text(completed.stderr, encoding='utf-8')
                 if completed.returncode: raise RuntimeError('backend_exit_' + str(completed.returncode))
@@ -198,32 +287,46 @@ class Tools:
             result.update(elapsed_s=time.monotonic() - tick, backend=spec['backend'], identity=identity, utc=now())
             save(saved, result)
         observation = {**result, 'tool': name, 'cache_hit': cache_hit, 'cache_key': key}
+        if len(row['images']) > 1:
+            observation['image_index'] = index
         save(selection, observation)
         return observation
 
 
-def validate_actions(value, runtime, arm, remaining):
+def validate_actions(value, runtime, arm, remaining, images=1):
     calls = value.get('calls')
     if not isinstance(calls, list) or len(calls) > remaining: raise ValueError('tool_bound')
     for call in calls:
-        if set(call) != {'tool', 'args'} or call['tool'] not in runtime['arms'][arm]['tools'] or not isinstance(call['args'], dict):
+        keys = {'tool', 'args', 'image_index'} if images > 1 else {'tool', 'args'}
+        if set(call) != keys or call['tool'] not in runtime['arms'][arm]['tools'] or not isinstance(call['args'], dict):
             raise ValueError('unregistered_tool_or_arguments')
+        index = call.get('image_index', 1)
+        if type(index) is not int or not 1 <= index <= images:
+            raise ValueError('invalid_bound_image_index')
     return calls
 
 
 def resolve_action(call, observations):
     if call['tool']=='roi_crop' and call['args'].get('box_from')=='region_parse':
         if 'box' in call['args']:raise ValueError('ambiguous_crop_coordinates')
-        prior=next((x for x in reversed(observations) if x.get('tool')=='region_parse'),None)
+        prior=next((x for x in reversed(observations) if x.get('tool')=='region_parse'
+                    and x.get('image_index',1)==call.get('image_index',1)),None)
         box=((prior or {}).get('observation') or {}).get('combined_box_normalized')
         if box is None:raise ValueError('prior_region_box_unavailable')
-        return {'tool':'roi_crop','args':{'box':box}}
+        return dict(call,args={'box':box})
     return call
 
 
-def episode(row, arm, data_root, protocol, runtime, out, paid, tools):
-    messages = [{'role': 'system', 'content': ANSWER if arm=='D' else AGENT_SYSTEM}, {'role': 'user', 'content': content(row, data_root)}]
+def episode(row, arm, data_root, protocol, runtime, out, paid, tools, *, conditioning=None):
+    messages = [{'role': 'system', 'content': agent_system(arm)}, {'role': 'user', 'content': content(row, data_root)}]
+    if conditioning:
+        messages.append({'role': 'user', 'content': conditioning})
     observations = []; calls_used = 0; n = 0
+    images = len(row['images'])
+    action_prompt = ACTION
+    if images > 1:
+        action_prompt = ACTION.replace('"args":{}', '"args":{},"image_index":1').replace(
+            'Each call applies only to the bound original.', 'Select the numbered original for each call via image_index.')
     def ask(text):
         nonlocal n
         n += 1
@@ -231,14 +334,14 @@ def episode(row, arm, data_root, protocol, runtime, out, paid, tools):
         messages.append({'role': 'user', 'content': text})
         raw = paid.call(row, arm, n, messages)
         messages.append({'role': 'assistant', 'content': raw}); return raw
-    if arm == 'D': final = ask('Return the final answer JSON now.')
+    if arm in ('D', 'D-H'): final = ask('Return the final answer JSON now.')
     else:
-        catalog = {k: runtime['tools'][k]['description'] for k in runtime['arms'][arm]['tools']}
-        first = ask(ACTION + json.dumps(catalog))
+        catalog = evidence_catalog(runtime, arm)
+        first = ask(action_prompt + json.dumps(catalog))
         direct = parse_final(first)
         if direct['status'] == 'completed' and arm != 'X': return {**direct, 'main_calls': n, 'tool_calls': 0, 'observations': []}
         try:
-            actions = [] if direct['status'] == 'completed' else validate_actions(json.loads(first), runtime, arm, 2)
+            actions = [] if direct['status'] == 'completed' else validate_actions(json.loads(first), runtime, arm, 2, images)
         except (ValueError, TypeError, KeyError):
             return {'answer': None, 'reason': None, 'status': 'missing_invalid_tool_plan', 'main_calls': n, 'tool_calls': 0}
         for action in actions:
@@ -248,11 +351,14 @@ def episode(row, arm, data_root, protocol, runtime, out, paid, tools):
                 observations.append({'tool':action['tool'],'status':'invalid_arguments','observation':None,'error':str(exc),'backend_invoked':False});continue
             observations.append(tools.call(row, actual, arm, calls_used))
         if arm == 'X':
-            observations.append(tools.call(row, {'tool': 'view_check', 'args': {}}, arm, 'auto_view'))
-            view = observations[-1]
-            if (view.get('observation') or {}).get('measurement_applicable') is True:
-                observations.append(tools.call(row, {'tool': 'measurement', 'args': {}}, arm, 'auto_measurement'))
-        append_observations(messages,observations,out)
+            for index in range(1, images+1):
+                suffix = '' if images==1 else f'_{index}'
+                binding = {} if images==1 else {'image_index': index}
+                view = tools.call(row, dict(tool='view_check', args={}, **binding), arm, 'auto_view'+suffix)
+                observations.append(view)
+                if (view.get('observation') or {}).get('measurement_applicable') is True:
+                    observations.append(tools.call(row, dict(tool='measurement', args={}, **binding), arm, 'auto_measurement'+suffix))
+        append_observations(messages,observations,out,arm)
         if arm == 'C' and observations:
             validation = ask(EDV)
             try: collaborate = json.loads(validation).get('collaboration_needed') is True
@@ -260,29 +366,29 @@ def episode(row, arm, data_root, protocol, runtime, out, paid, tools):
             if collaborate:
                 ask('Act as the focused independent expert requested by EDV. Reinspect the original image, resolve the stated issue concisely; no tools. Return brief findings and uncertainty, not an extended reasoning trace.')
             final = ask('As the director, reconcile original-image evidence, EDV and any expert findings. Return final answer/reason JSON only.')
-        elif arm == 'M':
+        elif arm in ('M', 'M-R', 'M-S', 'M-E', 'M-H'):
             for turn in range(2, protocol['main_call_limits'][arm] + 1):
                 text = ('Return final answer/reason JSON only; no further tools.' if turn == 4 or calls_used >= 2 else
-                        ACTION + json.dumps(catalog) + f' Remaining selectable calls: {2-calls_used}.')
+                        action_prompt + json.dumps(catalog) + f' Remaining selectable calls: {2-calls_used}.')
                 final = ask(text)
                 if parse_final(final)['status'] == 'completed' or turn == 4: break
-                try: more = validate_actions(json.loads(final), runtime, arm, 2-calls_used)
+                try: more = validate_actions(json.loads(final), runtime, arm, 2-calls_used, images)
                 except (ValueError, TypeError, KeyError): break
                 for action in more:
                     calls_used += 1; observations.append(tools.call(row, action, arm, calls_used))
-                append_observations(messages,observations,out)
+                append_observations(messages,observations,out,arm)
         else: final = ask('Combine the original with available auxiliary and validity-gated measurement evidence. Return final answer/reason JSON only.')
     return {**parse_final(final), 'main_calls': n, 'tool_calls': calls_used, 'observations': observations}
 
 
-def main(argv=None):
+def main(argv=None, *, arms=('D', 'M', 'C', 'X'), episode_fn=episode, system_fn=agent_system, extra_input_fields=()):
     p = argparse.ArgumentParser(); p.add_argument('--config', type=Path, required=True); p.add_argument('--data', type=Path, required=True)
-    p.add_argument('--out', type=Path, required=True); p.add_argument('--arms', nargs='+', choices=list('DMCX'), required=True)
+    p.add_argument('--out', type=Path, required=True); p.add_argument('--arms', nargs='+', choices=arms, required=True)
     p.add_argument('--execute', action='store_true'); p.add_argument('--api-key-stdin', action='store_true'); a = p.parse_args(argv)
     cfg = read(a.config); protocol = read(cfg['protocol']); runtime = read(cfg['runtime']); out = a.out
     inputs = rows(a.data / 'inputs.jsonl')
     for row in inputs:
-        if set(row) - {'question_id', 'question', 'images', 'image_id', 'source'}: raise ValueError('unexpected_inference_fields')
+        if set(row) - {'question_id', 'question', 'images', 'image_id', 'source', 'options', *extra_input_fields}: raise ValueError('unexpected_inference_fields')
     if not a.execute:
         print(json.dumps({'status': 'offline_interface_ready', 'questions': len(inputs), 'arms': a.arms, 'paid_calls': 0})); return 0
     key = sys.stdin.readline().strip() if a.api_key_stdin else ''
@@ -296,7 +402,7 @@ def main(argv=None):
             if not runtime['arms'][arm]['ready']: raise RuntimeError('arm_not_deployed:' + arm)
             full={'arm':runtime['arms'][arm], 'tools':{k:runtime['tools'][k] for k in runtime['arms'][arm]['tools']},
                   'backend_config':runtime['backend_config'] if arm!='D' else {},
-                  'agent_system':AGENT_SYSTEM if arm!='D' else ANSWER}
+                  'agent_system':system_fn(arm)}
             full_path=out/('runtime_full_'+arm+'.json')
             if not full_path.exists():save(full_path,full)
             elif read(full_path)!=full:raise ValueError('frozen_tool_or_agent_configuration_changed')
@@ -307,7 +413,7 @@ def main(argv=None):
                 if dest.exists(): continue
                 write(out / 'progress.json', {'status': 'running', 'arm': arm, 'index': index, 'total': len(inputs), 'qid': row['question_id'], 'utc': now()})
                 tick = time.monotonic()
-                try: result = episode(row, arm, a.data, protocol, runtime, out, paid, tools)
+                try: result = episode_fn(row, arm, a.data, protocol, runtime, out, paid, tools)
                 except Exception as exc:
                     write(out / 'progress.json', {'status': 'stopped', 'arm': arm, 'qid': row['question_id'], 'error': safe_error(exc, key), 'utc': now()})
                     raise

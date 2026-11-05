@@ -142,8 +142,9 @@ def execute_extended(req):
         import torch
         from transformers import AutoProcessor,AutoModelForImageTextToText,FineGrainedFP8Config
         model_path=Path(cfg['knowledge_model']);processor=AutoProcessor.from_pretrained(model_path,local_files_only=True)
+        memory=cfg.get('knowledge_gpu_memory_gib',[22,22])
         model=AutoModelForImageTextToText.from_pretrained(model_path,local_files_only=True,dtype=torch.bfloat16,
-            device_map='auto',max_memory={0:'22GiB',1:'22GiB','cpu':'35GiB'},
+            device_map='auto',max_memory={0:f'{memory[0]}GiB',1:f'{memory[1]}GiB','cpu':'35GiB'},
             quantization_config=FineGrainedFP8Config(dequantize=True),offload_folder=str(folder/'offload'),attn_implementation='eager')
         query=args.get('query') or args.get('conditions')
         if not isinstance(query,str) or not query.strip() or len(query)>1800:raise ValueError('condition_knowledge_query_required')
