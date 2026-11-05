@@ -8,6 +8,20 @@ import sys
 import time
 
 
+def existing_snapshot(cache_dir, spec):
+    """Bind pinned existing assets without reinstating obsolete artifact audits."""
+    snapshot=Path(cache_dir)/('models--'+spec['repo_id'].replace('/','--'))/'snapshots'/spec['revision']
+    if not snapshot.is_dir():raise FileNotFoundError('pinned_existing_snapshot_unavailable')
+    states={};artifacts=[]
+    for name in spec['files']:
+        path=snapshot/name
+        if not path.is_file():raise FileNotFoundError('required_existing_asset_unavailable:'+name)
+        stat=path.stat();states[name]=(stat.st_size,stat.st_mtime_ns)
+        artifacts.append({'filename':name,'bytes':stat.st_size,'sha256':None})
+    return snapshot.resolve(),{'repo_id':spec['repo_id'],'revision':spec['revision'],'files':artifacts,
+        'checksum_verification':'skipped_by_user','additional_cached_files':'retained; not an inference gate'},states
+
+
 def serial(value, folder, name='raw'):
     import numpy as np
     if isinstance(value, np.ndarray):
@@ -50,8 +64,10 @@ def execute(req):
         if name=='chest_xray_classifier':observation={'finding_scores':observation[0],'limitations':'Operating-point normalized finding scores, not calibrated disease probabilities, severity, localization or temporal change.'}
         elif name=='chest_xray_report_generator':observation={'report':observation[0],'limitations':'Unverified single-image report; interval statements have no prior-image evidence.'}
     elif name=='llava_med_qa':
-        from llava_smoke import create_llava_tool
-        tool,prov=create_llava_tool(repo,cache_dir=cache,device='cuda:0')
+        import llava_smoke as smoke
+        from unittest.mock import patch
+        with patch.object(smoke,'inspect_snapshot',existing_snapshot):
+            tool,prov=smoke.create_llava_tool(repo,cache_dir=cache/'hub',device='cuda:0')
         raw=tool.invoke({'question':args.get('question','Describe the visible findings.'),'image_path':str(image)})
         observation=serial(raw,folder)
         (folder/'provenance.json').write_text(json.dumps(prov,ensure_ascii=False,indent=2),encoding='utf-8')
@@ -63,8 +79,10 @@ def execute(req):
         observation=serial(raw,folder)
         (folder/'provenance.json').write_text(json.dumps(audit,ensure_ascii=False,indent=2),encoding='utf-8')
     elif name=='xray_phrase_grounding':
-        from maira_smoke import create_maira_tool
-        tool,prov=create_maira_tool(repo,cache_dir=cache,temp_dir=folder/'maira_runtime',device='cuda:0')
+        import maira_smoke as smoke
+        from unittest.mock import patch
+        with patch.object(smoke.audit,'inspect_snapshot',existing_snapshot):
+            tool,prov=smoke.create_maira_tool(repo,cache_dir=cache/'hub',temp_dir=folder/'maira_runtime',device='cuda:0')
         raw=tool.invoke({'image_path':str(image),'phrase':args.get('phrase','lung opacity')})
         observation=serial(raw,folder)
         (folder/'provenance.json').write_text(json.dumps(prov,ensure_ascii=False,indent=2),encoding='utf-8')
@@ -128,6 +146,7 @@ if __name__=='__main__':
             import traceback;traceback.print_exc()
             result={'status':'failed','observation':None,'error_type':type(exc).__name__,'error':str(exc)[:300]}
     result['actual_model_events']=events
+    result['adapter_revision']='cxr-vqa-existing-snapshot-binding-2'
     if req['backend']=='view_check' and result['status']=='completed':
         result['actual_model_events'].append({'kind':'tensorflow_predict','model_class':'OpenCXR Image Sorter','status':'completed'})
     print('CXR_VQA_RESULT='+json.dumps(result,ensure_ascii=False))

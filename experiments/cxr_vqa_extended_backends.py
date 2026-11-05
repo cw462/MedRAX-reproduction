@@ -99,10 +99,16 @@ def execute_extended(req):
         import opencxr
         from opencxr.utils.file_io import read_file
         sorter=opencxr.load(opencxr.algorithms.image_sorter)
-        pixels,spacing,_=read_file(str(image));raw=plain(sorter.run(pixels))
+        readable=image
+        if image.suffix.lower() in ['.jpg','.jpeg']:
+            from PIL import Image
+            readable=folder/'decoded_original.png'
+            Image.open(image).save(readable)  # Lossless container for the same decoded pixels.
+        pixels,spacing,_=read_file(str(readable));raw=plain(sorter.run(pixels))
         obs={'view_result':raw,'measurement_applicable':raw['Type']=='PA' and raw['Rotation']=='0',
              'gate_rule':'OpenCXR argmax view PA and rotation 0; geometry still requires nonempty, plausible anatomical masks.',
-             'backend':'OpenCXR Image Sorter; CPU execution'}
+             'backend':'OpenCXR Image Sorter; CPU execution',
+             'input_binding':'Original pixels; JPEG decoded once into lossless PNG for the official PNG reader; original retained.'}
     elif name in ['region_parse','measurement']:
         import numpy as np
         from PIL import Image,ImageDraw

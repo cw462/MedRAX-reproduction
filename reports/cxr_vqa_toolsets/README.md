@@ -127,3 +127,15 @@ CTR uses the bilateral lung span at the widest-heart row; lung asymmetry is
 log(right area / left area), and shift uses the tracheal centroid relative to
 the bilateral-lung horizontal midpoint. The latter is a declared adaptation,
 not a claim of reproducing unreleased geometric implementation details.
+
+During VQA-RAD M execution, LLaVA-Med attempts exposed an adapter cache-root
+error, followed by an inherited guard rejecting additional existing cached
+files. Those observations and predictions remain immutable and are not retried.
+The local binding was repaired to the existing pinned `hf_full/hub` snapshots;
+the obsolete additional-file/hash audit was not restored. Required local files
+must still exist, and the original model/vision loaders and generation remain
+unchanged. The repaired worker marks its adapter revision in each tool result.
+OpenCXR's official reader does not accept JPEG: the adapter decodes JPEG into
+lossless PNG without changing pixel geometry before the official PNG reader.
+Compatibility checks use one official SLAKE training image outside the target
+test split, without reference-answer feedback or paid main-model calls.
