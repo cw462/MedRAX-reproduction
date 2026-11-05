@@ -1,5 +1,8 @@
 # CXR VQA toolsets — frozen first-round protocol
 
+[Completed SLAKE and VQA-RAD comparison with per-question evidence](results/README.md).
+The remaining sections record the frozen protocol and deployment history.
+
 Main model: `qwen3.7-plus` (actual returned identifier retained). Temperature 0.2,
 top_p 0.95, enable_thinking=false, 2048 output tokens per call. D uses one call;
 adapted M/C use at most four and two selectable tool invocations. Adapted X uses
