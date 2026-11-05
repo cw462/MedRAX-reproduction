@@ -20,7 +20,7 @@ def prepare(source,out,review=None,split=None):
         if item.get('actual_modality')!='CXR' or item.get('review_status')!='confirmed':continue
         record={'question_id':'vqarad_'+str(row['qid']),'question':row['question'],'images':['images/'+image],
                 'image_id':image,'source':{'dataset':'VQA-RAD','osf_node':'89kps','original_qid':row['qid'],
-                 'evaluation_annotation':row['evaluation'],'phrase_type':row['phrase_type'],
+                 'phrase_type':row['phrase_type'],
                  'split':'official test_freeform/test_para (OSF Readme section 3)'}}
         if row['answer_type']=='CLOSED':
             selected.append(record);refs.append({'question_id':record['question_id'],'answer':str(row['answer']),'answer_type':'CLOSED','image_id':image})
