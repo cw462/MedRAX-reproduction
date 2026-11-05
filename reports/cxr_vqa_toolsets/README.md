@@ -135,6 +135,9 @@ The local binding was repaired to the existing pinned `hf_full/hub` snapshots;
 the obsolete additional-file/hash audit was not restored. Required local files
 must still exist, and the original model/vision loaders and generation remain
 unchanged. The repaired worker marks its adapter revision in each tool result.
+The cached MAIRA snapshot lacks its README; a model card is not a model-loader
+input and is no longer required to run the tool. Its earlier failure remains
+recorded.
 OpenCXR's official reader does not accept JPEG: the adapter decodes JPEG into
 lossless PNG without changing pixel geometry before the official PNG reader.
 Compatibility checks use one official SLAKE training image outside the target

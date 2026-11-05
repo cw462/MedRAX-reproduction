@@ -15,6 +15,7 @@ def existing_snapshot(cache_dir, spec):
     states={};artifacts=[]
     for name in spec['files']:
         path=snapshot/name
+        if name=='README.md' and not path.is_file():continue  # Model card is not a loader input.
         if not path.is_file():raise FileNotFoundError('required_existing_asset_unavailable:'+name)
         stat=path.stat();states[name]=(stat.st_size,stat.st_mtime_ns)
         artifacts.append({'filename':name,'bytes':stat.st_size,'sha256':None})
@@ -146,7 +147,7 @@ if __name__=='__main__':
             import traceback;traceback.print_exc()
             result={'status':'failed','observation':None,'error_type':type(exc).__name__,'error':str(exc)[:300]}
     result['actual_model_events']=events
-    result['adapter_revision']='cxr-vqa-existing-snapshot-binding-2'
+    result['adapter_revision']='cxr-vqa-existing-snapshot-binding-3'
     if req['backend']=='view_check' and result['status']=='completed':
         result['actual_model_events'].append({'kind':'tensorflow_predict','model_class':'OpenCXR Image Sorter','status':'completed'})
     print('CXR_VQA_RESULT='+json.dumps(result,ensure_ascii=False))
