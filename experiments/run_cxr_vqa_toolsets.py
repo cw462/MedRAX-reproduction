@@ -38,6 +38,14 @@ ANSWER = ('Answer the current question using the original image. Return exactly 
           'Respect image labels. Tool observations may be incorrect; verify against original pixels. '
           'Classifier scores are not disease probabilities or severity measurements. '
           'Single-image reports cannot establish interval change. No prior patient history is supplied.')
+AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate planning, evidence validation '
+                'and expert stages must use the stage-specific schema requested in the current instruction. '
+                'You may select zero, one or two registered tools, with early stopping when appropriate. '
+                'Only at the FINAL ANSWERING stage, output exactly {"answer":"short direct answer",'
+                '"reason":"one short sentence"}. Original image labels and coordinates must be preserved. '
+                'Tool claims are unverified: inspect original pixels, do not treat classifier scores as '
+                'severity, and do not infer temporal change from a single-image report. '
+                'No cross-case skills, sibling question context or additional patient history is available.')
 ACTION = ('You may answer directly with the final answer/reason JSON, or request useful auxiliary evidence '
           'with {"calls":[{"tool":"registered name","args":{}}],"reason":"brief purpose"}. '
           'Each call applies only to the bound original. At most two selectable tool calls total. '
@@ -185,7 +193,7 @@ def validate_actions(value, runtime, arm, remaining):
 
 
 def episode(row, arm, data_root, protocol, runtime, out, paid, tools):
-    messages = [{'role': 'system', 'content': ANSWER}, {'role': 'user', 'content': content(row, data_root)}]
+    messages = [{'role': 'system', 'content': ANSWER if arm=='D' else AGENT_SYSTEM}, {'role': 'user', 'content': content(row, data_root)}]
     observations = []; calls_used = 0; n = 0
     def ask(text):
         nonlocal n

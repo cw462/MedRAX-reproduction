@@ -26,11 +26,14 @@ labels, segmentation references and knowledge annotations are withheld.
 Attribution: [official project](https://www.med-vqa.com/slake/),
 [official author release, CC-BY-4.0](https://huggingface.co/datasets/BoKelvin/SLAKE).
 
-VQA-RAD's original OSF questions and image index have been obtained. Its
-`evaluation` annotation is not treated as a test split. Actual modality review
-and a verifiable evaluation partition remain necessary; no all-data official-test
-claim or paid inference is made while these are unresolved. CheXbench remains
-gated and does not delay SLAKE.
+VQA-RAD's official OSF Readme section 3 defines test_freeform/test_paraphrase;
+the JSON uses test_freeform/test_para. Restricting these official test questions
+to CLOSED and visually confirmed radiographs yields **116 questions / 58 images**.
+All 107 CHEST originals were checked as actual radiographs before filtering.
+`evaluation` is annotation-review status, never the split. Open test questions
+are kept separately. The official OSF node declares CC0 1.0 Universal.
+[VQA-RAD manifest](../../data/vqarad_cxr/manifest.json).
+CheXbench remains gated and does not delay SLAKE.
 
 ## Workflows and deployment
 
@@ -95,4 +98,9 @@ request-count ceilings remain canceled. Token rates 4/12 CNY per million are onl
 a bookkeeping proxy; Credits and actual charges remain unknown. No credits bought
 and no second-round skill experiment automatically authorized.
 
-Status: preparation and deployment in progress; no accuracy is available yet.
+Status: initial D and M generation completed. No accuracy was read. M's initial
+system prompt was found to conflict with intermediate planning; its 114 original
+records are retained as an initial-controller run, and are not represented as a
+validated repaired M comparison. See [controller repair](controller_amendment.md).
+C/X deployment continues. Repaired M requires an explicit exception to the
+first-request/no-repeat rule; D does not require any new paid calls.

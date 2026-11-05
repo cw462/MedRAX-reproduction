@@ -9,8 +9,8 @@ from score_cxr_vqa_toolsets import normalize,score
 
 
 class FakePaid:
-    def __init__(self,answers):self.answers=iter(answers);self.n=0
-    def call(self,*args):self.n+=1;return json.dumps(next(self.answers))
+    def __init__(self,answers):self.answers=iter(answers);self.n=0;self.system=None
+    def call(self,*args):self.n+=1;self.system=args[-1][0]['content'];return json.dumps(next(self.answers))
 
 
 class FakeTools:
@@ -42,6 +42,8 @@ class ContractTests(unittest.TestCase):
                        {'findings':'uncertain'}, {'answer':'no','reason':'visible'}]);tools=FakeTools()
         r=episode(self.row,'C',self.root,self.protocol,self.runtime,self.root,paid,tools)
         self.assertEqual((paid.n,len(tools.names),r['answer']),(4,1,'no'))
+        self.assertIn('Intermediate planning',paid.system)
+        self.assertIn('Only at the FINAL ANSWERING stage',paid.system)
     def test_x_failed_gate_never_zero_fills_or_measures(self):
         paid=FakePaid([{'calls':[]}, {'answer':'no','reason':'pixels'}]);tools=FakeTools()
         episode(self.row,'X',self.root,self.protocol,self.runtime,self.root,paid,tools)
