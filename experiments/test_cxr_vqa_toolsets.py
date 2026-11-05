@@ -6,6 +6,7 @@ import unittest
 from PIL import Image
 from run_cxr_vqa_toolsets import episode,parse_final,Tools
 from score_cxr_vqa_toolsets import normalize,score
+from cxr_vqa_extended_backends import geometry
 
 
 class FakePaid:
@@ -56,6 +57,16 @@ class ContractTests(unittest.TestCase):
         (self.root/'inputs.jsonl').write_text(json.dumps(self.row)+'\n')
         (self.root/'references.jsonl').write_text(json.dumps({'question_id':'q1','answer':'yes'})+'\n')
         with self.assertRaisesRegex(ValueError,'generation_not_complete'):score(self.root,self.root,self.root/'analysis')
+    def test_geometry_known_rectangle_ratio(self):
+        import numpy as np
+        masks=np.zeros((4,100,100),dtype=bool)
+        masks[0,20:80,10:40]=True;masks[1,20:80,60:90]=True
+        masks[2,40:65,35:65]=True;masks[3,10:70,48:52]=True
+        info={'original_size':[100,100],'labels':{'0':'lung left','1':'lung right','2':'heart','3':'trachea'}}
+        result=geometry(masks,info)
+        self.assertTrue(result['measurement_available']);self.assertEqual(result['values']['CTR'],30/80)
+        masks[3]=False;result=geometry(masks,info)
+        self.assertFalse(result['measurement_available']);self.assertIsNone(result['values'])
 
 
 if __name__=='__main__':unittest.main()

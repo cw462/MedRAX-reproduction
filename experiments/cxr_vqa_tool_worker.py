@@ -73,14 +73,61 @@ def execute(req):
         raw,observation,derived=execute_extended(req)
     else:raise ValueError('unknown_backend')
     (folder/'raw.json').write_text(json.dumps(serial(raw,folder),ensure_ascii=False,indent=2),encoding='utf-8')
+    def add_visuals(value):
+        if isinstance(value,dict):
+            for v in value.values():add_visuals(v)
+        elif isinstance(value,(list,tuple)):
+            for v in value:add_visuals(v)
+        elif isinstance(value,(str,Path)):
+            p=Path(str(value))
+            if p.suffix.lower() in ['.png','.jpg','.jpeg'] and p.is_file() and p.resolve().is_relative_to(folder.resolve()):
+                if str(p) not in derived:derived.append(str(p))
+    add_visuals(raw)
+    torch=sys.modules.get('torch')
+    peak=([int(torch.cuda.max_memory_allocated(i)) for i in range(torch.cuda.device_count())]
+          if torch is not None and torch.cuda.is_available() else [])
     return {'status':'completed','observation':observation,'derived_images':derived,'backend_compute_seconds':time.monotonic()-start,
+            'cuda_peak_allocated_bytes_by_visible_device':peak,
             'original_image':str(image),'raw_result_file':str(folder/'raw.json'),'clinical_correctness_verified':False}
 
 
+@contextlib.contextmanager
+def inference_events(req, events):
+    """Observe actual generation/XRV/CXAS forwards without changing model outputs."""
+    if req['backend'] in ['roi_crop','view_check']:
+        yield;return
+    import torch
+    from transformers.generation.utils import GenerationMixin
+    from unittest.mock import patch
+    folder=Path(req['artifact_dir']);folder.mkdir(parents=True,exist_ok=True)
+    def tracked(original,model,*a,kind,**kw):
+        event={'kind':kind,'model_class':type(model).__name__,'module':type(model).__module__,'status':'started_unknown','utc':time.time()}
+        events.append(event);path=folder/'backend_events.json'
+        path.write_text(json.dumps(events,indent=2))
+        tick=time.monotonic()
+        try:value=original(model,*a,**kw)
+        except Exception:
+            event.update(status='failed',elapsed_s=time.monotonic()-tick);path.write_text(json.dumps(events,indent=2));raise
+        event.update(status='completed',elapsed_s=time.monotonic()-tick);path.write_text(json.dumps(events,indent=2));return value
+    generation=GenerationMixin.generate;forward=torch.nn.Module._call_impl
+    def generate(model,*a,**kw):return tracked(generation,model,*a,kind='generate',**kw)
+    def call(model,*a,**kw):
+        kind=type(model).__name__;module=type(model).__module__
+        if (kind in ['DenseNet','PSPNet'] and module.startswith('torchxrayvision')) or kind=='BackboneUNet':
+            return tracked(forward,model,*a,kind='anatomy_or_classifier_forward',**kw)
+        return forward(model,*a,**kw)
+    with patch.object(GenerationMixin,'generate',generate),patch.object(torch.nn.Module,'_call_impl',call):yield
+
+
 if __name__=='__main__':
-    req=json.load(sys.stdin)
+    req=json.load(sys.stdin);events=[]
     with contextlib.redirect_stdout(sys.stderr):
-        try:result=execute(req)
+        try:
+            with inference_events(req,events):result=execute(req)
         except Exception as exc:
-            import traceback;traceback.print_exc();raise
+            import traceback;traceback.print_exc()
+            result={'status':'failed','observation':None,'error_type':type(exc).__name__,'error':str(exc)[:300]}
+    result['actual_model_events']=events
+    if req['backend']=='view_check' and result['status']=='completed':
+        result['actual_model_events'].append({'kind':'tensorflow_predict','model_class':'OpenCXR Image Sorter','status':'completed'})
     print('CXR_VQA_RESULT='+json.dumps(result,ensure_ascii=False))

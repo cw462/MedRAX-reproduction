@@ -15,6 +15,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import uuid
 
 from run_sampled_vlm import profile_for, invoke, exclusive_lock, safe_error
 from run_direct_vlm import write
@@ -28,8 +29,13 @@ def rows(p): return [json.loads(s) for s in Path(p).read_text(encoding='utf-8').
 
 def save(p, obj):
     p = Path(p); p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open('x', encoding='utf-8') as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2); f.write('\n'); f.flush(); os.fsync(f.fileno())
+    temp=p.with_name('.'+p.name+'.'+uuid.uuid4().hex+'.tmp')
+    try:
+        with temp.open('x', encoding='utf-8') as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2); f.write('\n'); f.flush(); os.fsync(f.fileno())
+        os.link(temp,p)  # Atomic publication, refuses an existing destination.
+    finally:
+        if temp.exists():temp.unlink()
 
 
 ANSWER = ('Answer the current question using the original image. Return exactly one JSON object '
@@ -192,6 +198,16 @@ def validate_actions(value, runtime, arm, remaining):
     return calls
 
 
+def resolve_action(call, observations):
+    if call['tool']=='roi_crop' and call['args'].get('box_from')=='region_parse':
+        if 'box' in call['args']:raise ValueError('ambiguous_crop_coordinates')
+        prior=next((x for x in reversed(observations) if x.get('tool')=='region_parse'),None)
+        box=((prior or {}).get('observation') or {}).get('combined_box_normalized')
+        if box is None:raise ValueError('prior_region_box_unavailable')
+        return {'tool':'roi_crop','args':{'box':box}}
+    return call
+
+
 def episode(row, arm, data_root, protocol, runtime, out, paid, tools):
     messages = [{'role': 'system', 'content': ANSWER if arm=='D' else AGENT_SYSTEM}, {'role': 'user', 'content': content(row, data_root)}]
     observations = []; calls_used = 0; n = 0
@@ -213,7 +229,11 @@ def episode(row, arm, data_root, protocol, runtime, out, paid, tools):
         except (ValueError, TypeError, KeyError):
             return {'answer': None, 'reason': None, 'status': 'missing_invalid_tool_plan', 'main_calls': n, 'tool_calls': 0}
         for action in actions:
-            calls_used += 1; observations.append(tools.call(row, action, arm, calls_used))
+            calls_used += 1
+            try: actual=resolve_action(action,observations)
+            except ValueError as exc:
+                observations.append({'tool':action['tool'],'status':'invalid_arguments','observation':None,'error':str(exc),'backend_invoked':False});continue
+            observations.append(tools.call(row, actual, arm, calls_used))
         if arm == 'X':
             observations.append(tools.call(row, {'tool': 'view_check', 'args': {}}, arm, 'auto_view'))
             view = observations[-1]
@@ -261,6 +281,12 @@ def main(argv=None):
         paid = PaidCalls(cfg, protocol, out, key); tools = Tools(runtime, a.data, out)
         for arm in a.arms:
             if not runtime['arms'][arm]['ready']: raise RuntimeError('arm_not_deployed:' + arm)
+            full={'arm':runtime['arms'][arm], 'tools':{k:runtime['tools'][k] for k in runtime['arms'][arm]['tools']},
+                  'backend_config':runtime['backend_config'] if arm!='D' else {},
+                  'agent_system':AGENT_SYSTEM if arm!='D' else ANSWER}
+            full_path=out/('runtime_full_'+arm+'.json')
+            if not full_path.exists():save(full_path,full)
+            elif read(full_path)!=full:raise ValueError('frozen_tool_or_agent_configuration_changed')
             if not (out / ('runtime_' + arm + '.json')).exists(): save(out / ('runtime_' + arm + '.json'), runtime['arms'][arm])
             elif read(out / ('runtime_' + arm + '.json')) != runtime['arms'][arm]: raise ValueError('arm_runtime_changed')
             for index, row in enumerate(inputs, 1):

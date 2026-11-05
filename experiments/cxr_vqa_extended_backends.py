@@ -109,7 +109,7 @@ def execute_extended(req):
         masks,info,fresh=cxas_masks(req)
         if name=='measurement':obs=geometry(masks,info)
         else:
-            regions=args.get('regions') or [args.get('region','lung left')]
+            regions=args.get('regions') or [args.get('region','left lung')]
             if not isinstance(regions,list) or not 1<=len(regions)<=4 or any(not isinstance(x,str) for x in regions):raise ValueError('one_to_four_anatomical_regions_required')
             boxes={};selected=[]
             for region in regions:
@@ -124,7 +124,9 @@ def execute_extended(req):
                  'original_size':[w,h],'coordinate_mapping':info['coordinates'],
                  'mask_file':str(Path(cfg['cxas_cache'])/info['image_sha256']/'masks.npz'),
                  'scope':'CXAS anatomy only. No BiomedParse pathology localization is claimed.'}
-            overlay=Image.open(image).convert('RGB');drawing=ImageDraw.Draw(overlay)
+            overlay=Image.open(image).convert('RGBA')
+            rgba=np.zeros((h,w,4),dtype=np.uint8);rgba[combined]=[255,0,0,70]
+            overlay=Image.alpha_composite(overlay,Image.fromarray(rgba));drawing=ImageDraw.Draw(overlay)
             for region,b in boxes.items():
                 if b:drawing.rectangle(b,outline='red',width=2);drawing.text((b[0],b[1]),region,fill='red')
             overlay.save(folder/'anatomy_boxes.png');derived=[str(folder/'anatomy_boxes.png')]
@@ -180,6 +182,46 @@ def execute_extended(req):
         raw=obs={'answer':processor.decode(generated[0,length:],skip_special_tokens=True),'model':'google/medgemma-4b-it',
             'revision':'290cda5eeccbee130f987c4ad74a59ae6f196408','backend_input_tokens':length,'backend_output_tokens':int(generated.shape[-1]-length)}
     elif name=='llava_rad':
-        raise RuntimeError('LLaVA-Rad_requires_pinned_Vicuna_base_and_BiomedCLIP_backend_not_yet_deployed')
+        import torch
+        from PIL import Image
+        from unittest.mock import patch
+        from transformers import AutoConfig,AutoTokenizer
+        source=Path(cfg['llavarad_source']);model_path=Path(cfg['llavarad_model']);base_path=Path(cfg['vicuna_model']);bert_path=Path(cfg['biomedbert_config'])
+        sys.path.insert(0,str(source));os.environ['HF_HUB_OFFLINE']='1'
+        from llava.model.builder import load_pretrained_model
+        from llava.constants import IMAGE_TOKEN_INDEX,DEFAULT_IMAGE_TOKEN,DEFAULT_IM_START_TOKEN,DEFAULT_IM_END_TOKEN
+        from llava.conversation import conv_templates
+        from llava.mm_utils import tokenizer_image_token
+        import llava.model.multimodal_encoder.open_clip_encoder.utils as clip_utils
+        original_config=AutoConfig.from_pretrained;original_tokenizer=AutoTokenizer.from_pretrained
+        original_clip=clip_utils.create_model_from_pretrained
+        def local_config(path,*a,**kw):
+            if str(path).startswith('microsoft/BiomedNLP-'):path=bert_path
+            kw['local_files_only']=True;value=original_config(path,*a,**kw)
+            if Path(str(path)).resolve()==model_path.resolve():
+                value.mm_vision_tower_config=str(model_path/'biomedclipcxr_518.json')
+                value.mm_vision_tower_checkpoint=str(model_path/'biomedclipcxr_518_checkpoint.pt')
+            return value
+        def local_tokenizer(path,*a,**kw):
+            if str(path).startswith('microsoft/BiomedNLP-'):path=bert_path
+            kw['local_files_only']=True;return original_tokenizer(path,*a,**kw)
+        def local_clip(*a,**kw):
+            # The full official CLIP checkpoint is loaded below. Initializing its
+            # text tower from config avoids an unnecessary external BERT load.
+            kw['pretrained_hf']=False;return original_clip(*a,**kw)
+        with patch.object(AutoConfig,'from_pretrained',side_effect=local_config),patch.object(AutoTokenizer,'from_pretrained',side_effect=local_tokenizer),patch.object(clip_utils,'create_model_from_pretrained',side_effect=local_clip):
+            tokenizer,model,processor,context=load_pretrained_model(str(model_path),str(base_path),'llavarad',device_map='auto',device='cuda:0')
+        question=args.get('question','Describe the visible findings.')
+        image_token=DEFAULT_IM_START_TOKEN+DEFAULT_IMAGE_TOKEN+DEFAULT_IM_END_TOKEN if getattr(model.config,'mm_use_im_start_end',False) else DEFAULT_IMAGE_TOKEN
+        conversation=conv_templates['v1'].copy();conversation.append_message(conversation.roles[0],image_token+'\n'+question);conversation.append_message(conversation.roles[1],None)
+        ids=tokenizer_image_token(conversation.get_prompt(),tokenizer,IMAGE_TOKEN_INDEX,return_tensors='pt').unsqueeze(0).cuda()
+        pixels=processor.preprocess(Image.open(image).convert('RGB'),return_tensors='pt')['pixel_values'][0].unsqueeze(0).half().cuda()
+        with torch.inference_mode():generated=model.generate(ids,images=pixels,do_sample=False,max_new_tokens=512,use_cache=True)
+        raw=obs={'answer':tokenizer.batch_decode(generated[:,ids.shape[-1]:],skip_special_tokens=True)[0],
+            'model':'microsoft/llava-rad','revision':'dcdbc6caf6806c9acb66e12a827a39c86e00f6a7',
+            'base_model':'lmsys/vicuna-7b-v1.5','base_revision':'3321f76e3f527bd14065daf69dad9344000a201d',
+            'official_source_commit':'1fc44096cc5766c28d8a3329240c8423100ce3df',
+            'backend_input_tokens':int(ids.shape[-1]),'backend_output_tokens':int(generated.shape[-1]-ids.shape[-1]),
+            'adaptation':'Original LoRA/base/BiomedCLIP loading and generation, local path binding; text tower config initialization before the complete official CLIP checkpoint load.'}
     else:raise ValueError('unsupported_extended_backend')
     return plain(raw),plain(obs),derived

@@ -102,5 +102,28 @@ Status: initial D and M generation completed. No accuracy was read. M's initial
 system prompt was found to conflict with intermediate planning; its 114 original
 records are retained as an initial-controller run, and are not represented as a
 validated repaired M comparison. See [controller repair](controller_amendment.md).
-C/X deployment continues. Repaired M requires an explicit exception to the
-first-request/no-repeat rule; D does not require any new paid calls.
+C/X deployment continues. Repaired SLAKE M requires an explicit exception to the
+first-request/no-repeat rule; D does not require any new paid calls. VQA-RAD D
+has separately completed all 116 questions. Its first M execution uses the
+repaired controller and does not repeat any VQA-RAD M prediction. No dataset
+accuracy has been inspected.
+
+Deployment progress: MedGemma's official Hugging Face page explicitly grants
+the user's account access after their license/data-sharing consent; account
+approval does not imply that its weights have reached the server. Anonymous
+downloads cannot use that grant. Public MedVLM-R1, Vicuna/LLaVA-Rad and Qwen
+knowledge weights are still being transferred. OpenCXR's official weights and
+CXAS's default anatomical checkpoint are being installed with isolated
+dependencies; imports and asset presence are not reported as successful image
+inference. C is not yet reported as a complete six-tool deployment.
+
+The extended worker now records actual generation/forward events, peak GPU
+allocation and backend errors, alongside tool selections and cache hits. X
+anatomical overlays preserve original pixel coordinates; crops may reference a
+preceding parser box without another planning call. CXAS supports anatomical
+regions only in this deployment; BiomedParse pathology localization is absent.
+Geometry is withheld when the PA/rotation gate or mask quality checks fail.
+CTR uses the bilateral lung span at the widest-heart row; lung asymmetry is
+log(right area / left area), and shift uses the tracheal centroid relative to
+the bilateral-lung horizontal midpoint. The latter is a declared adaptation,
+not a claim of reproducing unreleased geometric implementation details.

@@ -42,6 +42,7 @@ def score(data, out, dest):
                   'net_vs_D': sum(delta), 'delta_pp': sum(delta)/len(y)*100, 'delta_cluster_ci_pp': paired_ci(delta,clusters)}
         calls = [json.loads(p.read_text(encoding='utf-8')) for p in (out/'calls'/arm).glob('*/*/result.json')]
         selections = [json.loads(p.read_text(encoding='utf-8')) for p in (out/'tool_selections'/arm).glob('*/*.json')]
+        events=[event for s in selections if not s.get('cache_hit',False) for event in s.get('actual_model_events',[])]
         counts['resources'] = {'main_calls': len(list((out/'calls'/arm).glob('*/*/started.json'))),
             'input_tokens': sum((c.get('usage') or {}).get('prompt_tokens',0) for c in calls),
             'output_tokens': sum((c.get('usage') or {}).get('completion_tokens',0) for c in calls),
@@ -49,6 +50,9 @@ def score(data, out, dest):
             'automatic_backend_selections': len(list((out/'tool_selections'/arm).glob('*/auto_*.json'))),
             'cache_hits': sum(s.get('cache_hit',False) for s in selections),
             'fresh_backend_attempts': sum(not s.get('cache_hit',False) and s.get('status')!='started_unknown' for s in selections),
+            'actual_completed_generation_calls':sum(e.get('kind')=='generate' and e.get('status')=='completed' for e in events),
+            'actual_completed_anatomy_or_classifier_forwards':sum(e.get('kind')=='anatomy_or_classifier_forward' and e.get('status')=='completed' for e in events),
+            'actual_completed_opencxr_predictions':sum(e.get('kind')=='tensorflow_predict' and e.get('status')=='completed' for e in events),
             'episode_elapsed_seconds': sum(p.get('elapsed_s',0) for p in predictions[arm]),
             'proxy_cny_from_usage': (sum((c.get('usage') or {}).get('prompt_tokens',0) for c in calls)*4 + sum((c.get('usage') or {}).get('completion_tokens',0) for c in calls)*12)/1e6,
             'cost_note': 'Token-based 4/12 CNY proxy, not actual Credits or provider invoice. Shared cache ownership follows first execution.'}
