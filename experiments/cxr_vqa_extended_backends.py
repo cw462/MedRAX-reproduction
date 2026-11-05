@@ -147,8 +147,12 @@ def execute_extended(req):
             quantization_config=FineGrainedFP8Config(dequantize=True),offload_folder=str(folder/'offload'),attn_implementation='eager')
         query=args.get('query') or args.get('conditions')
         if not isinstance(query,str) or not query.strip() or len(query)>1800:raise ValueError('condition_knowledge_query_required')
-        messages=[{'role':'system','content':'Provide concise general chest-radiograph knowledge only: characteristic findings, distribution and discriminating features. No patient-specific diagnosis. No invented citations.'},
-                  {'role':'user','content':query}]
+        instruction = ('Provide concise general chest-radiograph knowledge only: characteristic findings, distribution '
+                       'and discriminating features. No patient-specific diagnosis. No invented citations.')
+        messages = [
+            {'role': 'system', 'content': [{'type': 'text', 'text': instruction}]},
+            {'role': 'user', 'content': [{'type': 'text', 'text': query}]},
+        ]
         inputs=processor.apply_chat_template(messages,tokenize=True,add_generation_prompt=True,return_dict=True,return_tensors='pt',enable_thinking=False).to(model.device)
         length=inputs['input_ids'].shape[-1]
         with torch.inference_mode():generated=model.generate(**inputs,max_new_tokens=512,do_sample=False)
