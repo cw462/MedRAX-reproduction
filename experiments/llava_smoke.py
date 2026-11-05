@@ -193,7 +193,10 @@ def local_loader(original, *, role, kind, snapshot, loads):
             str(source) == repo_id or Path(source).resolve() == snapshot
         ):
             raise ValueError("Unexpected pretrained source")
-        if kwargs.get("revision") not in (None, revision):
+        # Transformers forwards its default revision to nested config loaders
+        # even when the outer loader has already selected a local snapshot.
+        is_local_default = kwargs.get("revision") == "main" and Path(source).resolve() == snapshot
+        if kwargs.get("revision") not in (None, revision) and not is_local_default:
             raise ValueError("Unexpected pretrained revision")
         if kwargs.get("trust_remote_code") not in (None, False):
             raise ValueError("Unreviewed remote model code is disallowed")
