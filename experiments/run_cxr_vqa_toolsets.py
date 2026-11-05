@@ -19,6 +19,7 @@ import uuid
 
 from run_sampled_vlm import profile_for, invoke, exclusive_lock, safe_error
 from run_direct_vlm import write
+from provider_ledger import LedgerLocked
 from v12_ledger import V12ProviderLedger
 
 
@@ -105,6 +106,20 @@ class PaidCalls:
         self.client = OpenAI(api_key=key, base_url=self.profile.base_url, max_retries=0,
                              timeout=cfg.get('request_timeout_seconds', 120))
 
+    def open_ledger(self):
+        cfg = self.cfg
+        root = Path(cfg['root'])
+        deadline = time.monotonic() + 240
+        while True:
+            try:
+                return V12ProviderLedger(root / cfg['ledger'], self.profile,
+                                         cap_cny=str(cfg['cap_cny']),
+                                         inherit_ledger_path=root / cfg['inherit_ledger'])
+            except LedgerLocked:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(1)
+
     def call(self, row, arm, ordinal, messages):
         folder = self.out / 'calls' / arm / row['question_id'] / str(ordinal)
         if (folder / 'response.json').exists():
@@ -118,10 +133,9 @@ class PaidCalls:
         # Request saved before reservation, and send intent saved before network access.
         if not (folder / 'request.json').exists(): save(folder / 'request.json', payload)
         elif read(folder / 'request.json') != payload: raise ValueError('frozen_request_changed')
-        cfg = self.cfg; root = Path(cfg['root']); cap = str(cfg['cap_cny'])
+        cfg = self.cfg; root = Path(cfg['root'])
         request_id = f"cxrvqa:{self.protocol['experiment_id']}:{self.out.name}:{arm}:{row['question_id']}:{ordinal}"
-        with V12ProviderLedger(root / cfg['ledger'], self.profile, cap_cny=cap,
-                               inherit_ledger_path=root / cfg['inherit_ledger']) as ledger:
+        with self.open_ledger() as ledger:
             counter_path = root / cfg['global_request_counter']
             with exclusive_lock(str(counter_path) + '.lock'):
                 state = read(counter_path)
