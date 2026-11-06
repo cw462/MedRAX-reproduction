@@ -4,6 +4,8 @@ import argparse
 from collections import defaultdict
 import json
 from pathlib import Path
+import re
+import unicodedata
 
 import numpy as np
 
@@ -14,18 +16,29 @@ def rows(path):
     return [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line]
 
 
+def option_text_key(text):
+    return ' '.join(unicodedata.normalize('NFKC', text).casefold().split())
+
+
 def grade(row, prediction, reference):
-    answer = prediction.get('answer')
-    if prediction['status'] != 'completed' or not isinstance(answer, str):
+    raw_answer = prediction.get('answer')
+    if prediction['status'] != 'completed' or not isinstance(raw_answer, str):
         return False, True
-    answer = normalize(answer)
+    answer = normalize(raw_answer)
     options = row.get('options')
     if not options:
         return answer is not None and answer == normalize(reference), answer is None
     if answer and answer.upper() in options:
         return answer.upper() == reference, False
     matching = [letter for letter, text in options.items() if answer == normalize(text)]
-    return len(matching) == 1 and matching[0] == reference, len(matching) != 1
+    if len(matching) == 1:
+        return matching[0] == reference, False
+    labeled = re.fullmatch(r'([a-z])[.)] (.+)', option_text_key(raw_answer))
+    if labeled:
+        letter = labeled[1].upper()
+        if letter in options and labeled[2] == option_text_key(options[letter]):
+            return letter == reference, False
+    return False, True
 
 
 def bootstrap(delta, clusters, subsets):
