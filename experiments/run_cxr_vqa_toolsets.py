@@ -5,6 +5,7 @@ never resent. Reference answers are not opened by this program.
 """
 import argparse
 import base64
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
 import hashlib
@@ -202,6 +203,39 @@ class PaidCalls:
                     waiting_for_read = True
                 time.sleep(10)
 
+    @contextmanager
+    def reserve_call(self, request_id, arm, qid):
+        counter_path = Path(self.cfg['root']) / self.cfg['global_request_counter']
+        waiting_for_charge = False
+        while True:
+            with self.open_ledger() as ledger:
+                with exclusive_lock(str(counter_path) + '.lock'):
+                    state = read(counter_path)
+                    if request_id in state['request_ids']:
+                        raise RuntimeError('already_claimed_no_reissue')
+                    try:
+                        reservation = ledger.reserve(
+                            request_id=request_id, estimated_input_tokens=self.profile.max_input_tokens,
+                            max_output_tokens=2048, model=self.protocol['model'],
+                            metadata={'run': self.protocol['experiment_id'], 'arm': arm, 'qid': qid})
+                    except KeyError as exc:
+                        if exc.args != ('charged_cny',):
+                            raise
+                        # The charge calculation failed before persisting a reservation.
+                        reservation = None
+                    if reservation is not None:
+                        state['request_ids'].append(request_id)
+                        state.setdefault('scoped_request_limits', {})[self.protocol['experiment_id']] = {
+                            'normal': None, 'hard': None, 'authorization': 'user_20261104_request_count_unlimited', 'monetary_cap_changed': False}
+                        write(counter_path, state)
+                if reservation is not None:
+                    yield ledger, reservation
+                    return
+            if not waiting_for_charge:
+                print('Waiting for the shared ledger charge field before sending.', file=sys.stderr, flush=True)
+                waiting_for_charge = True
+            time.sleep(10)
+
     def call(self, row, arm, ordinal, messages, *, api_tools=None):
         folder = self.out / 'calls' / arm / row['question_id'] / str(ordinal)
         stored_response = (folder / 'response.json').exists()
@@ -226,20 +260,8 @@ class PaidCalls:
             if not self.profile.identity_ok(raw.get('model')): raise RuntimeError('returned_model_identity_mismatch')
             message = raw['choices'][0]['message']
             return message if api_tools is not None else message['content']
-        cfg = self.cfg; root = Path(cfg['root'])
         request_id = f"cxrvqa:{self.protocol['experiment_id']}:{self.out.name}:{arm}:{row['question_id']}:{ordinal}"
-        with self.open_ledger() as ledger:
-            counter_path = root / cfg['global_request_counter']
-            with exclusive_lock(str(counter_path) + '.lock'):
-                state = read(counter_path)
-                if request_id in state['request_ids']: raise RuntimeError('already_claimed_no_reissue')
-                reservation = ledger.reserve(request_id=request_id, estimated_input_tokens=self.profile.max_input_tokens,
-                                             max_output_tokens=2048, model=self.protocol['model'],
-                                             metadata={'run': self.protocol['experiment_id'], 'arm': arm, 'qid': row['question_id']})
-                state['request_ids'].append(request_id)
-                state.setdefault('scoped_request_limits', {})[self.protocol['experiment_id']] = {
-                    'normal': None, 'hard': None, 'authorization': 'user_20261104_request_count_unlimited', 'monetary_cap_changed': False}
-                write(counter_path, state)
+        with self.reserve_call(request_id, arm, row['question_id']) as (ledger, reservation):
             save(folder / 'started.json', {'request_id': request_id, 'utc': now(), 'reserved': reservation})
             tick = time.monotonic(); raw = None; error = None
             try:
