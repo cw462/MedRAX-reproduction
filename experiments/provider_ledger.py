@@ -156,8 +156,8 @@ class ProviderLedger:
         self._acquire_lock()
         try:
             anchor = self._read_anchor()
-            if self.path.exists():
-                raw = self.path.read_bytes()
+            if self._state_exists():
+                raw = self._read_state()
                 self._disk_hash = hashlib.sha256(raw).hexdigest()
                 try:
                     state = json.loads(raw)
@@ -265,6 +265,12 @@ class ProviderLedger:
         return False
 
     # ------------------------------------------------------------------- state
+    def _state_exists(self):
+        return self.path.exists()
+
+    def _read_state(self):
+        return self.path.read_bytes()
+
     def policy_snapshot(self):
         return deepcopy(self._policy)
 
@@ -372,6 +378,11 @@ class ProviderLedger:
         candidate['integrity_sha256'] = _digest(candidate)
         self._validate(candidate)
         raw = (json.dumps(candidate, ensure_ascii=False, indent=2, allow_nan=False) + '\n').encode('utf-8')
+        self._persist_state(raw)
+        self._state = candidate
+        self._disk_hash = hashlib.sha256(raw).hexdigest()
+
+    def _persist_state(self, raw):
         temp_path = None
         try:
             with tempfile.NamedTemporaryFile(mode='wb', prefix='.provider-', suffix='.tmp',
@@ -393,9 +404,6 @@ class ProviderLedger:
         finally:
             if temp_path is not None and temp_path.exists():
                 temp_path.unlink()
-        self._state = candidate
-        self._disk_hash = hashlib.sha256(raw).hexdigest()
-
     @property
     def inherited_cny_value(self):
         return _decimal(self._policy['inherited_cny'])

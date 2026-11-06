@@ -13,6 +13,8 @@ ProviderLedger itself retains its original validation behavior.
 """
 import hashlib
 import json
+import sqlite3
+from contextlib import closing
 
 from provider_ledger import LedgerIntegrityError, ProviderLedger, _decimal, _money
 
@@ -23,11 +25,45 @@ class V12ProviderLedger(ProviderLedger):
     def _check_disk(self):
         self._check_open()
 
+    @property
+    def sqlite_path(self):
+        return self.path.with_suffix('.sqlite3')
+
+    def _uses_sqlite(self):
+        return not self.path.exists() and self.sqlite_path.is_file()
+
+    def _state_exists(self):
+        return super()._state_exists() or self._uses_sqlite()
+
+    def _read_state(self):
+        if not self._uses_sqlite():
+            return super()._read_state()
+        with closing(sqlite3.connect(self.sqlite_path.as_uri()+'?mode=rw', uri=True)) as db:
+            row = db.execute('SELECT payload FROM ledger_state WHERE id=1').fetchone()
+        if row is None:
+            raise LedgerIntegrityError('SQLite ledger has no accounting snapshot')
+        return row[0]
+
+    def _persist_state(self, raw):
+        if not self._uses_sqlite():
+            return super()._persist_state(raw)
+        with closing(sqlite3.connect(self.sqlite_path.as_uri()+'?mode=rw', uri=True)) as db, db:
+            result = db.execute('UPDATE ledger_state SET payload=? WHERE id=1', (raw,))
+            if result.rowcount != 1:
+                raise LedgerIntegrityError('SQLite ledger has no accounting snapshot')
+
     def _validate(self, state):
         """Intentionally omit startup/commit integrity and reconciliation scans."""
 
     def _read_inherited(self):
         """Read the inherited amount without validating its stored checksum."""
+        if self._uses_sqlite():
+            state = json.loads(self._read_state())
+            inherited = state['policy']['inherited_from']
+            expected = self.inherit_path.name if self.inherit_path else None
+            if (inherited['path_name'] if inherited else None) != expected:
+                raise LedgerIntegrityError('Configured inherited ledger differs from the migrated budget')
+            return _decimal(state['inherited_cny']), inherited
         if self.inherit_path is None:
             return _decimal('0'), None
         if not self.inherit_path.exists():
