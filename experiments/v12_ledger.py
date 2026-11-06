@@ -83,3 +83,42 @@ class V12ProviderLedger(ProviderLedger):
         return committed, {'path_name': self.inherit_path.name, 'ledger_id': state['ledger_id'],
                            'committed_cny': _money(committed),
                            'sha256': hashlib.sha256(raw).hexdigest()}
+
+
+class LedgerSnapshotChanged(Exception):
+    """Another writer committed before this transaction."""
+
+
+class ConcurrentV12Ledger(V12ProviderLedger):
+    """Use the existing SQLite budget without a file lock during network calls."""
+
+    # The legacy crash recovery only converts 'pending'. A live concurrent
+    # reservation stays fully charged until its owner settles it.
+    RESERVATION_STATUS = 'in_flight'
+
+    def _acquire_lock(self):
+        if not self._uses_sqlite():
+            raise LedgerIntegrityError('Concurrent accounting requires the existing SQLite ledger')
+        self._lock_handle = self.path.with_name(self.path.name + '.lock').open('rb')
+        self._closed = False
+
+    def _bind_anchor(self, ledger_id):
+        raise LedgerIntegrityError('Concurrent accounting requires the existing ledger identity')
+
+    def _recover_pending(self, state):
+        raise LedgerReadError('A legacy reservation must finish before concurrent accounting can proceed')
+
+    def _read_state(self):
+        self._snapshot = super()._read_state()
+        return self._snapshot
+
+    def _persist_state(self, raw):
+        try:
+            with closing(sqlite3.connect(self.sqlite_path.as_uri() + '?mode=rw', uri=True)) as db, db:
+                result = db.execute('UPDATE ledger_state SET payload=? WHERE id=1 AND payload=?',
+                                    (raw, self._snapshot))
+                if result.rowcount != 1:
+                    raise LedgerSnapshotChanged()
+        except sqlite3.Error as exc:
+            raise LedgerReadError('Cannot update the shared SQLite ledger') from exc
+        self._snapshot = raw

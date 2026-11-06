@@ -1,20 +1,79 @@
 """Small synthetic-only tests for the user-authorized V12 ledger change."""
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from decimal import Decimal
 import json
 from pathlib import Path
+import sqlite3
 import sys
 import tempfile
+from threading import Barrier
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from provider_ledger import BudgetExceeded, LedgerIntegrityError, LedgerLocked
 from provider_profile import get_profile
-from v12_ledger import V12ProviderLedger
+from run_cxr_vqa_toolsets import PaidCalls, save
+from v12_ledger import ConcurrentV12Ledger, LedgerSnapshotChanged, V12ProviderLedger
 
 
 class V12LedgerTests(unittest.TestCase):
     def ledger(self,directory,**kwargs):
         return V12ProviderLedger(Path(directory)/'ledger.json',get_profile('qwen3-vl-plus'),**kwargs)
+
+    def sqlite_ledger(self, directory, **kwargs):
+        with self.ledger(directory, **kwargs) as ledger:
+            path = ledger.path
+        with closing(sqlite3.connect(path.with_suffix('.sqlite3'))) as db, db:
+            db.execute('CREATE TABLE ledger_state (id INTEGER PRIMARY KEY, payload BLOB)')
+            db.execute('INSERT INTO ledger_state VALUES (1, ?)', (path.read_bytes(),))
+        path.unlink()
+        return path
+
+    def test_conflicting_reservations_do_not_overwrite_each_other(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.sqlite_ledger(directory)
+            profile = get_profile('qwen3-vl-plus')
+            kwargs = dict(estimated_input_tokens=100, max_output_tokens=20)
+            with ConcurrentV12Ledger(path, profile) as first, ConcurrentV12Ledger(path, profile) as second:
+                first.reserve(request_id='synthetic:one', **kwargs)
+                with self.assertRaises(LedgerSnapshotChanged):
+                    second.reserve(request_id='synthetic:two', **kwargs)
+            with ConcurrentV12Ledger(path, profile) as ledger:
+                self.assertEqual(ledger._state['reservations'][0]['status'], 'in_flight')
+                with self.assertRaisesRegex(LedgerIntegrityError, 'already reserved'):
+                    ledger.reserve(request_id='synthetic:one', **kwargs)
+
+    def test_two_paid_calls_can_overlap_and_both_settle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inherited = root / 'parent.json'
+            inherited.write_text(json.dumps(dict(committed_cny='0', ledger_id='a' * 32)), encoding='utf-8')
+            path = self.sqlite_ledger(directory, inherit_ledger_path=inherited)
+            barrier = Barrier(2, timeout=5)
+            protocol = dict(experiment_id='fixture', model='qwen3-vl-plus', temperature=0,
+                            top_p=1, max_output_tokens=2048)
+
+            def fake_invoke(client, payload, folder):
+                barrier.wait()
+                raw = dict(model=protocol['model'], choices=[{'message': {'content': 'ok'}}],
+                           usage={'prompt_tokens': 90, 'completion_tokens': 10})
+                save(folder / 'response.json', raw)
+                return raw
+
+            def call(arm):
+                paid = PaidCalls.__new__(PaidCalls)
+                paid.cfg = dict(root=str(root), ledger=path.name, cap_cny='100', inherit_ledger=inherited.name)
+                paid.protocol, paid.out, paid.parallel = protocol, root / 'run', True
+                paid.profile, paid.client, paid.key = get_profile(protocol['model']), None, ''
+                return paid.call({'question_id': 'fixture'}, arm, 1, [])
+
+            with patch('run_cxr_vqa_toolsets.invoke', side_effect=fake_invoke), ThreadPoolExecutor(2) as pool:
+                self.assertEqual(list(pool.map(call, ('O', 'M-R'))), ['ok', 'ok'])
+            with ConcurrentV12Ledger(path, get_profile(protocol['model']), inherit_ledger_path=inherited) as ledger:
+                self.assertEqual([r['status'] for r in ledger._state['reservations']], ['settled', 'settled'])
+                self.assertEqual(ledger.remaining, Decimal('99.99904'))
 
     def test_unchanged_and_reformatted_bytes_do_not_stop_accounting(self):
         with tempfile.TemporaryDirectory() as directory, self.ledger(directory) as ledger:

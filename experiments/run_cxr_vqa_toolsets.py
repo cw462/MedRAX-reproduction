@@ -5,7 +5,7 @@ never resent. Reference answers are not opened by this program.
 """
 import argparse
 import base64
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from datetime import datetime, timezone
 from decimal import Decimal
 import hashlib
@@ -21,7 +21,7 @@ import uuid
 
 # Load the deployed ledger before the legacy helper modules add their own path.
 from provider_ledger import LedgerIntegrityError, LedgerLocked
-from v12_ledger import LedgerReadError, V12ProviderLedger
+from v12_ledger import ConcurrentV12Ledger, LedgerReadError, LedgerSnapshotChanged, V12ProviderLedger
 from run_sampled_vlm import profile_for, invoke, exclusive_lock, safe_error
 from run_direct_vlm import write
 
@@ -42,6 +42,29 @@ def save(p, obj):
         if temp.exists():temp.unlink()
 
 
+def freeze_protocol(out, protocol):
+    path = out / 'protocol.json'
+    try:
+        save(path, protocol)
+    except FileExistsError:
+        if read(path) != protocol:
+            raise ValueError('protocol_changed')
+
+
+@contextmanager
+def tool_worker_slot(path):
+    # Only tool subprocesses share the accelerator. API calls and cache hits
+    # remain independent.
+    with ExitStack() as stack:
+        while True:
+            try:
+                stack.enter_context(exclusive_lock(path))
+                break
+            except BlockingIOError:
+                time.sleep(.25)
+        yield
+
+
 IMAGE_DATA_URI = re.compile(r'data:(image/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)\Z')
 
 
@@ -59,9 +82,12 @@ def archive_request(payload, asset_dir):
             asset = asset_dir / digest
             if not asset.is_file():
                 asset_dir.mkdir(parents=True, exist_ok=True)
-                temp = asset.with_name('.'+digest+'.tmp')
-                temp.write_bytes(encoded.encode('ascii'))
-                os.replace(temp, asset)
+                temp = asset.with_name('.'+digest+'.'+uuid.uuid4().hex+'.tmp')
+                try:
+                    temp.write_bytes(encoded.encode('ascii'))
+                    os.replace(temp, asset)
+                finally:
+                    temp.unlink(missing_ok=True)
             return {'cxr_request_image_base64_sha256': digest, 'media_type': media_type}
         return value
     return visit(payload)
@@ -171,11 +197,12 @@ def append_observations(messages, observations, out, arm=None):
 
 
 class PaidCalls:
-    def __init__(self, cfg, protocol, out, key):
+    def __init__(self, cfg, protocol, out, key, *, parallel=False):
         from openai import OpenAI
         self.cfg, self.protocol, self.out = cfg, protocol, out
         self.profile = profile_for(cfg)
         self.key = key
+        self.parallel = parallel
         self.client = OpenAI(api_key=key, base_url=self.profile.base_url, max_retries=0,
                              timeout=cfg.get('request_timeout_seconds', 120))
 
@@ -186,9 +213,9 @@ class PaidCalls:
         waiting_for_read = False
         while True:
             try:
-                return V12ProviderLedger(ledger_path, self.profile,
-                                         cap_cny=str(cfg['cap_cny']),
-                                         inherit_ledger_path=root / cfg['inherit_ledger'])
+                ledger_class = ConcurrentV12Ledger if self.parallel else V12ProviderLedger
+                return ledger_class(ledger_path, self.profile, cap_cny=str(cfg['cap_cny']),
+                                    inherit_ledger_path=root / cfg['inherit_ledger'])
             except LedgerLocked:
                 # The current holder can be settling a paid call. This call
                 # has made no reservation and will wait before sending.
@@ -203,8 +230,33 @@ class PaidCalls:
                     waiting_for_read = True
                 time.sleep(10)
 
+    def update_accounting(self, operation):
+        while True:
+            try:
+                with self.open_ledger() as ledger:
+                    return operation(ledger)
+            except LedgerSnapshotChanged:
+                continue
+            except (LedgerReadError, KeyError) as exc:
+                if isinstance(exc, KeyError) and exc.args != ('charged_cny',):
+                    raise
+                print('Waiting to update the shared SQLite ledger.', file=sys.stderr, flush=True)
+                time.sleep(10)
+
+    def reserve(self, ledger, request_id, arm, qid):
+        return ledger.reserve(
+            request_id=request_id, estimated_input_tokens=self.profile.max_input_tokens,
+            max_output_tokens=2048, model=self.protocol['model'],
+            metadata={'run': self.protocol['experiment_id'], 'arm': arm, 'qid': qid})
+
     @contextmanager
     def reserve_call(self, request_id, arm, qid):
+        if self.parallel:
+            # The transaction records both the request ID and its reservation.
+            # Its connection is closed before entering the network call.
+            reservation = self.update_accounting(lambda ledger: self.reserve(ledger, request_id, arm, qid))
+            yield None, reservation
+            return
         counter_path = Path(self.cfg['root']) / self.cfg['global_request_counter']
         waiting_for_charge = False
         while True:
@@ -214,10 +266,7 @@ class PaidCalls:
                     if request_id in state['request_ids']:
                         raise RuntimeError('already_claimed_no_reissue')
                     try:
-                        reservation = ledger.reserve(
-                            request_id=request_id, estimated_input_tokens=self.profile.max_input_tokens,
-                            max_output_tokens=2048, model=self.protocol['model'],
-                            metadata={'run': self.protocol['experiment_id'], 'arm': arm, 'qid': qid})
+                        reservation = self.reserve(ledger, request_id, arm, qid)
                     except KeyError as exc:
                         if exc.args != ('charged_cny',):
                             raise
@@ -269,12 +318,17 @@ class PaidCalls:
                 if not self.profile.identity_ok(raw.get('model')): raise RuntimeError('returned_model_identity_mismatch')
             except Exception as exc:
                 error = exc
-            settlement = ledger.settle(reservation, usage=raw.get('usage') if raw else None,
-                                       response_received=raw is not None, error_type=type(error).__name__ if error else None)
+            def settle(current):
+                return current.settle(reservation, usage=raw.get('usage') if raw else None,
+                                      response_received=raw is not None, error_type=type(error).__name__ if error else None)
+            if self.parallel:
+                settlement = self.update_accounting(settle)
+            else:
+                settlement = settle(ledger)
             save(folder / 'result.json', {'request_id': request_id, 'model_returned': raw.get('model') if raw else None,
                  'usage': raw.get('usage') if raw else None, 'settlement': settlement,
                  'elapsed_s': time.monotonic() - tick, 'error': safe_error(error, self.key) if error else None,
-                 'response_received': raw is not None, 'utc': now(), 'ledger_remaining_proxy_cny': str(ledger.remaining)})
+                 'response_received': raw is not None, 'utc': now(), 'ledger_remaining_proxy_cny': settlement['remaining_cny']})
             if error: raise error
         message = raw['choices'][0]['message']
         return message if api_tools is not None else message['content']
@@ -282,8 +336,9 @@ class PaidCalls:
 
 class Tools:
     """Cache complete backend results by model version, image bytes and actual args."""
-    def __init__(self, runtime, data_root, out):
+    def __init__(self, runtime, data_root, out, *, worker_gate=None):
         self.runtime, self.data_root, self.out = runtime, data_root, out
+        self.worker_gate = worker_gate
 
     def call(self, row, call, arm, ordinal):
         selection = self.out / 'tool_selections' / arm / row['question_id'] / (str(ordinal) + '.json')
@@ -298,6 +353,16 @@ class Tools:
         identity = {'backend': spec['backend'], 'revision': spec.get('revision'), 'image': hashlib.sha256(image.read_bytes()).hexdigest(), 'args': args}
         key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         folder = self.out / 'tool_cache' / key; saved = folder / 'result.json'
+        gate = tool_worker_slot(self.worker_gate) if self.worker_gate and not saved.is_file() else nullcontext()
+        with gate:
+            result, cache_hit = self.observe(spec, args, image, identity, folder, saved)
+        observation = {**result, 'tool': name, 'cache_hit': cache_hit, 'cache_key': key}
+        if len(row['images']) > 1:
+            observation['image_index'] = index
+        save(selection, observation)
+        return observation
+
+    def observe(self, spec, args, image, identity, folder, saved):
         cache_hit = saved.exists()
         if cache_hit: result = read(saved)
         elif (folder / 'started.json').exists(): result = {'status': 'started_unknown', 'observation': None, 'automatic_retry': False}
@@ -320,11 +385,7 @@ class Tools:
                 result = {'status': 'failed', 'observation': None, 'error_type': type(exc).__name__, 'error': str(exc)[:300]}
             result.update(elapsed_s=time.monotonic() - tick, backend=spec['backend'], identity=identity, utc=now())
             save(saved, result)
-        observation = {**result, 'tool': name, 'cache_hit': cache_hit, 'cache_key': key}
-        if len(row['images']) > 1:
-            observation['image_index'] = index
-        save(selection, observation)
-        return observation
+        return result, cache_hit
 
 
 def validate_actions(value, runtime, arm, remaining, images=1):
@@ -418,7 +479,8 @@ def episode(row, arm, data_root, protocol, runtime, out, paid, tools, *, conditi
 def main(argv=None, *, arms=('D', 'M', 'C', 'X'), episode_fn=episode, system_fn=agent_system, extra_input_fields=()):
     p = argparse.ArgumentParser(); p.add_argument('--config', type=Path, required=True); p.add_argument('--data', type=Path, required=True)
     p.add_argument('--out', type=Path, required=True); p.add_argument('--arms', nargs='+', choices=arms, required=True)
-    p.add_argument('--execute', action='store_true'); p.add_argument('--api-key-stdin', action='store_true'); a = p.parse_args(argv)
+    p.add_argument('--execute', action='store_true'); p.add_argument('--api-key-stdin', action='store_true')
+    p.add_argument('--parallel', action='store_true'); a = p.parse_args(argv)
     cfg = read(a.config); protocol = read(cfg['protocol']); runtime = read(cfg['runtime']); out = a.out
     inputs = rows(a.data / 'inputs.jsonl')
     for row in inputs:
@@ -428,11 +490,16 @@ def main(argv=None, *, arms=('D', 'M', 'C', 'X'), episode_fn=episode, system_fn=
     key = sys.stdin.readline().strip() if a.api_key_stdin else ''
     if not key: raise ValueError('credential_required_stdin_only')
     out.mkdir(parents=True, exist_ok=True)
-    with exclusive_lock(out / '.generation.lock'):
-        if not (out / 'protocol.json').exists(): save(out / 'protocol.json', protocol)
-        elif read(out / 'protocol.json') != protocol: raise ValueError('protocol_changed')
-        paid = PaidCalls(cfg, protocol, out, key); tools = Tools(runtime, a.data, out)
-        for arm in a.arms:
+    paid = PaidCalls(cfg, protocol, out, key, parallel=a.parallel)
+    tools = Tools(runtime, a.data, out, worker_gate=out.parent / '.tool-worker.lock' if a.parallel else None)
+    for arm in a.arms:
+        lock = out / (f'.generation_{arm}.lock' if a.parallel else '.generation.lock')
+        progress = out / (f'progress_{arm}.json' if a.parallel else 'progress.json')
+        with exclusive_lock(lock):
+            freeze_protocol(out, protocol)
+            completion = out / f'complete_{arm}.json'
+            if completion.is_file():
+                continue
             if not runtime['arms'][arm]['ready']: raise RuntimeError('arm_not_deployed:' + arm)
             full={'arm':runtime['arms'][arm], 'tools':{k:runtime['tools'][k] for k in runtime['arms'][arm]['tools']},
                   'backend_config':runtime['backend_config'] if arm!='D' else {},
@@ -445,15 +512,15 @@ def main(argv=None, *, arms=('D', 'M', 'C', 'X'), episode_fn=episode, system_fn=
             for index, row in enumerate(inputs, 1):
                 dest = out / 'predictions' / arm / (row['question_id'] + '.json')
                 if dest.exists(): continue
-                write(out / 'progress.json', {'status': 'running', 'arm': arm, 'index': index, 'total': len(inputs), 'qid': row['question_id'], 'utc': now()})
+                write(progress, {'status': 'running', 'arm': arm, 'index': index, 'total': len(inputs), 'qid': row['question_id'], 'utc': now()})
                 tick = time.monotonic()
                 try: result = episode_fn(row, arm, a.data, protocol, runtime, out, paid, tools)
                 except Exception as exc:
-                    write(out / 'progress.json', {'status': 'stopped', 'arm': arm, 'qid': row['question_id'], 'error': safe_error(exc, key), 'utc': now()})
+                    write(progress, {'status': 'stopped', 'arm': arm, 'qid': row['question_id'], 'error': safe_error(exc, key), 'utc': now()})
                     raise
                 save(dest, dict(result, question_id=row['question_id'], image_id=row['image_id'], arm=arm, elapsed_s=time.monotonic()-tick, utc=now()))
-            write(out / ('complete_' + arm + '.json'), {'status': 'generation_complete', 'questions': len(inputs), 'utc': now()})
-        write(out / 'progress.json', {'status': 'requested_arms_complete', 'arms': a.arms, 'utc': now()})
+            save(completion, {'status': 'generation_complete', 'questions': len(inputs), 'utc': now()})
+            write(progress, {'status': 'requested_arms_complete', 'arms': [arm], 'utc': now()})
     return 0
 
 

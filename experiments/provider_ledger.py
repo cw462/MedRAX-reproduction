@@ -133,6 +133,15 @@ class ProviderLedger:
     """One lock, one file, one authorised budget shared across providers."""
 
     SCHEMA = 1
+    RESERVATION_STATUS = 'pending'
+
+    def _recover_pending(self, state):
+        recovered = deepcopy(state)
+        for item in recovered['reservations']:
+            if item['status'] == 'pending':
+                item.update(status='recovered_unknown', settled_utc=_now(),
+                            reason='pending_at_reopen_charged_in_full')
+        self._commit(recovered)
 
     def __init__(self, path, profile: ProviderProfile, *, cap_cny='100',
                  inherit_ledger_path=None):
@@ -169,14 +178,8 @@ class ProviderLedger:
                 self._state = state
                 if anchor is not None and anchor != state['ledger_id']:
                     raise LedgerIntegrityError('Ledger identity changed; refusing a replacement')
-                pending = [item for item in state['reservations'] if item['status'] == 'pending']
-                if pending:
-                    recovered = deepcopy(state)
-                    for item in recovered['reservations']:
-                        if item['status'] == 'pending':
-                            item.update(status='recovered_unknown', settled_utc=_now(),
-                                        reason='pending_at_reopen_charged_in_full')
-                    self._commit(recovered)
+                if any(item['status'] == 'pending' for item in state['reservations']):
+                    self._recover_pending(state)
             else:
                 if anchor is not None:
                     raise LedgerIntegrityError('Previously initialised ledger is missing; refusing to reset')
@@ -431,7 +434,7 @@ class ProviderLedger:
         candidate = deepcopy(self._state)
         reservation_id = uuid.uuid4().hex
         candidate['reservations'].append({
-            'id': reservation_id, 'request_id': request_id, 'metadata': clean, 'status': 'pending',
+            'id': reservation_id, 'request_id': request_id, 'metadata': clean, 'status': self.RESERVATION_STATUS,
             'reserved_cny': _money(amount), 'charged_cny': _money(amount), 'usage': None,
             'created_utc': _now(), 'settled_utc': None, 'response_received': None,
             'error_type': None, 'reason': 'reserved_before_call',
@@ -450,7 +453,7 @@ class ProviderLedger:
             raise ValueError('error_type must be a class name')
         candidate = deepcopy(self._state)
         item = next((entry for entry in candidate['reservations'] if entry['id'] == reservation), None)
-        if item is None or item['status'] != 'pending':
+        if item is None or item['status'] != self.RESERVATION_STATUS:
             raise LedgerIntegrityError('Reservation absent or already finalised')
         used = _usage(usage) if response_received and error_type is None else None
         reserved = _decimal(item['reserved_cny'])

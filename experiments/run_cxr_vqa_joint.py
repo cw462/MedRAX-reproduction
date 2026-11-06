@@ -42,6 +42,7 @@ def main(argv=None):
     parser.add_argument('--arms', nargs='+', choices=ARMS, required=True)
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--api-key-stdin', action='store_true')
+    parser.add_argument('--parallel', action='store_true')
     args = parser.parse_args(argv)
 
     cfg = read(args.config)
@@ -72,10 +73,12 @@ def main(argv=None):
     if not key:
         raise ValueError('API key is required through stdin')
 
-    with exclusive_lock(out / '.generation.lock'):
-        paid = PaidCalls(cfg, protocol, out, key)
-        tools = Tools(runtime, args.data, out)
-        for arm in args.arms:
+    paid = PaidCalls(cfg, protocol, out, key, parallel=args.parallel)
+    tools = Tools(runtime, args.data, out, worker_gate=out.parent / '.tool-worker.lock' if args.parallel else None)
+    for arm in args.arms:
+        lock = out / (f'.generation_{arm}.lock' if args.parallel else '.generation.lock')
+        progress_path = out / (f'progress_{arm}.json' if args.parallel else 'progress.json')
+        with exclusive_lock(lock):
             if not runtime['arms'][arm]['ready']:
                 raise ValueError(f'Arm is not ready: {arm}')
             freeze = {'arm': runtime['arms'][arm], 'tools': runtime['tools'],
@@ -94,12 +97,12 @@ def main(argv=None):
                     result = read(terminal)
                 else:
                     progress = {'arm': arm, 'qid': group_id, 'index': index, 'total': len(groups)}
-                    write(out / 'progress.json', dict(progress, status='running', utc=now()))
+                    write(progress_path, dict(progress, status='running', utc=now()))
                     start = time.monotonic()
                     try:
                         result = joint_episode(group, rows_by_id, arm, args.data, runtime, out, paid, tools)
                     except Exception as exc:
-                        write(out / 'progress.json', dict(progress, status='stopped', error=safe_error(exc, key), utc=now()))
+                        write(progress_path, dict(progress, status='stopped', error=safe_error(exc, key), utc=now()))
                         raise
                     result['elapsed_s'] = time.monotonic() - start
                     save(terminal, result)
@@ -118,7 +121,7 @@ def main(argv=None):
             if not completion.is_file():
                 save(completion, {'status': 'generation_complete', 'questions': len(ids),
                                   'groups': len(groups), 'cohort_sha256': args.cohort_sha256, 'utc': now()})
-        write(out / 'progress.json', {'status': 'requested_arms_complete', 'arms': args.arms, 'utc': now()})
+            write(progress_path, {'status': 'requested_arms_complete', 'arms': [arm], 'utc': now()})
 
 
 if __name__ == '__main__':

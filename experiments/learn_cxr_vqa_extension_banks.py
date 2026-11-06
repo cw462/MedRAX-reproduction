@@ -63,6 +63,7 @@ def main(argv=None):
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--api-key-stdin', action='store_true')
+    parser.add_argument('--parallel', action='store_true')
     args = parser.parse_args(argv)
 
     raw = args.source.read_bytes()
@@ -94,7 +95,7 @@ def main(argv=None):
             if read(completion)['source_sha256'] != args.source_sha256:
                 raise ValueError('Completed bank cohort differs from requested source inputs')
             return
-        paid = PaidCalls(cfg, protocol, args.out, key)
+        paid = PaidCalls(cfg, protocol, args.out, key, parallel=args.parallel)
         completed_banks = {}
         for arm in ARMS:
             items = []
