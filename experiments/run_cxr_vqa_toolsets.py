@@ -20,7 +20,7 @@ import uuid
 
 # Load the deployed ledger before the legacy helper modules add their own path.
 from provider_ledger import LedgerIntegrityError, LedgerLocked
-from v12_ledger import V12ProviderLedger
+from v12_ledger import LedgerReadError, V12ProviderLedger
 from run_sampled_vlm import profile_for, invoke, exclusive_lock, safe_error
 from run_direct_vlm import write
 
@@ -181,25 +181,26 @@ class PaidCalls:
     def open_ledger(self):
         cfg = self.cfg
         root = Path(cfg['root'])
-        sqlite_active = (root / cfg['ledger']).with_suffix('.sqlite3').is_file()
-        read_failures = 0
+        ledger_path = root / cfg['ledger']
+        waiting_for_read = False
         while True:
             try:
-                return V12ProviderLedger(root / cfg['ledger'], self.profile,
+                return V12ProviderLedger(ledger_path, self.profile,
                                          cap_cny=str(cfg['cap_cny']),
                                          inherit_ledger_path=root / cfg['inherit_ledger'])
             except LedgerLocked:
                 # The current holder can be settling a paid call. This call
                 # has made no reservation and will wait before sending.
                 time.sleep(1)
-            except (json.JSONDecodeError, LedgerIntegrityError) as exc:
-                # This call has not reserved or sent anything. Reopen the
-                # transactional snapshot after an intermittent decode error.
-                decode_error = exc if isinstance(exc, json.JSONDecodeError) else exc.__cause__
-                if not sqlite_active or read_failures >= 3 or not isinstance(decode_error, json.JSONDecodeError):
+            except (json.JSONDecodeError, UnicodeDecodeError, LedgerIntegrityError) as exc:
+                # Wait at the pre-send boundary until the budget can be read.
+                read_error = exc.__cause__ if isinstance(exc, LedgerIntegrityError) else exc
+                if not isinstance(exc, LedgerReadError) and not isinstance(read_error, (json.JSONDecodeError, UnicodeDecodeError)):
                     raise
-                read_failures += 1
-                time.sleep(.2)
+                if not waiting_for_read:
+                    print('Waiting to read the shared ledger before sending.', file=sys.stderr, flush=True)
+                    waiting_for_read = True
+                time.sleep(10)
 
     def call(self, row, arm, ordinal, messages, *, api_tools=None):
         folder = self.out / 'calls' / arm / row['question_id'] / str(ordinal)

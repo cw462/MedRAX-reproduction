@@ -19,6 +19,10 @@ from contextlib import closing
 from provider_ledger import LedgerIntegrityError, ProviderLedger, _decimal, _money
 
 
+class LedgerReadError(LedgerIntegrityError):
+    """The budget snapshot could not be read."""
+
+
 class V12ProviderLedger(ProviderLedger):
     """Keep operational budget guards without ledger-integrity validation."""
 
@@ -36,12 +40,15 @@ class V12ProviderLedger(ProviderLedger):
         return super()._state_exists() or self._uses_sqlite()
 
     def _read_state(self):
-        if not self._uses_sqlite():
-            return super()._read_state()
-        with closing(sqlite3.connect(self.sqlite_path.as_uri()+'?mode=rw', uri=True)) as db:
-            row = db.execute('SELECT payload FROM ledger_state WHERE id=1').fetchone()
+        try:
+            if not self._uses_sqlite():
+                return super()._read_state()
+            with closing(sqlite3.connect(self.sqlite_path.as_uri()+'?mode=ro', uri=True)) as db:
+                row = db.execute('SELECT payload FROM ledger_state WHERE id=1').fetchone()
+        except (OSError, sqlite3.Error) as exc:
+            raise LedgerReadError('Cannot read the shared ledger snapshot') from exc
         if row is None:
-            raise LedgerIntegrityError('SQLite ledger has no accounting snapshot')
+            raise LedgerReadError('SQLite ledger has no accounting snapshot')
         return row[0]
 
     def _persist_state(self, raw):
