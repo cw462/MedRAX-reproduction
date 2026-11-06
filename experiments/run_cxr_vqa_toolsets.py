@@ -18,10 +18,11 @@ import sys
 import time
 import uuid
 
-from run_sampled_vlm import profile_for, invoke, exclusive_lock, safe_error
-from run_direct_vlm import write
+# Load the deployed ledger before the legacy helper modules add their own path.
 from provider_ledger import LedgerLocked
 from v12_ledger import V12ProviderLedger
+from run_sampled_vlm import profile_for, invoke, exclusive_lock, safe_error
+from run_direct_vlm import write
 
 
 def now(): return datetime.now(timezone.utc).isoformat()
