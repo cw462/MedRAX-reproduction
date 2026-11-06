@@ -355,14 +355,14 @@ class Tools:
         folder = self.out / 'tool_cache' / key; saved = folder / 'result.json'
         gate = tool_worker_slot(self.worker_gate) if self.worker_gate and not saved.is_file() else nullcontext()
         with gate:
-            result, cache_hit = self.observe(spec, args, image, identity, folder, saved)
+            result, cache_hit = self.observe(name, spec, args, image, identity, folder, saved)
         observation = {**result, 'tool': name, 'cache_hit': cache_hit, 'cache_key': key}
         if len(row['images']) > 1:
             observation['image_index'] = index
         save(selection, observation)
         return observation
 
-    def observe(self, spec, args, image, identity, folder, saved):
+    def observe(self, name, spec, args, image, identity, folder, saved):
         cache_hit = saved.exists()
         if cache_hit: result = read(saved)
         elif (folder / 'started.json').exists(): result = {'status': 'started_unknown', 'observation': None, 'automatic_retry': False}

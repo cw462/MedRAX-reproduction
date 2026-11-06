@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from PIL import Image
 from run_cxr_vqa_toolsets import episode,parse_final,Tools
 from score_cxr_vqa_toolsets import normalize,score
@@ -53,6 +54,16 @@ class ContractTests(unittest.TestCase):
         paid=FakePaid([{'calls':[{'tool':'t','args':{}}]*3}]);tools=FakeTools()
         r=episode(self.row,'M',self.root,self.protocol,self.runtime,self.root,paid,tools)
         self.assertEqual(r['status'],'missing_invalid_tool_plan');self.assertEqual(tools.names,[])
+    def test_uncached_tool_sends_selected_name_to_worker(self):
+        runtime = {'tools': {'t': {'backend': 'backend', 'python': 'python'}}, 'backend_config': {}}
+        tools = Tools(runtime, self.root, self.root)
+        with patch('run_cxr_vqa_toolsets.subprocess.run') as worker:
+            worker.return_value.returncode = 0
+            worker.return_value.stdout = 'CXR_VQA_RESULT={"status":"completed"}'
+            worker.return_value.stderr = ''
+            result = tools.call(self.row, {'tool': 't'}, 'M', 1)
+        self.assertEqual(json.loads(worker.call_args.kwargs['input'])['tool'], 't')
+        self.assertEqual(result['status'], 'completed')
     def test_scoring_requires_all_arms(self):
         (self.root/'inputs.jsonl').write_text(json.dumps(self.row)+'\n')
         (self.root/'references.jsonl').write_text(json.dumps({'question_id':'q1','answer':'yes'})+'\n')
