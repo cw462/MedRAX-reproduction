@@ -90,11 +90,14 @@ def resources(run, arm, predictions):
                 proxy_cny=(input_tokens*4+output_tokens*12)/1e6)
 
 
-def score(data, run, reused, dest, arms, comparisons):
-    inputs = rows(data/'inputs.jsonl')
+def score(data, run, reused, dest, arms, comparisons, *, question_ids=None, cohort_sha256=None):
+    all_inputs = rows(data/'inputs.jsonl')
+    inputs = all_inputs if question_ids is None else [row for row in all_inputs if row['question_id'] in question_ids]
     if not inputs:
         raise ValueError('Empty frozen evaluation')
     ids = [row['question_id'] for row in inputs]
+    if question_ids is not None and set(ids) != question_ids:
+        raise ValueError('Frozen question subset is not present in the inputs')
     predictions, costs = {}, {}
     for arm in arms:
         if reused and arm in 'DMCX':
@@ -104,8 +107,11 @@ def score(data, run, reused, dest, arms, comparisons):
             original = json.loads((reused/'summary.json').read_text())
             costs[arm] = dict(original['arms'][arm]['resources'], reused=True)
         else:
-            if not (run/f'complete_{arm}.json').is_file():
+            receipt = run/f'complete_{arm}.json'
+            if not receipt.is_file():
                 raise ValueError('Phase generation incomplete: '+arm)
+            if cohort_sha256 is not None and json.loads(receipt.read_text())['cohort_sha256'] != cohort_sha256:
+                raise ValueError('Completion receipt belongs to a different frozen cohort: '+arm)
             values = [json.loads((run/'predictions'/arm/(qid+'.json')).read_text()) for qid in ids]
             costs[arm] = resources(run, arm, values)
         predictions[arm] = {p['question_id']: p for p in values}
@@ -113,7 +119,7 @@ def score(data, run, reused, dest, arms, comparisons):
             raise ValueError('Prediction cohort mismatch: '+arm)
 
     refs = {r['question_id']: r['answer'] for r in rows(data/'references.jsonl')}
-    if set(refs) != set(ids) or len(set(ids)) != len(ids):
+    if set(refs) != {row['question_id'] for row in all_inputs} or len(set(ids)) != len(ids):
         raise ValueError('Reference cohort mismatch')
     subsets = np.array([row.get('source', {}).get('subset', 'all') for row in inputs])
     clusters = cluster_keys(inputs)
@@ -158,6 +164,18 @@ if __name__ == '__main__':
     parser.add_argument('--reuse-published', type=Path)
     parser.add_argument('--arms', nargs='+', default=['D','M','C','X','O','M-R'])
     parser.add_argument('--compare', action='append', nargs=2)
+    parser.add_argument('--cohort', type=Path)
+    parser.add_argument('--cohort-sha256')
+    parser.add_argument('--dataset', choices=('chexbench', 'slake', 'vqarad'))
     args = parser.parse_args()
+    ids = None
+    comparisons = args.compare or [('M','D'),('M','O'),('M','M-R'),('C','D'),('X','D')]
+    if args.cohort:
+        from run_cxr_vqa_joint import load_groups
+
+        if not args.dataset or not args.cohort_sha256 or set(args.arms) != {'D-Q', 'M-Q'}:
+            parser.error('Q scoring requires both joint arms, dataset and frozen cohort digest')
+        _, ids = load_groups(args.cohort, args.dataset, args.cohort_sha256)
+        comparisons = args.compare or [('M-Q', 'D-Q')]
     score(args.data, args.run, args.reuse_published, args.dest, args.arms,
-          args.compare or [('M','D'),('M','O'),('M','M-R'),('C','D'),('X','D')])
+          comparisons, question_ids=ids, cohort_sha256=args.cohort_sha256)
