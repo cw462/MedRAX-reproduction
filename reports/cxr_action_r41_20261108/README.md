@@ -32,3 +32,13 @@
 包内15个列明文件hash通过；两个上游依赖与已提交LF原文hash相同，本地CRLF差异已逐字核对。只安装9个新增脚本/测试文件；既有score_cxr_pairs_v2.py相同并复用，未覆盖基线。随包14项离线测试全部通过，包含无标签检索、必要条件、历史null复用、零调用复用、四工具/六主调用上限与辅助字段解析。离线测试不等于真实接口成功或性能提高。
 
 [包来源记录](package_provenance.json) · [执行器](../../experiments/run_cxr_action_r41.py) · [任务检索](../../experiments/cxr_action_skill_r41.py) · [源学习](../../experiments/learn_cxr_source_r41.py) · [源审核冻结](../../experiments/review_freeze_cxr_r41.py) · [mask冻结](../../experiments/prepare_cxr_action_r41.py) · [复用审计](../../experiments/audit_cxr_action_r41.py) · [离线评分](../../experiments/score_cxr_pairs_v2.py) · [上一轮最终结果](../cxr_gain_v32_20261107/FINAL_REPORT.md)。
+
+## 启动状态：源与开发已完成，CheXbench目标已启动
+
+69份新源回复完整保存且源退出0。最终7张task卡中1张原样、6张源证据支持的操作方程序性修订；原57候选拒绝56张，12份归属拒绝原样保留。完整审核和改写证据已发布，不宣称纯自动学习。库SHA256为`4517dc57005971d50a2ff86dd0257f9f0b11e7326dd5f77cf2653d4134075885`。
+
+固定覆盖：CheXbench175/618（Rad-Restruct115/115、SLAKE60/123、OpenI0/380）；独立SLAKE49/114，VQA-RAD71/116。OpenI这轮全部复用历史M，不能评估OpenI的Skill收益。CheXbench171/175、SLAKE48/49、VQA-RAD66/71命中均来自同一双侧/数量程序卡，覆盖更高不等于覆盖丰富或更有效。源审核先于目标mask，之后没有为覆盖或成绩改卡。[完整预冻结选择清单](frozen_selection.json)。
+
+开发检查已核对实际有卡/无卡和4次健康工具执行；初次本地图片目录链接失败发生在任何发送前，修复路径后退出0。开发对照仍出现自由文本混合JSON，原样记格式缺失，未补答；源Figure与数字图像索引的映射未被旧提示明确表达，开发不证明时间绑定或临床正确性。移除evidence.effect只解决特定丢答原因，不保证输出完全可解析或工具使用恰当。
+
+[完整新源学习及卡片审阅](results/source_learning/README.md) · [开发实际请求、失败与恢复证据](results/development/README.md)。CheXbench已启动M-S41，之后自动M-C41、SLAKE两臂、VQA-RAD两臂；主队列不并行，不按中途成绩改方案。各数据集两臂全量生成且退出0后才评分，不将阶段启动视为结果完成。
