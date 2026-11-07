@@ -206,6 +206,28 @@ class PaidCalls:
         self.client = OpenAI(api_key=key, base_url=self.profile.base_url, max_retries=0,
                              timeout=cfg.get('request_timeout_seconds', 120))
 
+    @property
+    def uses_shared_ledger(self):
+        return self.protocol.get('budget', {}).get('existing_shared_ledger') is not False
+
+    def response_cost(self, raw):
+        usage = raw.get('usage') if raw else None
+        valid = isinstance(usage, dict) and all(
+            type(usage.get(k)) is int and usage[k] >= 0 for k in ('prompt_tokens', 'completion_tokens'))
+        amount = None
+        if valid:
+            amount = str((usage['prompt_tokens'] * self.profile.input_cny_per_million +
+                          usage['completion_tokens'] * self.profile.output_cny_per_million) / Decimal(1000000))
+        return {'status': 'recorded_local' if valid else 'usage_unknown', 'currency': 'CNY',
+                'charged_cny': amount, 'remaining_cny': None, 'reservation_id': None,
+                'provider_bill_amount': False, 'accounting': 'per_request_usage_only'}
+
+    def record_saved_response_cost(self, folder, raw, request_id):
+        if not self.uses_shared_ledger and not (folder / 'result.json').exists():
+            save(folder / 'result.json', {'request_id': request_id, 'model_returned': raw.get('model'),
+                 'usage': raw.get('usage'), 'settlement': self.response_cost(raw), 'elapsed_s': None,
+                 'error': None, 'response_received': True, 'utc': now(), 'recovered_from_saved_response': True})
+
     def open_ledger(self):
         cfg = self.cfg
         root = Path(cfg['root'])
@@ -252,6 +274,9 @@ class PaidCalls:
 
     @contextmanager
     def reserve_call(self, request_id, arm, qid):
+        if not self.uses_shared_ledger:
+            yield None, None
+            return
         if self.parallel:
             # The transaction records both the request ID and its reservation.
             # Its connection is closed before entering the network call.
@@ -288,11 +313,13 @@ class PaidCalls:
 
     def call(self, row, arm, ordinal, messages, *, api_tools=None):
         folder = self.out / 'calls' / arm / row['question_id'] / str(ordinal)
+        request_id = f"cxrvqa:{self.protocol['experiment_id']}:{self.out.name}:{arm}:{row['question_id']}:{ordinal}"
         stored_response = (folder / 'response.json').exists()
         dedup = self.protocol.get('request_archive') == 'image_base64_content_addressed_v1'
         if stored_response and not dedup:
             raw = read(folder / 'response.json')
             if not self.profile.identity_ok(raw.get('model')): raise RuntimeError('returned_model_identity_mismatch')
+            self.record_saved_response_cost(folder, raw, request_id)
             message = raw['choices'][0]['message']
             return message if api_tools is not None else message['content']
         if not stored_response and (folder / 'started.json').exists(): raise RuntimeError('unknown_sent_no_reissue:' + row['question_id'])
@@ -308,9 +335,9 @@ class PaidCalls:
         if stored_response:
             raw = read(folder / 'response.json')
             if not self.profile.identity_ok(raw.get('model')): raise RuntimeError('returned_model_identity_mismatch')
+            self.record_saved_response_cost(folder, raw, request_id)
             message = raw['choices'][0]['message']
             return message if api_tools is not None else message['content']
-        request_id = f"cxrvqa:{self.protocol['experiment_id']}:{self.out.name}:{arm}:{row['question_id']}:{ordinal}"
         with self.reserve_call(request_id, arm, row['question_id']) as (ledger, reservation):
             save(folder / 'started.json', {'request_id': request_id, 'utc': now(), 'reserved': reservation})
             tick = time.monotonic(); raw = None; error = None
@@ -322,7 +349,9 @@ class PaidCalls:
             def settle(current):
                 return current.settle(reservation, usage=raw.get('usage') if raw else None,
                                       response_received=raw is not None, error_type=type(error).__name__ if error else None)
-            if self.parallel:
+            if not self.uses_shared_ledger:
+                settlement = self.response_cost(raw)
+            elif self.parallel:
                 settlement = self.update_accounting(settle)
             else:
                 settlement = settle(ledger)

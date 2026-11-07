@@ -115,6 +115,37 @@ class V12LedgerTests(unittest.TestCase):
                 with self.assertRaisesRegex(LedgerIntegrityError, 'already reserved'):
                     paid.reserve(ledger, 'synthetic:one', 'O', 'fixture')
 
+    def test_request_records_work_without_any_shared_ledger_access(self):
+        for parallel in (False, True):
+            with self.subTest(parallel=parallel), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / 'shared.sqlite3').write_bytes(b'unreadable ledger')
+                paid = PaidCalls.__new__(PaidCalls)
+                paid.cfg, paid.out, paid.parallel, paid.key = {}, root / 'run', parallel, ''
+                paid.profile, paid.client = get_profile('qwen3-vl-plus'), None
+                paid.protocol = dict(experiment_id='fixture', model=paid.profile.model, temperature=0,
+                                     top_p=1, max_output_tokens=2048, budget={'existing_shared_ledger': False})
+                raw = dict(model=paid.profile.model, choices=[{'message': {'content': 'ok'}}],
+                           usage={'prompt_tokens': 90, 'completion_tokens': 10})
+
+                def fake_invoke(client, payload, folder):
+                    save(folder / 'response.json', raw)
+                    return raw
+
+                with patch.object(paid, 'open_ledger', side_effect=AssertionError('ledger accessed')):
+                    with patch('run_cxr_vqa_toolsets.invoke', side_effect=fake_invoke) as invoke:
+                        self.assertEqual(paid.call({'question_id': 'fixture'}, 'O', 1, []), 'ok')
+                        result_path = paid.out / 'calls/O/fixture/1/result.json'
+                        result = json.loads(result_path.read_text())
+                        self.assertEqual(Decimal(result['settlement']['charged_cny']), Decimal('0.00048'))
+                        result_path.unlink()
+                        self.assertEqual(paid.call({'question_id': 'fixture'}, 'O', 1, []), 'ok')
+                        self.assertTrue(json.loads(result_path.read_text())['recovered_from_saved_response'])
+                        invoke.assert_called_once()
+                    save(paid.out / 'calls/O/unknown/1/started.json', {'request_id': 'unknown'})
+                    with self.assertRaisesRegex(RuntimeError, 'unknown_sent_no_reissue'):
+                        paid.call({'question_id': 'unknown'}, 'O', 1, [])
+
     def test_stale_checksum_schema_and_total_do_not_block_open_or_commit(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.ledger(directory):
