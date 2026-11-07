@@ -25,3 +25,5 @@
 ## 已完成结果
 
 [SLAKE完整配对结果](results/slake/README.md) · [共享源学习与审阅证据](results/source_learning/README.md)。其余队列继续按冻结顺序运行，不因SLAKE成绩改变范围。
+
+[VQA-RAD完整配对结果](results/vqarad/README.md)已完成；CheXbench继续按原范围生成，不按中途分数调整方案。
