@@ -1,5 +1,7 @@
 # CheXbench 与胸片问答扩展实验
 
+2026-11-07：全部授权生成完成或确认不适用，详见[最终完成报告](FINAL_REPORT.md)、[第二阶段](results/stage2/README.md)与[第三阶段](results/stage3/README.md)。后文保留原设计与修订记录。
+
 第一阶段复用 SLAKE 与 VQA-RAD 已完成的 D/M/C/X，新增 O 和 M−R。CheXbench 使用 Stanford AIMI 的 gated `data.json`，按作者任务和数据源筛选 Rad-ReStruct VQA 115 题、SLAKE VQA 123 题和 OpenI Fine-Grained Reasoning 380 题。数量是筛选后的核验条件。报告以三子集等权宏平均为主，同时提供 618 题微平均。 [MedRAX 论文](https://arxiv.org/abs/2502.02673) · [CheXbench 官方发布](https://huggingface.co/datasets/StanfordAIMI/chexbench) · [已完成的基线报告](../cxr_vqa_toolsets/results/README.md)
 
 服务器已具备原比较运行配置和固定 MedRAX 源码。授权下载的 `data.json` 已传到服务器，其 Git blob 与固定的官方版本完全一致，筛选得到 618 题。原图准备完成后才冻结生成输入。CheXbench 的 SLAKE 子集与独立 SLAKE 114 题有 17 张解码像素完全相同的原图；这些图像上的 64 道题均匹配独立 SLAKE 的规范化题干。因此两项结果不能视为完全独立的泛化证据。 [协议](protocol.json) · [官方 commit](official_medrax_commit.txt) · [提示词差异](prompt_differences.md) · [工具部署记录](tool_deployment.json)

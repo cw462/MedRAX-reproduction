@@ -76,16 +76,39 @@ def restore_images(value, run):
     return value
 
 
-def export(data, run, score_dir, out, arms, reuse_url):
+def export(data, run, score_dir, out, arms, reuse_url, *, cohort=None, dataset=None):
     if out.exists():
         raise FileExistsError(out)
     summary = read(score_dir / 'summary.json')
     inputs = rows(data / 'inputs.jsonl')
+    groups = None
+    cohort_digest = None
+    if cohort is not None:
+        from run_cxr_vqa_joint import load_groups
+
+        if dataset is None or set(arms) != {'D-Q', 'M-Q'}:
+            raise ValueError('Joint export requires dataset and both joint arms')
+        cohort_digest = hashlib.sha256(cohort.read_bytes()).hexdigest()
+        groups, ids = load_groups(cohort, dataset, cohort_digest)
+        inputs = [row for row in inputs if row['question_id'] in ids]
+        if {row['question_id'] for row in inputs} != ids:
+            raise ValueError('Joint export cohort differs from target inputs')
+    ids = {row['question_id'] for row in inputs}
+    if summary['questions'] != len(inputs):
+        raise ValueError('Export cohort differs from the scored denominator')
     for arm in arms:
         if not (run / f'complete_{arm}.json').is_file() or arm not in summary['arms']:
             raise ValueError('Arm must have completed generation and isolated scoring: ' + arm)
         if sum(1 for _ in (run / 'predictions' / arm).glob('*.json')) != len(inputs):
             raise ValueError('Prediction count differs from the scored cohort')
+        if cohort_digest and read(run / f'complete_{arm}.json').get('cohort_sha256') != cohort_digest:
+            raise ValueError('Completion receipt belongs to a different joint cohort')
+        if groups is not None:
+            expected_groups = {group['group_id'] for group in groups}
+            if {p.stem for p in (run / 'joint_groups' / arm).glob('*.json')} != expected_groups:
+                raise ValueError('Joint terminal membership differs from frozen groups')
+            if {p.name for p in (run / 'calls' / arm).iterdir() if p.is_dir()} != expected_groups:
+                raise ValueError('Joint request membership differs from frozen groups')
     publisher = RequestEvidencePublisher(out, data / 'manifest.json', image_roots=(data,))
     for row in inputs:
         for name in row['images']:
@@ -122,7 +145,7 @@ def export(data, run, score_dir, out, arms, reuse_url):
                                     backend_stderr=stderr.read_text(errors='replace') if stderr.is_file() else None)
 
     for name in ('inputs.jsonl', 'references.jsonl'):
-        values = rows(data / name)
+        values = [row for row in rows(data / name) if row['question_id'] in ids]
         for row in values:
             if 'images' in row:
                 row['images'] = [publisher.rel(publisher.source_image(image), out / name) for image in row['images']]
@@ -131,14 +154,19 @@ def export(data, run, score_dir, out, arms, reuse_url):
     for name in ('summary.json', 'per_question.jsonl'):
         publisher.copy_json(score_dir / name, out / name)
     publisher.copy_json(run / 'protocol.json', out / 'protocol.json')
+    if cohort is not None:
+        publisher.copy_json(cohort, out / 'joint_cohort.json')
     for arm in arms:
         for name in (f'complete_{arm}.json', f'runtime_full_{arm}.json'):
             publisher.copy_json(run / name, out / name)
         publisher.emit(out / f'predictions_{arm}.jsonl',
                        [read(run / 'predictions' / arm / (row['question_id'] + '.json')) for row in inputs], jsonl=True)
         publisher.emit(out / f'tool_selections_{arm}.jsonl', selections[arm], jsonl=True)
-        for row in inputs:
-            qid = row['question_id']
+        episode_ids = [group['group_id'] for group in groups] if groups is not None else [row['question_id'] for row in inputs]
+        for qid in episode_ids:
+            if groups is not None:
+                publisher.copy_json(run / 'joint_groups' / arm / (qid + '.json'),
+                                    out / 'joint_groups' / arm / (qid + '.json'))
             calls = []
             for request in sorted((run / 'calls' / arm / qid).glob('*/request.json')):
                 entry = {'ordinal': request.parent.name}
@@ -151,7 +179,7 @@ def export(data, run, score_dir, out, arms, reuse_url):
                 calls.append(entry)
             publisher.emit(out / 'calls' / arm / (qid + '.json'), calls)
     emit_tool_results(publisher, out, tool_results.values())
-    publisher.emit(out / 'reuse.json', {'D_M_C_X_evidence': reuse_url})
+    publisher.emit(out / 'reuse.json', {'prior_stages_evidence' if groups is not None else 'D_M_C_X_evidence': reuse_url})
     publisher.emit(out / 'image_assets.json', [
         {key: value for key, value in item.items() if key != 'target'} |
         {'path': publisher.rel(item['target'], out / 'image_assets.json')}
@@ -167,5 +195,8 @@ if __name__ == '__main__':
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--arms', nargs='+', default=['O', 'M-R'])
     parser.add_argument('--reuse-url', required=True)
+    parser.add_argument('--cohort', type=Path)
+    parser.add_argument('--dataset', choices=('chexbench', 'slake', 'vqarad'))
     args = parser.parse_args()
-    export(args.data.resolve(), args.run.resolve(), args.score_dir.resolve(), args.out.resolve(), args.arms, args.reuse_url)
+    export(args.data.resolve(), args.run.resolve(), args.score_dir.resolve(), args.out.resolve(), args.arms, args.reuse_url,
+           cohort=args.cohort.resolve() if args.cohort else None, dataset=args.dataset)
