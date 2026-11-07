@@ -41,7 +41,7 @@ def execute(req):
     folder=Path(req['artifact_dir']);folder.mkdir(parents=True,exist_ok=True)
     name=req['backend'];args=dict(req['args']);image=Path(req['image']);start=time.monotonic()
     # Paths always come from the bound executor; the model cannot open arbitrary files.
-    if set(args)&{'image','image_path','image_paths','path','output','output_path'}:raise ValueError('model_paths_forbidden')
+    if set(args)&{'image','image_path','image_paths','dicom_path','path','output','output_path'}:raise ValueError('model_paths_forbidden')
     raw=None;observation=None;derived=[]
     if name=='roi_crop':
         from PIL import Image
@@ -59,7 +59,8 @@ def execute(req):
             report_cache=root/'models/hf_report',segmentation_checkpoint=root/'models/home/.torchxrayvision/models_data/pspnet_chestxray_best_model_4.pth',
             temp_dir=folder/'runtime',tools=[name],device_main='cuda:0')
         tool=tools[name]
-        raw=tool.invoke(dict(args,image_path=str(image)))
+        bound_path='dicom_path' if name=='dicom_processor' else 'image_path'
+        raw=tool.invoke(dict(args,**{bound_path:str(image)}))
         observation=serial(raw,folder)
         (folder/'provenance.json').write_text(json.dumps(prov,ensure_ascii=False,indent=2),encoding='utf-8')
         if name=='chest_xray_classifier':observation={'finding_scores':observation[0],'limitations':'Operating-point normalized finding scores, not calibrated disease probabilities, severity, localization or temporal change.'}
