@@ -1,11 +1,40 @@
 """Publish completed extension arms with sanitized request and tool evidence."""
 
 import argparse
+import base64
+import hashlib
 import json
 from pathlib import Path
 
 from export_cxr_vqa_toolsets import CALL_FILES, rows
 from export_vote_phase import Publisher, read
+
+
+class RequestEvidencePublisher(Publisher):
+    """Retain malformed archived request bytes without treating them as valid images."""
+
+    def from_uri(self, uri, source=None):
+        try:
+            return super().from_uri(uri, source)
+        except (SyntaxError, OSError) as exc:
+            if source is not None:
+                raise
+            data = base64.b64decode(uri.split(',', 1)[1], validate=True)
+            if len(data) > 100 * 1024 * 1024:
+                raise ValueError('image_above_export_size_limit') from exc
+            digest = hashlib.sha256(data).hexdigest()
+            target = self.out / 'invalid_request_image_bytes' / (digest + '.bin')
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists() and target.read_bytes() != data:
+                raise ValueError('existing_export_asset_conflict') from exc
+            if not target.exists():
+                target.write_bytes(data)
+            self.files.add(target)
+            self.assets[digest] = dict(target=target, bytes=len(data), size=None,
+                sha256=digest, byte_preserving=True, reused_existing_public_image=False,
+                integrity='invalid_archived_request_image', validation_error=str(exc))
+            self.uri_cache[hashlib.sha256(uri.encode('ascii')).hexdigest()] = digest
+            return digest
 
 
 def emit_tool_results(publisher, out, values):
@@ -57,7 +86,7 @@ def export(data, run, score_dir, out, arms, reuse_url):
             raise ValueError('Arm must have completed generation and isolated scoring: ' + arm)
         if sum(1 for _ in (run / 'predictions' / arm).glob('*.json')) != len(inputs):
             raise ValueError('Prediction count differs from the scored cohort')
-    publisher = Publisher(out, data / 'manifest.json', image_roots=(data,))
+    publisher = RequestEvidencePublisher(out, data / 'manifest.json', image_roots=(data,))
     for row in inputs:
         for name in row['images']:
             digest = publisher.sources.get(name)
