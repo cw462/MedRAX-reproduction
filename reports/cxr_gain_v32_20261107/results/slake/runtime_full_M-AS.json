@@ -1,0 +1,95 @@
+{
+  "arm": {
+    "ready": true,
+    "tools": [
+      "chest_xray_classifier",
+      "chest_xray_report_generator",
+      "chest_xray_segmentation",
+      "chest_xray_expert",
+      "llava_med_qa",
+      "xray_phrase_grounding",
+      "image_visualizer",
+      "dicom_processor"
+    ],
+    "label": "M-MedRAX-8-adapted-no-RoentGen",
+    "bank_path": "[REDACTED]",
+    "bank_sha256": "9d4434eaad4059b57e4a4c525c68543c5b27e23e22787434f6dd79dd7567ff98",
+    "retrieval": {
+      "max_cards": 2,
+      "min_overlap": 2,
+      "max_chars": 2200
+    }
+  },
+  "tools": {
+    "chest_xray_classifier": {
+      "backend": "chest_xray_classifier",
+      "description": "args={}. Single original CXR finding scores, never severity or localization.",
+      "python": "[REDACTED]",
+      "gpu": "1",
+      "revision": "MedRAX-dae30e2f136ef0b2a40885a4c335386e9ffad052",
+      "deployment_status": "existing_assets_not_yet_observed_on_this_dataset"
+    },
+    "chest_xray_report_generator": {
+      "backend": "chest_xray_report_generator",
+      "description": "args={}. Single original CXR report; temporal claims unsupported.",
+      "python": "[REDACTED]",
+      "gpu": "1",
+      "revision": "MedRAX-dae30e2f136ef0b2a40885a4c335386e9ffad052",
+      "deployment_status": "existing_assets_not_yet_observed_on_this_dataset"
+    },
+    "chest_xray_segmentation": {
+      "backend": "chest_xray_segmentation",
+      "description": "args={\"organs\":[\"Left Lung\",\"Right Lung\",\"Heart\"]}. Exact anatomical names; real XRV masks, not disease or severity. Empty args segments all organs.",
+      "python": "[REDACTED]",
+      "gpu": "1",
+      "revision": "MedRAX-dae30e2f136ef0b2a40885a4c335386e9ffad052",
+      "deployment_status": "existing_assets_not_yet_observed_on_this_dataset"
+    },
+    "chest_xray_expert": {
+      "backend": "chest_xray_expert",
+      "description": "args={\"question\":\"focused image question\"}. CheXagent CXR visual QA.",
+      "python": "[REDACTED]",
+      "gpu": "1",
+      "revision": "MedRAX-dae30e2f136ef0b2a40885a4c335386e9ffad052",
+      "deployment_status": "existing_assets_not_yet_observed_on_this_dataset"
+    },
+    "llava_med_qa": {
+      "backend": "llava_med_qa",
+      "description": "args={\"question\":\"focused image question\"}. LLaVA-Med visual QA.",
+      "python": "[REDACTED]",
+      "gpu": "1",
+      "revision": "MedRAX-dae30e2f136ef0b2a40885a4c335386e9ffad052",
+      "deployment_status": "existing_assets_not_yet_observed_on_this_dataset"
+    },
+    "xray_phrase_grounding": {
+      "backend": "xray_phrase_grounding",
+      "description": "args={\"phrase\":\"visible structure or finding\"}. MAIRA-2 phrase grounding.",
+      "python": "[REDACTED]",
+      "gpu": "1",
+      "revision": "MedRAX-dae30e2f136ef0b2a40885a4c335386e9ffad052",
+      "deployment_status": "existing_assets_not_yet_observed_on_this_dataset"
+    },
+    "image_visualizer": {
+      "backend": "image_visualizer",
+      "description": "args={}. Display the bound original image; does not provide additional clinical evidence.",
+      "python": "[REDACTED]",
+      "gpu": "1",
+      "revision": "MedRAX-dae30e2f136ef0b2a40885a4c335386e9ffad052",
+      "deployment_status": "existing_assets_not_yet_observed_on_this_dataset"
+    },
+    "dicom_processor": {
+      "backend": "dicom_processor",
+      "description": "args={}. DICOM utility only; current JPEGs are not DICOM; do not select for JPEG.",
+      "python": "[REDACTED]",
+      "gpu": "1",
+      "revision": "MedRAX-dae30e2f136ef0b2a40885a4c335386e9ffad052",
+      "deployment_status": "existing_assets_not_yet_observed_on_this_dataset"
+    }
+  },
+  "backend_config": {
+    "tool_repo": "source/MedRAX",
+    "chexagent_snapshot": "[REDACTED]",
+    "vision_snapshot": "[REDACTED]"
+  },
+  "agent_system": "You answer chest-image questions using the original pixels and optional tools.\nKeep original image numbers, sides and timepoints bound. Read the COMPLETE question and\nall options. A finding supporting one clause does not establish every clause of an option.\nFirst give a tentative answer. If one unresolved visual attribute could change it, request\nONE appropriate check of that attribute. Specify the competing interpretations and the\nobservation that would distinguish them. Tools are optional, never a vote or authority.\nUse only registered tool arguments. For a QA tool accepting question or prompt, put the\nspecific check question in that documented argument; a planning description alone does\nnot reach the tool. For fixed-output tools, args must stay within their native contract.\nNever invent a crop, measurement, view or temporal\ncomparison capability. A single-image report cannot establish change between timepoints;\nclassifier scores are not severity. Unknown is distinct from absence or equality.\nFor laterality/count questions, inspect each relevant side/object; unilateral evidence\ncannot support bilateral involvement. For size/severity, use direct visible or valid\nmeasurement evidence, not classifier magnitude. For interval questions, bind each\ncomparison to the actual supplied originals; never infer time from call order. For\nprojection/position, distinguish acquisition effects from anatomical disease. These\nare question-dependent checks, not a mandatory checklist for every case.\nAfter a check, compare its result with the original and the question. Correct your first\nanswer when evidence warrants it, even if you initially felt certain. Conversely, a new\nunsupported diagnosis, prior example, or repeated opinion is not sufficient evidence to\nchange. Do NOT automatically preserve the first answer and do NOT require agreement.\nIf the evidence conflicts, choose another check ONLY if it can resolve the specific\nconflict within the available tools. Otherwise answer as well as the available evidence\nallows. Brief evidence statements only; no lengthy reasoning transcript.\nNo sibling questions, added patient history, or target answers are supplied. Optional\nskill cards, when present, are procedural suggestions, not findings in this patient.\nReturn a JSON object with exactly answer, reason, evidence, check.\nanswer: an original option letter/full option text, or a short direct answer.\nreason: one sentence.\nevidence: up to 3 objects {\"source\":\"original:1 or tool:T1\",\"finding\":\"short observation\",\n\"effect\":\"supports|contradicts|unknown\"}; reference only images/tools actually supplied.\ncheck: null to finish, or {\"attribute\":\"one unresolved property\", \"alternatives\":[\"one\",\"two\"],\n\"question\":\"specific observation needed\", \"tool\":\"registered name\", \"args\":{}, \"image_index\":1}.\nWhen finishing, set check=null. Do not use a tool failure as evidence of disease absence.\n"
+}
