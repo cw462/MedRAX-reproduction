@@ -162,20 +162,23 @@ def finalize(root, code, dataset, historical, historical_url):
     gpu = code / "configs/cxr_vqa_tool_worker_gpu.json"
     if gpu.is_file():
         pub.copy_json(gpu, out / "tool_worker_gpu.json")
-    if dataset == "chexbench":
-        recovery = root / "recovery_maira_20261108_0134"
+    recovery_folders = {"chexbench": "recovery_maira_20261108_0134",
+                        "vqarad": "recovery_chexagent_20261108_0328"}
+    if dataset in recovery_folders:
+        recovery = root / recovery_folders[dataset]
         if recovery.is_dir():
             request = read(recovery / "request.json")
             health = json.loads((recovery / "stdout.log").read_text().split("CXR_VQA_RESULT=")[-1])
             for name in [request["image"], *health.get("derived_images", [])]:
                 pub.alias(name, pub.put_image(pub.read_image(Path(name))))
-            for name in ("request.json", "recovery.json"):
-                pub.copy_json(recovery / name, out / "recovery" / name)
+            for name in ("request.json", "recovery.json", "health_verified.json", "checkpoint_header_probe.json"):
+                if (recovery / name).is_file():
+                    pub.copy_json(recovery / name, out / "recovery" / name)
             pub.emit(out / "recovery/health_result.json", health)
             pub.copy_json(recovery / "artifacts/raw.json", out / "recovery/health_raw.json")
             pub.emit(out / "recovery/health_stderr.txt", (recovery / "stderr.log").read_text())
-            pub.emit(out / "recovery/initial_job_failure.txt", (recovery / "original_jobs/chexbench.log").read_text())
-            pub.emit(out / "recovery/initial_job_markers.json", {"pid": (recovery / "original_jobs/chexbench.pid").read_text().strip(), "exit_code": (recovery / "original_jobs/chexbench.exitcode").read_text().strip()})
+            pub.emit(out / "recovery/initial_job_failure.txt", (recovery / "original_jobs" / (dataset + ".log")).read_text())
+            pub.emit(out / "recovery/initial_job_markers.json", {"pid": (recovery / "original_jobs" / (dataset + ".pid")).read_text().strip(), "exit_code": (recovery / "original_jobs" / (dataset + ".exitcode")).read_text().strip()})
     pub.emit(out / "recovery_image_assets.json", [{k: v for k, v in item.items() if k != "target"} | {"path": pub.rel(item["target"], out / "recovery_image_assets.json")} for item in pub.assets.values()])
     pub.emit(out / "r41_target_export_complete.json", {"status": "completed", "dataset": dataset, "generation_gate": gate, "reuse_audit": reuse, "new_inference_requests_from_publication": 0})
     pub.emit(out / "publication_manifest.json", {"files": sorted(set(manifest["files"]) | {p.relative_to(out).as_posix() for p in pub.files}), "redactions": dict(Counter(manifest["redactions"]) + pub.redactions)})
