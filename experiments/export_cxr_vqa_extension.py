@@ -8,6 +8,31 @@ from export_cxr_vqa_toolsets import CALL_FILES, rows
 from export_vote_phase import Publisher, read
 
 
+def emit_tool_results(publisher, out, values):
+    """Keep complete tool evidence in files small enough for repository hosting."""
+    batches, current, size = [], [], 0
+    for value in values:
+        row_size = len(json.dumps(value, ensure_ascii=False).encode('utf-8')) + 1
+        if current and size + row_size > 40_000_000:
+            batches.append(current)
+            current, size = [], 0
+        current.append(value)
+        size += row_size
+    if current or not batches:
+        batches.append(current)
+    if len(batches) == 1:
+        publisher.emit(out / 'raw_tool_results.jsonl', batches[0], jsonl=True)
+        return
+    parts = []
+    for index, batch in enumerate(batches, 1):
+        name = f'raw_tool_results/part_{index:03d}.jsonl'
+        publisher.emit(out / name, batch, jsonl=True)
+        if (out / name).stat().st_size >= 100_000_000:
+            raise ValueError('One tool evidence partition exceeds the hosting file limit')
+        parts.append({'path': name, 'records': len(batch)})
+    publisher.emit(out / 'raw_tool_results_index.json', {'parts': parts})
+
+
 def restore_images(value, run):
     if isinstance(value, dict):
         digest = value.get('cxr_request_image_base64_sha256')
@@ -96,7 +121,7 @@ def export(data, run, score_dir, out, arms, reuse_url):
                 entry.get('result', {}).pop('ledger_remaining_proxy_cny', None)
                 calls.append(entry)
             publisher.emit(out / 'calls' / arm / (qid + '.json'), calls)
-    publisher.emit(out / 'raw_tool_results.jsonl', list(tool_results.values()), jsonl=True)
+    emit_tool_results(publisher, out, tool_results.values())
     publisher.emit(out / 'reuse.json', {'D_M_C_X_evidence': reuse_url})
     publisher.emit(out / 'image_assets.json', [
         {key: value for key, value in item.items() if key != 'target'} |

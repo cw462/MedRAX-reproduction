@@ -55,6 +55,27 @@ def card(raw, case_id):
     return {'source_id': case_id, **{key: value[key].strip() for key in value}}
 
 
+def source_card(paid, case, arm, messages, out):
+    """An unknown sent source request is unusable evidence and is never reissued."""
+    case_id = case['case_id']
+    try:
+        raw = paid.call({'question_id': case_id}, arm, 1, messages)
+    except RuntimeError as exc:
+        if str(exc) != 'unknown_sent_no_reissue:' + case_id:
+            raise
+        record = {'case_id': case_id, 'arm': arm, 'status': 'unknown_sent_no_saved_reply',
+                  'retry': False, 'usage_status': 'unknown', 'proxy_cny': None,
+                  'excluded_from_bank': True}
+        destination = out / 'unknown_source_cases' / arm / (case_id + '.json')
+        if destination.is_file():
+            if read(destination) != record:
+                raise ValueError('Unknown source-case record changed')
+        else:
+            save(destination, record)
+        return None
+    return card(raw, case_id)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
@@ -106,7 +127,7 @@ def main(argv=None):
                 progress = {'arm': 'banks', 'learning_arm': arm, 'qid': case_id, 'index': index}
                 write(args.out / 'progress.json', dict(progress, status='running'))
                 try:
-                    result = card(paid.call({'question_id': case_id}, arm, 1, messages), case_id)
+                    result = source_card(paid, case, arm, messages, args.out)
                 except Exception as exc:
                     write(args.out / 'progress.json', dict(progress, status='stopped', error=safe_error(exc, key)))
                     raise
@@ -117,6 +138,9 @@ def main(argv=None):
             bank = {'kind': arm, 'source_only': True, 'frozen': True,
                     'source_sha256': args.source_sha256, 'source_cases': len(cases),
                     'discarded_cases': len(cases) - len(items), 'items': items}
+            unknown = sorted(p.stem for p in (args.out / 'unknown_source_cases' / arm).glob('*.json'))
+            if unknown:
+                bank['unknown_sent_cases'] = unknown
             destination = args.out / f'bank_{arm}.json'
             if destination.is_file():
                 if read(destination) != bank:
