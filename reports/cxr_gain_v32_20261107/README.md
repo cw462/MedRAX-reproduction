@@ -1,6 +1,6 @@
 # AgentGain v3.2：针对性取证与行动Skill（2026-11-07）
 
-用户已授权启动新实验。此页记录冻结运行安排，当前不报告准确率或宣称改进。原扩展实验及其最终报告保留不变，新实验使用独立代码、配置和输出目录。
+六组新目标实验已全部生成完成、退出0并隔离评分；[最终报告](FINAL_REPORT.md)及[完成登记](completion_register.json)已整理。此页保留冻结运行安排与来源记录。原扩展实验及其最终报告保留不变，新实验使用独立代码、配置和输出目录。
 
 每个数据集运行M-AS（针对性取证＋行动Skill），然后运行同条件无Skill消融M-A，依次SLAKE114题、VQA-RAD116题、CheXbench618题。两个新臂均最多6次主模型、4次工具，允许提前结束，不强制工具、不投票。历史M复用，不重跑M-F或新增D；目标期间不读目标参考答案。相对旧M的整体差异包含额外调用预算、运行时段和工具环境差异；同条件M-AS vs M-A才用于判断Skill新增贡献。
 
@@ -24,6 +24,6 @@
 
 ## 已完成结果
 
-[SLAKE完整配对结果](results/slake/README.md) · [共享源学习与审阅证据](results/source_learning/README.md)。其余队列继续按冻结顺序运行，不因SLAKE成绩改变范围。
+[SLAKE完整配对结果](results/slake/README.md) · [共享源学习与审阅证据](results/source_learning/README.md)。其余队列已按冻结顺序完成，没有因SLAKE成绩改变范围。
 
-[VQA-RAD完整配对结果](results/vqarad/README.md)已完成；CheXbench继续按原范围生成，不按中途分数调整方案。
+[VQA-RAD完整配对结果](results/vqarad/README.md)已完成；[CheXbench完整配对结果](results/chexbench/README.md)亦已完成，没有按中途成绩调整方案。
