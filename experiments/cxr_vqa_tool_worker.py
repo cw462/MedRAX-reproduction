@@ -140,6 +140,12 @@ def inference_events(req, events):
 
 if __name__=='__main__':
     req=json.load(sys.stdin);events=[]
+    gpu_config = Path(__file__).resolve().parents[1] / 'configs/cxr_vqa_tool_worker_gpu.json'
+    if gpu_config.is_file():
+        device = json.loads(gpu_config.read_text())['cuda_visible_devices']
+        if device not in ('0', '1'):
+            raise ValueError('Unsupported tool worker GPU')
+        os.environ['CUDA_VISIBLE_DEVICES'] = device
     with contextlib.redirect_stdout(sys.stderr):
         try:
             with inference_events(req,events):result=execute(req)
@@ -147,6 +153,7 @@ if __name__=='__main__':
             import traceback;traceback.print_exc()
             result={'status':'failed','observation':None,'error_type':type(exc).__name__,'error':str(exc)[:300]}
     result['actual_model_events']=events
+    result['cuda_visible_devices']=os.environ.get('CUDA_VISIBLE_DEVICES')
     result['adapter_revision']='cxr-vqa-existing-snapshot-binding-3'
     if req['backend']=='view_check' and result['status']=='completed':
         result['actual_model_events'].append({'kind':'tensorflow_predict','model_class':'OpenCXR Image Sorter','status':'completed'})
