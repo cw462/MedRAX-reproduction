@@ -413,7 +413,7 @@ class ProviderLedger:
 
     # -------------------------------------------------------------- operations
     def reserve(self, metadata=None, *, request_id, estimated_input_tokens, max_output_tokens,
-                model=None):
+                model=None, enforce_amount_cap=True):
         self._usable()
         clean = _metadata(metadata)
         if type(estimated_input_tokens) is not int or estimated_input_tokens < 0:
@@ -429,7 +429,7 @@ class ProviderLedger:
         if any(item['request_id'] == request_id for item in self._state['reservations']):
             raise LedgerIntegrityError('request_id already reserved; refusing a duplicate call')
         amount = self._reserve_amount(estimated_input_tokens, max_output_tokens)
-        if self.remaining < amount:
+        if enforce_amount_cap and self.remaining < amount:
             raise BudgetExceeded(f'Insufficient remaining budget: need {_money(amount)}')
         candidate = deepcopy(self._state)
         reservation_id = uuid.uuid4().hex

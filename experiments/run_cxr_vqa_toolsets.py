@@ -247,6 +247,7 @@ class PaidCalls:
         return ledger.reserve(
             request_id=request_id, estimated_input_tokens=self.profile.max_input_tokens,
             max_output_tokens=2048, model=self.protocol['model'],
+            enforce_amount_cap=self.protocol.get('budget', {}).get('enforce_money_cap') is not False,
             metadata={'run': self.protocol['experiment_id'], 'arm': arm, 'qid': qid})
 
     @contextmanager

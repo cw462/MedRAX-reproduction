@@ -97,6 +97,24 @@ class V12LedgerTests(unittest.TestCase):
                 ledger.reserve(request_id='synthetic:over-cap',estimated_input_tokens=100,max_output_tokens=20)
             self.assertEqual(ledger._state['reservations'],[])
 
+    def test_uncapped_extension_still_records_cost_and_rejects_duplicates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.sqlite_ledger(directory, cap_cny='0.000001')
+            profile = get_profile('qwen3-vl-plus')
+            paid = PaidCalls.__new__(PaidCalls)
+            paid.profile = profile
+            paid.protocol = dict(experiment_id='fixture', model=profile.model)
+            with ConcurrentV12Ledger(path, profile, cap_cny='0.000001') as ledger:
+                with self.assertRaises(BudgetExceeded):
+                    paid.reserve(ledger, 'synthetic:one', 'O', 'fixture')
+                paid.protocol['budget'] = {'enforce_money_cap': False}
+                reservation = paid.reserve(ledger, 'synthetic:one', 'O', 'fixture')
+                settlement = ledger.settle(reservation, usage={'prompt_tokens': 90, 'completion_tokens': 10})
+                self.assertEqual(settlement['status'], 'settled')
+                self.assertLess(ledger.remaining, 0)
+                with self.assertRaisesRegex(LedgerIntegrityError, 'already reserved'):
+                    paid.reserve(ledger, 'synthetic:one', 'O', 'fixture')
+
     def test_stale_checksum_schema_and_total_do_not_block_open_or_commit(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.ledger(directory):
