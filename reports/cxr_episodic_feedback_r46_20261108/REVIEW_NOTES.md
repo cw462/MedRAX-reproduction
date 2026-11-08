@@ -1,0 +1,7 @@
+# 审阅范围和接线说明
+
+原始审阅全文均保留，不能把所有措辞当独立事实保证。初始代码审阅中“prepare不读refs”应准确解释为：prepare机械复制本地开发参考文件，不解析它来构库；真正生成runner不读，deploy不上传。源质量审阅基于内联实际E和本地源标签/输入/代码，未逐字节独立审计服务器或临床判图。
+
+初始评分退出路径疑问已经由private pull将jobs原始phase退出复制到mirror generation解决。实际源故障后，新增source.effective.exitcode、独立recovery job0和scorer显式参数，原raw1保留。恢复审阅要求的companion上传与启动分支在启动前完成并0API验证，旧审阅请求中的helper快照不包含后来已补齐的分支。全部推理core/原runner在源恢复中未改。
+
+源审阅批准12条合法示例记忆并明确gamma薄弱，不是批准临床有效性。结果审阅partial只支持单次开发观察；它的“换No标签即证明复制”等解释是待验证假设，不能据此伪造真值或声称因果已证。
