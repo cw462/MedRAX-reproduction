@@ -13,3 +13,8 @@
 - R43 uniform net vsfixedpredecessor is+5CheX/0SLAKE; M42+1VQA. O andD-Q largeformatrecoveries are interfaceeffects, not newcapacity.
 - Relative toD, currentbesthas+55/+4/+15correct, but differentbudget/info/epochs make thisdescriptive. Rad-Restruct direct77 exceedsM4373; X82bestsubgroup, nooraclecombine.
 - Fresh result-to-claim supports limiteddescriptivecomparison, samefamilyprovisional. No officialSOTA/clinicalcausal/blanketSkillclaim. Next independent source/dev matchedbudgetvalidation stillpending.
+
+
+## 2026-11-08 — R44 fixed short Skill: completed null development result
+
+Official SLAKE train source12/12images and validation27/8images after target-origin/exactpixel exclusion. All remaining validation cases used. Matched1main/0tool P0/P1, shared explicit-answer adapter+M4CXR EM, one sample/temp.2. Both21/27(77.78%), all27answerssame, corrections0/harms0/net0,0missing/technicalfault.54requests/replies,exit0,0.259312CNYproxy,62.50017s. P1added4374inputtokens/0.017496proxy and changed no answers. PrimaryJSONgate absent; wholeJSON0botharmsstill21correct. Six reference-EM mismatches on4images are not all clinically adjudicated errors. Bootstrapdelta[0,0] is observed-degenerate, not equivalence. Source8abnormalityanswersallYes and question-text exposure disclosed. PrepaidARIScode/source8ready, same-familyprovisional. No expanded target run; frozen466/108/100 and all historical records unchanged; strongest-real-accuracy objective remainsopen. Report reports/cxr_skill_probe_r44_20261108/README.md; publication/claimreview pending at entry time.
