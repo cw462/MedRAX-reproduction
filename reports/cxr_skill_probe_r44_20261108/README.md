@@ -61,3 +61,5 @@
 ## 原图阅读索引
 
 [12张源图接触表](figures/source_contact_sheet.jpg) · [8张开发图接触表](figures/development_contact_sheet.jpg)。这两张缩放拼图仅供读者和发布检查阅读，未用于模型推理；模型实际输入及公开原图仍为完整原始JPEG字节。
+
+Publication text follows the repository Git LF normalization. Saved per-request evidence and original image bytes are copied unchanged; publication-manifest byte counts refer to Git-normalized outgoing files. Newline normalization does not alter answers, JSON values or scores.
