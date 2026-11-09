@@ -24,18 +24,24 @@ def asset_normalizer(evidence):
         if not target.is_relative_to(evidence.resolve()) or not target.is_file():
             raise ValueError('self_contained_public_asset_missing_or_outside_evidence')
         assets.append((target, 'PUBLIC_ASSET:'+str(index)))
+    mappings_by_parent = {}
     def normalize(value, document):
-        if isinstance(value, dict):
-            return {key: normalize(item, document) for key, item in value.items()}
-        if isinstance(value, list):
-            return [normalize(item, document) for item in value]
-        if not isinstance(value, str):
-            return value
-        mappings = [(os.path.relpath(target, document.parent).replace('\\', '/'), canonical)
-                    for target, canonical in assets]
-        for relative, canonical in sorted(mappings, key=lambda pair: -len(pair[0])):
-            value = value.replace(relative, canonical)
-        return value
+        parent = Path(document).parent
+        if parent not in mappings_by_parent:
+            mappings_by_parent[parent] = sorted(
+                [(os.path.relpath(target, parent).replace('\\', '/'), canonical)
+                 for target, canonical in assets], key=lambda pair: -len(pair[0]))
+        mappings = mappings_by_parent[parent]
+        def visit(item):
+            if isinstance(item, dict):
+                return {key: visit(child) for key, child in item.items()}
+            if isinstance(item, list):
+                return [visit(child) for child in item]
+            if isinstance(item, str):
+                for relative, canonical in mappings:
+                    item = item.replace(relative, canonical)
+            return item
+        return visit(value)
     return normalize
 
 

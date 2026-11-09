@@ -3369,13 +3369,17 @@
 | 2026-11-08 21:27:52 | /run-experiment + /analyze-results + /result-to-claim | [reports/cxr_image_memory_gt_r47_20261108/PUBLICATION_MANIFEST.json](reports/cxr_image_memory_gt_r47_20261108/PUBLICATION_MANIFEST.json) | completed result | R47 online same-image truth feedback:468/618, net+2, full positive-negative evidence |
 
 <!-- R49_ONLINE_GT_WINDOW_SKILL_START -->
-**R49 completed results: evidence-first publication; final result review pending.**
+## R49：已完成在线真值反馈与窗口Skill产物
 
-CheXbench：M43 466/618→R49 465/618（75.40%→75.24%），49纠正／50误改／净-1；聚簇95%微平均差区间[-3.3762, +3.0450]pp（含0）。
+三清单分别完整报告，不合并独立病例准确率；全部848题新生成。下列记录保留正负结果与不同信息条件。
 
-另列SLAKE：M43 108/114→R49 113/114（94.74%→99.12%），5纠正／0误改／净+5；聚簇95%微平均差区间[+0.9174, +8.4750]pp（全正）。
-
-VQA-RAD：M42 100/116→R49 97/116（86.21%→83.62%），4纠正／7误改／净-3；聚簇95%微平均差区间[-8.2645, +2.7273]pp（含0）。
-
-Online GT and executor/resource/prompt confounds prevent Skill-only causal or SOTA claims. [Full public evidence](reports/cxr_online_skill_r49_20261108/README.md).
+| 产物 | 范围 |
+|---|---|
+| [完整结果](reports/cxr_online_skill_r49_20261108/README.md) | 全量宏微、子集、纠正／误改／区间、方法限制 |
+| [逐题正负证据](reports/cxr_online_skill_r49_20261108/CASE_INDEX.md) | 全部848题各自原图、预测、反馈时序、请求与窗口 |
+| [实际资源](reports/cxr_online_skill_r49_20261108/RESOURCE_SUMMARY.json) | 主／元／Embedding／工具分账、未知费用与时间 |
+| [复现说明](reports/cxr_online_skill_r49_20261108/REPRODUCTION.md) | 公开语义复算、0新推理、无新字节门槛 |
+| [CheXbench证据](reports/cxr_online_skill_r49_20261108/evidence/chexbench/publication_manifest.json) | [公开重算](reports/cxr_online_skill_r49_20261108/public_reproduction/chexbench/summary.json) |
+| [另列SLAKE证据](reports/cxr_online_skill_r49_20261108/evidence/slake/publication_manifest.json) | [公开重算](reports/cxr_online_skill_r49_20261108/public_reproduction/slake/summary.json) |
+| [VQA-RAD证据](reports/cxr_online_skill_r49_20261108/evidence/vqarad/publication_manifest.json) | [公开重算](reports/cxr_online_skill_r49_20261108/public_reproduction/vqarad/summary.json) |
 <!-- R49_ONLINE_GT_WINDOW_SKILL_END -->

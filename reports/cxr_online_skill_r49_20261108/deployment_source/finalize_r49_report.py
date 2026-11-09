@@ -120,6 +120,29 @@ def actual_review(raw_path, metadata_path, claims_path):
                 clinical_or_integrity_audit_claim=False, favorable_verdict_required=False)
 
 
+def publication_sequence():
+    """Keep the user's later evidence-first order separate from original plans."""
+    history = read(REPORT/'PUBLICATION_HISTORY.json')
+    first = history['first_evidence_publication']
+    committed = read(ROOT/'local_assets/r49_evidence_first_publication/commit.json')
+    pushed = read(ROOT/'local_assets/r49_evidence_first_publication/push_completed.json')
+    require(first.get('status') == 'git_push_completed_exit0'
+            and first.get('commit') == committed.get('commit') == pushed.get('commit')
+            and pushed.get('exit_code') == 0
+            and first.get('final_result_review_completed_at_first_push') is False
+            and history['user_sequence_amendment'].get('first_upload_before_final_review') is True
+            and history['post_push_remote_verification'].get('waived_by_user') is True
+            and history['post_push_remote_verification'].get('performed') is False,
+            'actual_user_directed_first_push_and_post_verification_waiver_required')
+    return {'history': 'PUBLICATION_HISTORY.json', 'amendment': 'PUBLICATION_SEQUENCE_AMENDMENT.md',
+            'first_evidence_publication': first,
+            'first_publication_preceded_final_result_review': True,
+            'final_review_timing': 'after_generation_and_first_evidence_push_before_final_report_followup',
+            'original_deferred_prelaunch_control_unchanged': True,
+            'post_push_remote_verification_waived_by_user': True,
+            'post_push_remote_verification_performed': False}
+
+
 def complete(value, ds):
     s = SPEC[ds]
     require(value.get('status') == 'generation_complete' and value.get('arm') == ARM
@@ -557,8 +580,12 @@ def dependency_recovery(archive, public_root, raw_review, metadata_review, bundl
             and len(raw_review.read_text(encoding='utf-8-sig').strip()) > 20,
             'actual_DeepSeek_dependency_delta_review_required')
     qid = 'chexbench_rad_restruct_0123'; evidence = bundle['evidence']
-    pred = read(bundle['files']['predictions'][qid]); event = read(bundle['files']['prediction_events'][qid])
-    feedback = read(bundle['files']['feedback'][qid])
+    pred_path = bundle['files']['predictions'][qid]
+    event_path = bundle['files']['prediction_events'][qid]
+    feedback_path = bundle['files']['feedback'][qid]
+    pred = public_asset_semantics(read(pred_path), pred_path, evidence)
+    event = public_asset_semantics(read(event_path), event_path, evidence)
+    feedback = public_asset_semantics(read(feedback_path), feedback_path, evidence)
     require(pred.get('ordinal') == 1 and pred.get('main_calls') == 3 and pred.get('tool_calls') == 2
             and event.get('saved_prediction') == pred and feedback.get('saved_prediction') == pred,
             'first_committed_prediction_not_replaced_after_dependency_repair')
@@ -1425,7 +1452,10 @@ def adoption_recovery(archive, public_root, bundles, final_review, explanation=N
         require(utc(read(bundles['chexbench']['files']['predictions'][row['question_id']])['prediction_saved_at']) <= earliest_original_analysis,
                 'first210_committed_predictions_must_precede_known_adoption_analysis_failure')
     return {'recovery_id': 'adoption_1', 'public_tree': public_rel, 'proof': proof, 'review_files': review_files,
-            'review_metadata': metadata, 'audit_timing': 'after_generation_before_publication',
+            'review_metadata': metadata,
+            'original_planned_audit_timing': 'after_generation_before_publication',
+            'audit_timing': 'after_generation_and_user_directed_first_evidence_push_before_final_report_followup',
+            'publication_sequence_amendment': 'PUBLICATION_SEQUENCE_AMENDMENT.md',
             'single_final_review_shared_with_result_claim_review': True, 'additional_prelaunch_DeepSeek_request_required': False,
             'initial_user_directed_audit_deferral_preserved': True, 'initial_deferred_marker_is_reviewer_ready_claim': False,
             'actual_final_review_scope_complete': True, 'actual_final_review_audit_scope': metadata['audit_scope'],
@@ -1573,7 +1603,7 @@ def make_readme(bundles, extras, resource, review):
                   r['fresh_backend_attempts'], r['healthy_backend_attempts'], r['registered_failed_historical_attempts'],
                   num(r['backend_compute_seconds_known']), extras[ds]['fresh_tool_backend_time_unknown_count'], r['failed_or_unknown_tools'],
                   num(extras[ds]['recorded_request_span_seconds'])] for ds in DATASETS]
-    m = review['metadata']; probe_value = resource['separate_embedding_probe']; repair = resource['dependency_recovery']; cuda = resource['cuda_recovery']; schema = resource['meta_schema_recovery']; fields = resource['mutation_fields_recovery']; embed = resource['embedding_http_recovery']; phrase = resource['phrase_guard_recovery']; adoption = resource['adoption_recovery']; scoring_provenance = resource['offline_scoring_provenance']
+    m = review['metadata']; probe_value = resource['separate_embedding_probe']; repair = resource['dependency_recovery']; cuda = resource['cuda_recovery']; schema = resource['meta_schema_recovery']; fields = resource['mutation_fields_recovery']; embed = resource['embedding_http_recovery']; phrase = resource['phrase_guard_recovery']; adoption = resource['adoption_recovery']; scoring_provenance = resource['offline_scoring_provenance']; publication = resource['publication_sequence']
     variants = [[SPEC[ds]['label'], (v := fields['per_dataset_prompt_amendments'][ds])['ordinary_mutation_requests'],
                  v['original_system_requests'], v['clarified_system_requests'], len(v['protected_original_events']),
                  v['extra_ordinary_meta_calls']] for ds in DATASETS]
@@ -1688,7 +1718,7 @@ CUDA接续在第4个窗口、120个已保存预测与反馈之后再次停止：
 
 {table(['数据集', '激活前已提交题数', '普通ANALYZE请求', '原system请求', '澄清system请求', '保护原缓存事件数', '普通澄清额外调用'], analysis_rows)}
 
-用户明确指示“这个可以跑完再审计？”。因此本次初始`EXECUTION_AUTHORIZATION.json`如实记录`audit_deferred_until_full_generation`、review_completed=false、scope_complete=false、explicit_user_reply及完成后发布前审计要求；它不冒充外部审阅ready，也不在完成后改写成曾经预审通过。实现检查完成后按现有实验授权继续，所有技术停止条件保留。最终完整848题之后的**同一次**实际DeepSeek结果审阅覆盖adoption_protocol、request_resource_accounting、complete_results_and_claims，scope_complete来自真实审阅结论；这里与下文RESULT_CLAIM审阅是同一次，不额外增加或重复计费。负结果可以如实发布，审阅已完成及范围覆盖不能由性能好坏替代。
+用户最初明确指示“这个可以跑完再审计？”。因此初始`EXECUTION_AUTHORIZATION.json`如实保留`audit_deferred_until_full_generation`、review_completed=false、scope_complete=false、explicit_user_reply及原定完成后发布前审计要求；不将其改写为曾经预审ready。随后用户明确要求“先上传github吧”“抓紧推送”，因此先在`{publication['first_evidence_publication']['commit']}`公开完整已完成结果与证据，当时最终结果审阅尚未完成。本页对应后续最终报告：同一次实际DeepSeek审阅发生在全部848题及首次证据推送之后、最终报告补充推送之前，覆盖adoption_protocol、request_resource_accounting、complete_results_and_claims，scope_complete来自真实结论。不能再声称审阅发生在第一次发布之前；最新用户指示和原始历史授权分开保存。这里与下文RESULT_CLAIM审阅是同一次，不重复计费，负结果可以如实发布。[发布顺序修订](PUBLICATION_SEQUENCE_AMENDMENT.md)与[实际发布控制记录](PUBLICATION_HISTORY.json)保留这一顺序。
 
 [采用项恢复方案]({adoption['review_files']['explanation']}) · [实际完成后的统一审计]({adoption['review_files']['raw']}) · [审计元数据]({adoption['review_files']['metadata']}) · [helper源码]({adoption['review_files']['helper']}) · [完整恢复树／210题失败边界／原始后审授权]({adoption['public_tree']}) · [GEN两次选择登记](evidence/chexbench/failure_events/adoption_1_registration.json)。各组`failure_events/analysis_unique_adoption_amendment.json`保留实际激活点、原提示／说明及保护事件清单。只有最后adoption_1的controller与三组原runner实际原始退出0，全部历史1保持；没有技术空答或effective-exit。
 
@@ -1696,7 +1726,7 @@ CUDA接续在第4个窗口、120个已保存预测与反馈之后再次停止：
 
 R48的63题后MAIRA嵌套失败和原始退出1保持独立，不把R49视为其恢复、不填失败题／清缓存／重试旧请求。[全部逐题与窗口证据](CASE_INDEX.md) · [公开复现与实际路径](REPRODUCTION.md)。公开语义重算使用保存的请求回复和统一答案适配，0新推理、无新字节／哈希／像素校验；本地复算不是第三方医学审计。图片／数据来源与适用条件见各组证据，代码许可证不重新许可数据。
 
-本页生成不等于GitHub发布完成；只有实际推送且main核验成功后才报告发布完成。
+本页生成不等于最终补充推送完成；以实际Git推送成功为准。用户明确表示不需要推送后的远端核验，因此没有该项核验，也不将本地commit或推送回执冒称额外远端核验结论。
 '''
 
 
@@ -1740,7 +1770,10 @@ def make_reproduction(actual, review, repair, cuda, schema, fields, embed, phras
                  '## 解释限制', '',
                  '848题为三个独立重置的题目流，不是848个独立病例；SLAKE同源重叠、CheX跨子集同图与VQA复述保留。历史比较不是同期无Skill反事实。线上学习可在已保存预测后读取自身标签，闭卷准确率、在线反馈准确率与JSON合规分开。最后窗口新Skill不改善本轮既有分数。', '',
                  link('实际结果审阅', review['paths']['raw'])+' · '+link('结果声明', review['paths']['claims'])+' · '+link('完整资源原字段', 'RESOURCE_SUMMARY.json'), '']
-    sections += ['## 保存的评分尝试与原始控制记录', '',
+    sections += ['## 用户修订后的实际发布顺序', '',
+                 '用户后续明确要求先上传，完整已完成证据已先行推送，最终结果审阅发生在首次证据推送之后、最终报告补充推送之前。原始后审授权和原定发布前审计文字作为历史记录保留，不改写为曾经预审通过。用户另明确不需要推送后的远端核验；以实际Git推送成功和本地commit记录报告，不能称额外远端核验已完成。', '',
+                 link('实际首次推送与发布控制记录', 'PUBLICATION_HISTORY.json')+' · '+link('最新用户顺序／核验指示', 'PUBLICATION_SEQUENCE_AMENDMENT.md'), '',
+                 '## 保存的评分尝试与原始控制记录', '',
                  f"已记录{scoring_provenance['total_native_score_function_entries']}次原生评分函数进入、{scoring_provenance['completed_metric_calculations']}次完整指标计算、{scoring_provenance['pre_adaptation_failed_invocations']}次适配前失败。这里没有评分调用，已保存summary／per_question全部复用。", '',
                  link('真实来源、首个失败／接续及公开凭证清单', 'OFFLINE_SCORING_PROVENANCE.md'), '']
     return '\n'.join(sections)
@@ -1828,6 +1861,7 @@ def main():
     # All actual completion and review checks precede the first outgoing write.
     bundles = load_completed(actual['archive_root'], args.public_reproduction_summary_name)
     review = actual_review(args.result_review, args.result_review_metadata, args.claims)
+    publication = publication_sequence()
     scoring_provenance = offline_scoring_provenance(actual['archive_root'], actual['preparation_root'],
         actual['score_receipts_root'], actual['public_reporting_provenance_root'], bundles)
     actual = recorded_scoring_sources(actual, scoring_provenance)
@@ -1874,6 +1908,7 @@ def main():
                     fixed_main_call_limit=None, fixed_tool_call_limit=None),
                 'separate_embedding_probe': single_probe, 'actual_result_review': review,
                 'offline_scoring_provenance': scoring_provenance,
+                'publication_sequence': publication,
                 'execution_review_metadata': read(REPORT/'CODE_REVIEW_METADATA.json') if (REPORT/'CODE_REVIEW_METADATA.json').is_file() else None,
                 'actual_paths': actual, 'final_recovery_controller_raw_exit': 0, 'final_full_runner_raw_dataset_exits': {ds: 0 for ds in DATASETS},
                 'dependency_recovery': repair, 'initial_controller_raw_exit': 1, 'initial_chexbench_raw_exit': 1,
@@ -1895,7 +1930,10 @@ def main():
                 'ordinary_ANALYZE_uniqueness_clarifier_extra_calls': 0,
                 'adoption_credit_attribution_and_prompt_change_confound': True,
                 'initial_audit_deferral_control_rewritten_as_ready': False,
-                'single_actual_result_and_adoption_audit_after_generation_before_publication': True,
+                'single_actual_result_and_adoption_audit_after_generation_before_final_report_followup': True,
+                'first_publication_preceded_final_result_review': publication['first_publication_preceded_final_result_review'],
+                'post_push_remote_verification_waived_by_user': publication['post_push_remote_verification_waived_by_user'],
+                'post_push_remote_verification_performed': publication['post_push_remote_verification_performed'],
                 'all_attempts_exited_zero_claim': False,
                 'controller_wall_seconds': None, 'unpriced_tool_hardware_cost': None,
                 'whole_generation_wall_times_not_inferred_from_file_mtime': True,

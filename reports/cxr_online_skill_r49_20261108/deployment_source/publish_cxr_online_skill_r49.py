@@ -133,8 +133,12 @@ def paths():
     return values
 
 
+_PUBLIC_MAPPINGS = {}
+_PUBLIC_TARGETS = {}
+
+
 def public_asset_semantics(value, document):
-    """Normalize document-relative image links without reading image contents."""
+    """Apply the same ordered substitutions, caching by evidence/document parent."""
     import os
     evidence = REPORT/'evidence/chexbench'
     for dataset in DATASETS:
@@ -142,16 +146,29 @@ def public_asset_semantics(value, document):
         if document.resolve().is_relative_to(candidate.resolve()):
             evidence = candidate
             break
-    assets = read(evidence/'image_assets.json')
-    mappings = [(os.path.relpath((evidence/item['path']).resolve(), document.parent).replace('\\', '/'),
-                 'PUBLIC_ASSET:'+str(index)) for index, item in enumerate(assets)]
+    cache_key = (evidence, document.parent)
+    if cache_key not in _PUBLIC_MAPPINGS:
+        if evidence not in _PUBLIC_TARGETS:
+            assets = read(evidence/'image_assets.json')
+            _PUBLIC_TARGETS[evidence] = [((evidence/item['path']).resolve(), 'PUBLIC_ASSET:'+str(index))
+                                         for index, item in enumerate(assets)]
+        mappings = sorted([(os.path.relpath(target, document.parent).replace('\\', '/'), canonical)
+                           for target, canonical in _PUBLIC_TARGETS[evidence]],
+                          key=lambda pair: -len(pair[0]))
+        # A substitution cannot occur if every old path requires this absent
+        # literal substring. This avoids scanning inline base64 once per asset.
+        anchor = 'assets/' if mappings and all('assets/' in old for old, _ in mappings) else None
+        _PUBLIC_MAPPINGS[cache_key] = mappings, anchor
+    mappings, anchor = _PUBLIC_MAPPINGS[cache_key]
     def normalize(item):
         if isinstance(item, dict):
             return {key: normalize(child) for key, child in item.items()}
         if isinstance(item, list):
             return [normalize(child) for child in item]
         if isinstance(item, str):
-            for old, new in sorted(mappings, key=lambda pair: -len(pair[0])):
+            if anchor and anchor not in item:
+                return item
+            for old, new in mappings:
                 item = item.replace(old, new)
         return item
     return normalize(value)
@@ -620,6 +637,7 @@ def dependency_recovery(continued_by_cuda=False):
 
 def ready():
     """Require actual three-stream completion, public reproduction and result review."""
+    print(json.dumps({'publication_gate':'full_semantic_readiness_start'}),flush=True)
     if not REQUIRED_SCRIPTS <= set(SCRIPTS):
         raise ValueError('required_R49_source_or_test_missing')
     documents = ('README.md', 'PLAN.md', 'PROTOCOL.json', 'TESTS.md', 'REVIEW_STATUS.md',
@@ -654,24 +672,31 @@ def ready():
                 'same_budget_causal_Skill_claim', 'pooled_independent_848_case_accuracy_claim'))):
         raise ValueError('actual_controller_exits_and_honest_claim_scope_required')
     adoption_recovered = adoption_recovery()
+    print(json.dumps({'publication_gate':'adoption_recovery_checked'}),flush=True)
     if not adoption_recovered:
         raise ValueError('actual_latest_adoption_completion_and_final_audit_required')
     phrase_recovered = phrase_guard_recovery(continued_by_adoption=adoption_recovered)
+    print(json.dumps({'publication_gate':'phrase_recovery_checked'}),flush=True)
     if adoption_recovered and not phrase_recovered:
         raise ValueError('prior_phrase_guard_success_and_later_assessment_failure_must_be_preserved')
     embedding_recovered = embedding_http_recovery(continued_by_phrase=phrase_recovered)
+    print(json.dumps({'publication_gate':'embedding_recovery_checked'}),flush=True)
     if phrase_recovered and not embedding_recovered:
         raise ValueError('prior_successful_embedding_recovery_and_later_tool_failure_must_be_preserved')
     fields_recovered = mutation_fields_recovery(continued_by_embedding=embedding_recovered)
+    print(json.dumps({'publication_gate':'fields_recovery_checked'}),flush=True)
     if embedding_recovered and not fields_recovered:
         raise ValueError('earlier_fields2_success_and_later_embedding_failure_must_also_be_preserved')
     meta_recovered = meta_schema_recovery(continued_by_fields=fields_recovered)
+    print(json.dumps({'publication_gate':'meta_recovery_checked'}),flush=True)
     if fields_recovered and not meta_recovered:
         raise ValueError('earlier_first_META_repair_history_must_also_be_preserved')
     cuda_recovered = cuda_recovery(continued_by_meta=meta_recovered)
+    print(json.dumps({'publication_gate':'cuda_recovery_checked'}),flush=True)
     if meta_recovered and not cuda_recovered:
         raise ValueError('earlier_successful_CUDA_retry_and_later_exit_one_must_also_be_preserved')
     recovered = dependency_recovery(continued_by_cuda=cuda_recovered)
+    print(json.dumps({'publication_gate':'dependency_recovery_checked'}),flush=True)
     if cuda_recovered and not recovered:
         raise ValueError('earlier_dependency_failure_history_must_also_be_preserved')
     checked = {}
@@ -819,6 +844,7 @@ def ready():
                             'actual_final_adoption_protocol_resource_result_audit_complete': adoption_recovered,
                             'all_attempts_exited_zero_claim': False if recovered else None,
                             'public_scores_and_resources_reproduced': True}
+        print(json.dumps({'publication_gate':'complete_dataset_checked','dataset':dataset}),flush=True)
     return checked
 
 
@@ -857,12 +883,18 @@ def local_image(value, document):
     return target.relative_to(ROOT).as_posix()
 
 
+def outgoing_report_paths():
+    """New/modified report files only; committed evidence is already published."""
+    modified = names(command(['git', 'diff', '--name-only', '-z', 'HEAD', '--', REPORT_REL]))
+    untracked = names(command(['git', 'ls-files', '--others', '-z', '--', REPORT_REL]))
+    return [ROOT/relative for relative in sorted(modified|untracked)
+            if (ROOT/relative).is_file()]
+
+
 def referenced_originals():
     """Only image paths explicitly referenced by the outgoing report tree."""
     result = set()
-    for path in REPORT.rglob('*'):
-        if not path.is_file():
-            continue
+    for path in outgoing_report_paths():
         if path.suffix.lower() == '.json':
             values = values_in(read(path))
         elif path.suffix.lower() == '.jsonl':
@@ -915,6 +947,8 @@ def prepare(args):
 def check(args):
     completed = ready(); values = paths(); allowed = set(values); old = tracked_paths()
     published_paths = old | allowed
+    modified = names(command(['git', 'diff', '--name-only', '-z', 'HEAD']))
+    check_values = [relative for relative in values if relative not in old or relative in modified]
     originals = set(read(RECEIPTS/'prepared.json')['new_original_images'])
     if originals != referenced_originals()-old:
         raise ValueError('referenced_untracked_original_allowlist_changed')
@@ -970,7 +1004,7 @@ def check(args):
         elif isinstance(value, str):
             asset(value, document)
 
-    for relative in values:
+    for relative in check_values:
         path = validate_relative(relative, originals)
         if not path.is_file() or path.stat().st_size >= 100_000_000:
             raise ValueError('missing_or_above_hosting_file_limit:'+relative)
@@ -1004,6 +1038,8 @@ def check(args):
                     raise ValueError('markdown_link_unpublished:'+relative+':'+value)
                 counts['markdown_links'] += 1
     result = {'status': 'outgoing_content_checks_passed', 'allowlist_count': len(values), **counts,
+              'checked_new_or_modified_files': len(check_values),
+              'unchanged_committed_files_reused_without_rescan': len(values)-len(check_values),
               'datasets': completed, 'new_original_images': len(originals),
               'credentials_excluded': True, 'unrelated_user_edits_excluded': True,
               'new_inference_scoring_or_export': False}
@@ -1030,7 +1066,7 @@ def stage(args):
     command(['git', '--literal-pathspecs', 'add', '-f',
              '--pathspec-from-file='+str(pathspec), '--pathspec-file-nul'])
     staged = staged_paths()
-    if not staged <= allowed or not set(SCRIPTS) <= staged:
+    if not staged <= allowed or not set(SCRIPTS) <= staged|tracked_paths():
         raise ValueError('staged_paths_not_expected_allowlist')
     manifest_relative = MANIFEST.relative_to(ROOT).as_posix(); outgoing = sorted(staged|{manifest_relative})
     write(MANIFEST, {'scope': 'Completed R49 per-dataset online same-image truth feedback and window Skill learning',

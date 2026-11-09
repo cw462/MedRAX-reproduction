@@ -38,7 +38,7 @@ Fixed reuseddev27/8images,freshdirect21→E22,1correction0harms,CI[0,13.64]ppinc
 <!-- R47_ONLINE_GT_FEEDBACK_END -->
 
 <!-- R49_ONLINE_GT_WINDOW_SKILL_START -->
-**R49 completed results: evidence-first publication; final result review pending.**
+## 2026-11-08 — R49：三清单在线反馈与窗口Skill
 
 CheXbench：M43 466/618→R49 465/618（75.40%→75.24%），49纠正／50误改／净-1；聚簇95%微平均差区间[-3.3762, +3.0450]pp（含0）。
 
@@ -46,5 +46,5 @@ CheXbench：M43 466/618→R49 465/618（75.40%→75.24%），49纠正／50误改
 
 VQA-RAD：M42 100/116→R49 97/116（86.21%→83.62%），4纠正／7误改／净-3；聚簇95%微平均差区间[-8.2645, +2.7273]pp（含0）。
 
-Online GT and executor/resource/prompt confounds prevent Skill-only causal or SOTA claims. [Full public evidence](reports/cxr_online_skill_r49_20261108/README.md).
+三个流均全部新生成、各自空Skill／同图记忆；此前真值只在原预测保存后释放。在线反馈、解除调用上限、执行循环和运行中MUTATE字段提示修订共同存在，没有同期无Skill对照，不单独归因Skill。848为题目记录总量，不是独立病例总体；SLAKE17共享图／64匹配题、CheX五跨子集同图组十题及VQA复述均披露。原无反馈最好466／108／100和R47在线GT468/618原条件保留，不改旧表／旧预测，不称未见测试或官方SOTA。 [完整逐题正负案例](reports/cxr_online_skill_r49_20261108/CASE_INDEX.md) · [资源与局限](reports/cxr_online_skill_r49_20261108/README.md)。
 <!-- R49_ONLINE_GT_WINDOW_SKILL_END -->

@@ -8,3 +8,8 @@ The reviewer read primary code/upstream interfaces/test sources and found no exe
 ## Actual post-commit dependency continuation002
 
 DeepSeek continuation completed9/10ready,scope_complete=true,342363ms/1turn,CLI-estimated USD1.22049(not invoice). Scope only known missing deployed author-adapter module plus one-use recovery. Initial raw exit1 retained; no answer/null/reference/strategy change. Original runner must actually exit0 after resume; initial attempt is not called successful. Raw review andmetadata are in DEPENDENCY_REPAIR_REVIEW.md / DEPENDENCY_REPAIR_METADATA.json.
+
+
+## Actual final result/protocol/resource review
+
+One fresh selected DeepSeek native session 4744a579-2dbb-43e8-b29b-ea54edc8a56f completed after all848/public reproductions and the user-directed evidence-first push628617beb. scope_complete=true; audit_scope=adoption_protocol, request_resource_accounting, complete_results_and_claims. No publication blockers. This supports descriptive reporting of the actual mixed/negative results, not Skill-only causality, SOTA, clinical validity or weight identity. 421190ms/4native turns; CLI estimated USD2.341015, not invoice. Complete reply/metadata/limits are in RESULT_CLAIM_REVIEW.md, RESULT_CLAIM_METADATA.json and CLAIMS_FROM_RESULTS.md. User waived post-push remote verification; none was performed.
