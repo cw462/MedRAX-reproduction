@@ -1,0 +1,11 @@
+# Known post-commit deployment repair
+
+Execution review001completed9/10ready. Initialcontroller2277353/CheX2277359 then exited1 after the first prediction, prediction event and own-label feedback were atomically saved. All3mainrequests have responses;2toolselections were healthy. The exception was ModuleNotFoundError:cxr_author_alignment inside released_reward, before the first trajectory/repository update and before any secondquestion context. SLAKE/VQA untouched. No target score was inspected.
+
+Cause: deployment copied the inference-only R48 dependency set, but R49 online reward also needs the existing repository answer-adapter module. The actual tracked cxr_author_alignment.py has now been added unchanged to the newR49code directory. Actual server toy import/explicit-adapter smoke passed0API/0reference reads. R49runner/services/Skill/model/config/inputs/labels are unchanged. No originalbyte/pixel/hashcheck was added.
+
+OriginalPID/started/log/exit1andgeneration.exitcode1 retained under ROOT/recovery/dependency_1/{jobs,generation}; newone-use helper also preserves canonical original/records. Latest current PID/exit files may reflect the actual new attempt, with originalexit1 explicitly retained and reported. No claim that every attempt exited0. The newguard accepts only this exact failure and exact committed1question/3closedresponses/2healthytools/no futurequestion; unknown/toolfailures cannot be swallowed.
+
+Original frozenrunner resumes sameOUT, reads its existing firstprediction/event/feedback, constructs deterministic reward/trajectory then continues to question2. It must not call execute or ReferenceVault for the committed firstquestion. One synthetic actual-run_stream regression passed0.230s and demonstrated no repeated prediction or reference access and unchanged firstrecords. The helper has stage/launch/status, checks actual DeepSeekdelta readiness and one-time launch, uses GPU1only/3GiB/serialCheX→SLAKE→VQA, stops on any future nonzero. The original R49 controller must not be queued again.
+
+No recovery has been launched yet. This is a dependency repair and operational continuation,not a strategy change or a technical-null amendment. Completecohort+actual finaloriginalrunnerraw0 still required; initialraw1andrepaircost/time remain published evidence.

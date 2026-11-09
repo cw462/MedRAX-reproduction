@@ -1,0 +1,15 @@
+# Embedding continuation executed
+
+The user replied "可以了" to the DashScope-specific funding question. The reply was recorded at 2026-11-09T09:22:24.754778+08:00; this is the local recording time after receipt, since the incoming reply supplied no separate timestamp. This is an explicit user confirmation, not an independent account-balance check. The three actual scope, completed operational-review and funding records passed the reviewed helper validation.
+
+Before execution, the new helper status and marker check showed no existing stage, launch or retry namespace. Stage and launch then each ran once. Stage preserved the existing150 committed questions and archived prior jobs/raw exits and diagnostic/failure evidence. The new controller PID is2645757 and its CheXbench runner PID2645763. They continue through all prior declared wrappers.
+
+The new same-input/model/endpoint/default-SDK production embedding attempt `000063_arrearage_1` returned a healthy `text-embedding-v4` response. The reviewed helper validated a finite nonzero1024-dimensional vector before writing the matching generation/recovery registration. Actual receipt: one physical request, no automatic retry,0.5830125838983804 seconds,291 prompt and total tokens, error null. Usage is a provider response record, not an invoice. Full sanitized wire/HTTP/response/receipt evidence remains in the new production namespace.
+
+The original `000063` request/start/failed receipt and missing response remain unchanged. Its HTTP400 exception class is known; the original provider body and usage/billing remain unknown. The independent neutral diagnostic's HTTP400 Arrearage evidence is separate and was not used as a production vector or reconstructed original error body. All earlier failed attempts and legitimate repairs are retained.
+
+At 2026-11-09T09:23:39.314658+08:00, the new controller and runner were alive. The fifth window's original candidate review/evolution had resumed, with150 saved questions and four completed windows; Agent372/372, META143/142 with one in flight, embeddings66/65 including the retained historical failed send. Question151 and SLAKE/VQA had not begun at that snapshot. This establishes successful embedding recovery and active continuation, not complete experiment results. No target scores or clinical Skill contents were inspected. Final scoring/export/publication still require all618/114/116 records and actual final three runner/controller raw exit0.
+
+Subsequent control snapshot at 2026-11-09T09:25:32.564850+08:00: CheXbench advanced to152/618 saved records and five completed windows; new controller and runner remained alive. The original150-question boundary was therefore actually passed. SLAKE/VQA remain pending, and no complete result or score is claimed.
+
+Later continuation stopped at168 committed questions because of a separate xray_phrase_grounding nested empty-string error at question169. Both new controller/runner exited1. See PHRASE_GROUNDING_FAILURE.md. The healthy embedding registration is retained; the full experiment is not complete.

@@ -76,3 +76,15 @@ SLAKE的M−R、M-S41、M43并列108。CheX的X在Rad-Restruct为82/115，超过
 
 固定CheX618在线同图真值反馈：M43 466→M43-IM-GT 468/618（75.73%），主宏平均77.0773%→77.2527%，5纠正／3误改／净+2。来源簇95%区间：微[-0.5008, +1.2780]pp、宏[-0.7165, +1.0918]pp，均含0。本行不并入上方原45组合／11848行离线对齐summary，不替换无在线真值反馈设置的466/108/100，也不改旧方法行。488首次／单例复用，130后续新生成；此前同图真值只在其自身预测保存后揭示。5跨子集组10题、17同题干／0完整选项相同、14肺不张选项重叠均披露。205主／75工具＋1健康探针，原始生成exit0，无R45式技术null恢复。历史R45冻结465仅为次要比较，无同期新鲜无反馈臂，因此468不能解释成独立单题条件下的公平超越、因果医学收益或官方SOTA。[R47完整结果／618题反馈与请求证据](../cxr_image_memory_gt_r47_20261108/README.md)。
 <!-- R47_ONLINE_GT_FEEDBACK_END -->
+
+<!-- R49_ONLINE_GT_WINDOW_SKILL_START -->
+**R49 completed results: evidence-first publication; final result review pending.**
+
+CheXbench：M43 466/618→R49 465/618（75.40%→75.24%），49纠正／50误改／净-1；聚簇95%微平均差区间[-3.3762, +3.0450]pp（含0）。
+
+另列SLAKE：M43 108/114→R49 113/114（94.74%→99.12%），5纠正／0误改／净+5；聚簇95%微平均差区间[+0.9174, +8.4750]pp（全正）。
+
+VQA-RAD：M42 100/116→R49 97/116（86.21%→83.62%），4纠正／7误改／净-3；聚簇95%微平均差区间[-8.2645, +2.7273]pp（含0）。
+
+Online GT and executor/resource/prompt confounds prevent Skill-only causal or SOTA claims. [Full public evidence](../cxr_online_skill_r49_20261108/README.md).
+<!-- R49_ONLINE_GT_WINDOW_SKILL_END -->

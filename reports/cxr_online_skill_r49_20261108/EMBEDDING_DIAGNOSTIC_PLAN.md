@@ -1,0 +1,13 @@
+# One neutral embedding diagnostic
+
+Status: prepared; not executed. A new actual DeepSeek diagnostic review and the corresponding execution scope record are required before the helper can execute. The scope uses the existing R49 technical diagnosis authorization; it does not claim new user approval.
+
+R49 remains stopped after 150 committed predictions. Embedding request 000063 produced a `BadRequestError`; its original failure record did not retain the HTTP body. The input was 1360 ASCII characters, and 62 earlier embeddings succeeded. Neither excessive input length nor an encoding-format cause has been established.
+
+The helper `local_assets/diagnose_r49_embedding_400_once.py` makes exactly one isolated request with the harmless text `This is a neutral diagnostic sentence.` using the existing embedding endpoint `https://dashscope.aliyuncs.com/compatible-mode/v1`, model `text-embedding-v4`, existing embedding credential, and original Python interpreter. It calls `embeddings.create(model=..., input=...)` without an encoding or dimension override. Thus the installed SDK's default remains in effect; the observed server SDK 1.109.1 injects `encoding_format=base64` when omitted. This diagnostic does not change that setting.
+
+Evidence is written exclusively to `/home/imss/cw/MedRAX_reproduction_20261027/runs/online_skill_r49_embedding_diagnostic_20261109/attempt_1`. Exclusive directory and record creation prevent reissuing an existing attempt. SDK retries and HTTP redirects are disabled, and a request hook rejects any second request, wrong endpoint/model, or nonneutral input. The credential is passed only through stdin. The request archive contains its JSON body, without request headers. HTTP response evidence includes status, response body, and request ID; occurrences of the credential are redacted. Connection or timeout failures are classified as unknown and stop without retry. Usage is retained if returned; no zero-cost claim is made.
+
+The action makes zero Agent, META, CXR tool, or GPU calls. It does not read or send the failed Skill input, alter the R49 run, retry production request 000063, reuse a diagnostic vector in production, or resume R49. A successful neutral request would show that this small request works at that time; the original failure's cause would remain unknown. Any subsequent production recovery needs its own concrete operational plan and actual review.
+
+Only the helper's wire capture, redaction, and stop boundaries are checked offline. No real endpoint is contacted by those tests. The local OpenAI package is older than the server SDK, so the tests do not claim to reproduce the server SDK's internal encoding implementation.

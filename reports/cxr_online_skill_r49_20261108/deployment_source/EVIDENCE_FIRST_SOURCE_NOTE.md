@@ -1,0 +1,15 @@
+# Evidence-first publication helper
+
+The sibling publish_r49_evidence_first.py is the actual local helper added after the original 293-copy source preparation in response to the user’s explicit request to upload first. It changes publication order, preserves the original final-audit publisher unchanged and does not fabricate a completed review. No source hash or new experiment is asserted.
+
+prepare_001.py preserves the version used by the first preparation process. The current sibling helper reuses prepare’s recorded external-original-image discovery during check because all exported image sets are immutable; the complete credential, JSON, Markdown, actual-request-image and file-size checks remain active. No experiment, prediction, score or final-audit gate changed.
+
+The before_content_check_optimization.py snapshot preserves the original publisher. The current publisher computes the same tracked-plus-allowlisted path set once per content-check invocation and reuses it for image/Markdown membership. This removes repeated set allocation; all path memberships and final-review gates are unchanged.
+
+The outgoing credential check rejected a quoted credential field in a negative-test source fixture. Publication copies only were sanitized, with each changed source and field listed in CREDENTIAL_REDACTION_RECEIPT.json. Actual original experiment sources and scores were not modified. These copies are not byte-attested source files.
+
+A later content check found an inherited VQA historical-image URL using its old document base. The original public comparator bundle is preserved in vqarad_comparison_sources.before_image_link_repair.json. The published repair script changes only those URLs to existing local assets after exact question_id/original-filename membership checks; VQARAD_IMAGE_LINK_REPAIR.json records every substitution. Original private predictions, saved scores, benchmark inputs and image contents remain untouched; no scoring or hash check was repeated.
+
+The original40-path-per-process staging was stopped after a partial explicit index because of process/index overhead. That index was preserved without reset or file deletion; the active Git child finished and released its lock. The before_one_pass_stage.py source preserves that version. The current publisher supplies the same explicit path set in one NUL-delimited literal Git pathspec file, then checks exact index membership and the normal diff. No credential, final-audit, base-change or push gate changed.
+
+All explicit paths reached the Git index. The raw-tree whitespace check rejected a preserved source snapshot’s blank line at EOF (test_analyze_skill_s2.py:56). Raw native source/log/reviewer whitespace is intentionally preserved. The current publisher checks active R49 code, indexes, versioned logs and the report entry; source snapshots and raw evidence are exempt from cosmetic whitespace checks. Credential, JSON, image/link, allowlist and base-change checks remain passed/active. The before_raw_whitespace_policy.py copy preserves the earlier publisher. No evidence content was reformatted.

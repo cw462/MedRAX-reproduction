@@ -147,3 +147,15 @@ python runner/r0.py --repo /path/to/MedRAX --input /path/to/inference.jsonl --im
 ```
 
 This example is not verified against a real model or tool. Per-question call gates and request timeouts do not enforce a monetary limit or stop an already running tool; tool initialization can download weights and a tool may make additional requests. Check provider cost and set appropriate limits before use. Scoring, resumption and author-protocol evaluation are not yet implemented.
+
+<!-- R49_ONLINE_GT_WINDOW_SKILL_START -->
+**R49 completed results: evidence-first publication; final result review pending.**
+
+CheXbench：M43 466/618→R49 465/618（75.40%→75.24%），49纠正／50误改／净-1；聚簇95%微平均差区间[-3.3762, +3.0450]pp（含0）。
+
+另列SLAKE：M43 108/114→R49 113/114（94.74%→99.12%），5纠正／0误改／净+5；聚簇95%微平均差区间[+0.9174, +8.4750]pp（全正）。
+
+VQA-RAD：M42 100/116→R49 97/116（86.21%→83.62%），4纠正／7误改／净-3；聚簇95%微平均差区间[-8.2645, +2.7273]pp（含0）。
+
+Online GT and executor/resource/prompt confounds prevent Skill-only causal or SOTA claims. [Full public evidence](reports/cxr_online_skill_r49_20261108/README.md).
+<!-- R49_ONLINE_GT_WINDOW_SKILL_END -->

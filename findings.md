@@ -36,3 +36,15 @@ Fixed reuseddev27/8images,freshdirect21→E22,1correction0harms,CI[0,13.64]ppinc
 
 固定CheX618在线同图真值反馈：M43 466→M43-IM-GT 468/618（75.73%），主宏平均77.0773%→77.2527%，5纠正／3误改／净+2。来源簇95%区间：微[-0.5008, +1.2780]pp、宏[-0.7165, +1.0918]pp，均含0。原488复用363题正确不变，130后续103→105。Rad73→73/115、CheX-SLAKE117→117/123、OpenI276→278/380。历史R45冻结465为次要对照，R47相对它8纠正／5误改／净+3，不是同期无反馈消融。17同题干组9→10，14肺不张重叠组8→9；事后当前参考文本匹配前题反馈87题70→72，不能当学习机制的因果证明。618预测／上下文／反馈、205闭合主请求、75健康工具＋1额外探针，原始及controller退出0，无推理失败／技术空答／重试；首次SSH EOF39文件后关闭预取接续3927文件，纯传输恢复。2.234536CNY usage代理、生成墙钟1394.426196秒；未知usage／settlement／时长均0。原始运行和公开复现字节／哈希校验按用户要求关闭。全部618完整JSON但1字母／文本冲突仍计错。执行DeepSeek服务审阅9ready只限执行；结果审阅以独立实际记录为准。在线GT信息优势、历史采样／时段、复用、顺序和重叠限制解释，不能宣称稳定临床／通用学习／未见SOTA。原无在线GT完整最好466/108/100与全部旧表、旧预测和旧成绩保留。报告：[R47](reports/cxr_image_memory_gt_r47_20261108/README.md)。
 <!-- R47_ONLINE_GT_FEEDBACK_END -->
+
+<!-- R49_ONLINE_GT_WINDOW_SKILL_START -->
+**R49 completed results: evidence-first publication; final result review pending.**
+
+CheXbench：M43 466/618→R49 465/618（75.40%→75.24%），49纠正／50误改／净-1；聚簇95%微平均差区间[-3.3762, +3.0450]pp（含0）。
+
+另列SLAKE：M43 108/114→R49 113/114（94.74%→99.12%），5纠正／0误改／净+5；聚簇95%微平均差区间[+0.9174, +8.4750]pp（全正）。
+
+VQA-RAD：M42 100/116→R49 97/116（86.21%→83.62%），4纠正／7误改／净-3；聚簇95%微平均差区间[-8.2645, +2.7273]pp（含0）。
+
+Online GT and executor/resource/prompt confounds prevent Skill-only causal or SOTA claims. [Full public evidence](reports/cxr_online_skill_r49_20261108/README.md).
+<!-- R49_ONLINE_GT_WINDOW_SKILL_END -->

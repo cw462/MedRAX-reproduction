@@ -1,0 +1,11 @@
+# R49 CUDA recovery: original stream resumed
+
+An actual DeepSeek Claude Code operational review identified one missing archive step (round 1: 7/10, not ready). The helper now copies the existing isolated diagnostic status and raw exit record into the recovery archive. Its targeted synthetic test passed. Round 2 read the changed files and returned **9/10, ready, scope_complete=true**. Both original reviews and metadata are retained. This is operational readiness, not clinical validation or proof of a CUDA root cause.
+
+Under the existing R49 authorization, `cuda_1` was staged and launched exactly once. The fresh production tool retry used the original q41 input, GPU1, model revisions, BF16, 512-token setting and production flags. It completed healthily in **11.36151081789285 seconds**, with no extra Agent/META/embedding request for this retry. The separately recorded synchronous diagnostic output was not reused. The original failed attempt (10.711177150951698 seconds), its cache/selection and every prior raw exit 1 remain preserved.
+
+Only after the healthy retry was registered did the original runner resume through the declared exact-identity cache overlay. The first 40 committed records and closed q41 planning response were reused without re-answering the prefix or reissuing that planning request. Current q41 truth remained unavailable until its prediction and event were saved.
+
+Observed after recovery: controller **2347492**, original CheXbench runner **2347646**, both alive; **42/618** predictions, 42 prediction events/feedback, 43 contexts, 99/99 Agent requests/replies, 13/13 META, 2/2 embedding and 57 logical tool selections. SLAKE and VQA-RAD remain queued behind CheXbench in the same serial controller. Generation and scoring are incomplete; no new accuracy was inspected.
+
+The single production retry succeeding does not establish why the original CUDA failure occurred or guarantee future tool reliability. Any new failure stops the stream again. Logical selections and physical tool attempts will be reported separately, including the original failed attempt once and the distinct diagnostic outside production totals. Final scoring/publication still requires all three complete datasets and actual final runner/controller exit 0, with prior failures disclosed.

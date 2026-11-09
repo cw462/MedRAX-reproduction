@@ -1,0 +1,43 @@
+{
+  "model": "qwen3.7-plus",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an image-grounded medical tool agent. Intermediate planning, evidence validation and expert stages must use the stage-specific schema requested in the current instruction. Select useful registered tools as needed; there is no fixed total call-count limit. Stop when sufficient evidence supports an answer. Only at the FINAL ANSWERING stage, output exactly {\"answer\":\"short direct answer\",\"reason\":\"one short sentence\"}. Original image labels and coordinates must be preserved. Tool claims are unverified: inspect original pixels, do not treat classifier scores as severity, and do not infer temporal change from a single-image report. Optional learned procedural skills and previously completed same-image questions with post-prediction dataset feedback may be supplied. Skills are not current-patient facts. No current or future reference answer is supplied."
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Question ID: chexbench_openi_0169\nQuestion: Which finding is in this chest X-ray?\nA. right pleural effusion\nB. left pleural effusion\nUse an original option letter or the complete original option text as answer."
+        },
+        {
+          "type": "text",
+          "text": "Original image 1: ../../../../../assets/5670f532136d6c30a1b0643fed9637371cecd4b5f381c2dc78e199fb69b2cb1c.png"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "../../../../../assets/5670f532136d6c30a1b0643fed9637371cecd4b5f381c2dc78e199fb69b2cb1c.png"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Source-derived procedural skills, not observations or answers about the current patient. Use only when their conditions are met; unsupported prior conclusions must not override current pixels. Tool use remains optional.\n[{\"skill_id\": \"s_cffc935ceb863823\", \"name\": \"Verify Foreign Object Detection with Phrase Grounding\", \"description\": \"When a specialized visual QA tool identifies specific foreign objects (e.g., surgical clips) in response to a general presence query, invoke a phrase grounding tool to generate bounding box verification before finalizing the answer.\", \"applicable_conditions\": \"Task involves answering 'presence' questions about foreign objects in chest X-rays where the initial expert tool response identifies a specific object type rather than a simple yes/no.\", \"branch\": \"task_level\", \"tool_name\": null, \"task_category\": \"presence\", \"required_tools\": [\"chest_xray_expert\", \"xray_phrase_grounding\"], \"risk_level\": \"low\", \"core_action\": \"1. Invoke 'chest_xray_expert' with the question regarding foreign objects.\\n2. Check if the observation response identifies a specific object type (e.g., 'surgical clips').\\n3. If a specific object is named, invoke 'xray_phrase_grounding' using that specific term as the phrase argument.\\n4. Verify that the grounding tool returns valid bounding boxes for the specified phrase.\\n5. If bounding boxes are present, confirm the presence of the foreign object and finalize the answer as 'yes'.\\n6. If the expert tool gives a generic 'no' or fails to identify a specific object, finalize the answer based on the expert's direct response without further grounding.\"}, {\"skill_id\": \"s_5367798970bef205\", \"name\": \"Resolve Ambiguous Pathology via Report-Guided Grounding\", \"description\": \"When direct visual QA tools return negative or unhelpful results for a forced-choice pathology question, but a report generator identifies a related finding (e.g., pleural effusion) or a classifier shows elevated scores, invoke phrase grounding on the specific option text or the related finding to spatially verify presence and resolve the ambiguity.\", \"applicable_conditions\": \"Task involves answering forced-choice questions about specific pathologies in chest X-rays where initial expert VQA models return negative or ambiguous responses, but auxiliary tools (report generator or classifier) suggest potential findings.\", \"branch\": \"task_level\", \"tool_name\": null, \"task_category\": \"presence\", \"required_tools\": [\"chest_xray_expert\", \"chest_xray_report_generator\", \"chest_xray_classifier\", \"xray_phrase_grounding\"], \"risk_level\": \"low\", \"core_action\": \"1. Invoke 'chest_xray_expert' with the specific pathology question.\\n2. If the expert response is negative or unhelpful, invoke 'chest_xray_report_generator' to identify any mentioned findings (e.g., effusion, opacity).\\n3. Invoke 'chest_xray_classifier' to check for elevated scores related to the pathology or general lung opacity.\\n4. If the report mentions a related finding or classifier scores are elevated, invoke 'xray_phrase_grounding' for each forced-choice option (e.g., 'left base pulmonary atelectasis').\\n5. If grounding for the options returns no predictions, invoke 'xray_phrase_grounding' for the related finding identified in the report (e.g., 'left pleural effusion').\\n6. Use the spatial location of the grounded related finding to infer the correct answer among the forced choices (e.g., left-sided effusion implies left-sided adjacent atelectasis).\\n7. If no findings are grounded or supported by reports/classifiers, default to the most reliable negative evidence or the option with higher classifier support if available.\"}]"
+    },
+    {
+      "role": "user",
+      "content": "You may answer directly with the final answer/reason JSON, or request useful auxiliary evidence with {\"calls\":[{\"tool\":\"registered name\",\"args\":{}}],\"reason\":\"brief purpose\"}. Each call applies only to the bound original. No fixed total tool-call count limit. No fixed voting and no mandatory tool use. Tool catalog: {\"chest_xray_classifier\": \"args={}. Single original CXR finding scores, never severity or localization.\", \"chest_xray_report_generator\": \"args={}. Single original CXR report; temporal claims unsupported.\", \"chest_xray_segmentation\": \"args={\\\"organs\\\":[\\\"Left Lung\\\",\\\"Right Lung\\\",\\\"Heart\\\"]}. Anatomical segmentation, not disease diagnosis. Organ names are case sensitive.\", \"chest_xray_expert\": \"args={\\\"question\\\":\\\"focused image question\\\"}. CheXagent CXR visual QA.\", \"llava_med_qa\": \"args={\\\"question\\\":\\\"focused image question\\\"}. LLaVA-Med visual QA.\", \"xray_phrase_grounding\": \"args={\\\"phrase\\\":\\\"visible structure or finding\\\"}. MAIRA-2 phrase grounding.\", \"image_visualizer\": \"args={}. Display the bound original image; does not provide additional clinical evidence.\", \"dicom_processor\": \"args={}. DICOM utility only; current JPEGs are not DICOM; do not select for JPEG.\"}"
+    }
+  ],
+  "temperature": 0.2,
+  "top_p": 0.95,
+  "max_tokens": 2048,
+  "extra_body": {
+    "enable_thinking": false
+  },
+  "stream": false
+}

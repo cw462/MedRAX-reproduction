@@ -1,0 +1,11 @@
+# Current DashScope account rejection confirmed
+
+After the actual diagnostic-only DeepSeek review returned **9/10, ready, scope_complete=true**, the isolated helper executed exactly once. It sent only the neutral sentence stated in the plan, using `text-embedding-v4`, the configured DashScope endpoint and installed SDK defaults. It made one embedding request, zero Agent/META/CXR-tool/GPU calls, and changed no production record.
+
+The actual response was **HTTP 400, code/type `Arrearage`**, with a message that access was denied because the account was not in good standing and a link to Alibaba's overdue-payment documentation. Request ID: `985840a6-25ee-9391-bb69-a1ea45cc8373`; elapsed 0.2997101889923215 seconds. Full sanitized wire JSON, HTTP response, error receipt and status are preserved. The diagnostic exited 1 with `known_http_error`; it was **not healthy**, returned no usable vector and has unknown usage/billing. No diagnostic vector exists to reuse in production. [Alibaba account-error documentation](https://help.aliyun.com/zh/model-studio/error-code#overdue-payment)
+
+This confirms the **current embedding-account arrears blocker**. It does not reconstruct the missing error body of original production attempt `000063`; that older receipt records only the SDK's HTTP-400 exception class. The SDK-default `base64` wire parameter was observed, but this diagnostic's actual error is account arrears, so there is no basis here to change encoding, input, endpoint or model.
+
+R49 remains stopped at 150 committed question records. The original failed embedding and all prior predictions, replies, feedback, repositories and failure histories remain intact. The user has been asked to fund the Alibaba Model Studio/DashScope account used for `text-embedding-v4`. No additional embedding request will be issued before explicit confirmation that the account has been updated.
+
+A concrete one-attempt production-continuation proposal is being prepared while waiting: a fresh same-input/model/default-SDK embedding in a new namespace, preservation of the original HTTP-400 record and diagnostic evidence, strict successful-vector validation, an exact-input cache alias, and the existing inference/Skill pipeline unchanged. It requires its own actual operational review and does not yet authorize execution. Scoring remains unavailable.

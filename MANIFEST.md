@@ -3367,3 +3367,15 @@
 | 2026-11-08 21:27:52 | /run-experiment + /analyze-results + /result-to-claim | [reports/cxr_image_memory_gt_r47_20261108/public_reproduction/summary.json](reports/cxr_image_memory_gt_r47_20261108/public_reproduction/summary.json) | completed result | R47 online same-image truth feedback:468/618, net+2, full positive-negative evidence |
 | 2026-11-08 21:27:52 | /run-experiment + /analyze-results + /result-to-claim | [reports/cxr_image_memory_gt_r47_20261108/evidence/publication_manifest.json](reports/cxr_image_memory_gt_r47_20261108/evidence/publication_manifest.json) | completed result | R47 online same-image truth feedback:468/618, net+2, full positive-negative evidence |
 | 2026-11-08 21:27:52 | /run-experiment + /analyze-results + /result-to-claim | [reports/cxr_image_memory_gt_r47_20261108/PUBLICATION_MANIFEST.json](reports/cxr_image_memory_gt_r47_20261108/PUBLICATION_MANIFEST.json) | completed result | R47 online same-image truth feedback:468/618, net+2, full positive-negative evidence |
+
+<!-- R49_ONLINE_GT_WINDOW_SKILL_START -->
+**R49 completed results: evidence-first publication; final result review pending.**
+
+CheXbench：M43 466/618→R49 465/618（75.40%→75.24%），49纠正／50误改／净-1；聚簇95%微平均差区间[-3.3762, +3.0450]pp（含0）。
+
+另列SLAKE：M43 108/114→R49 113/114（94.74%→99.12%），5纠正／0误改／净+5；聚簇95%微平均差区间[+0.9174, +8.4750]pp（全正）。
+
+VQA-RAD：M42 100/116→R49 97/116（86.21%→83.62%），4纠正／7误改／净-3；聚簇95%微平均差区间[-8.2645, +2.7273]pp（含0）。
+
+Online GT and executor/resource/prompt confounds prevent Skill-only causal or SOTA claims. [Full public evidence](reports/cxr_online_skill_r49_20261108/README.md).
+<!-- R49_ONLINE_GT_WINDOW_SKILL_END -->
