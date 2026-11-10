@@ -159,3 +159,15 @@ VQA-RAD：M42 100/116→R49 97/116（86.21%→83.62%），4纠正／7误改／�
 
 三个流均全部新生成、各自空Skill／同图记忆；此前真值只在原预测保存后释放。在线反馈、解除调用上限、执行循环和运行中MUTATE字段提示修订共同存在，没有同期无Skill对照，不单独归因Skill。848为题目记录总量，不是独立病例总体；SLAKE17共享图／64匹配题、CheX五跨子集同图组十题及VQA复述均披露。原无反馈最好466／108／100和R47在线GT468/618原条件保留，不改旧表／旧预测，不称未见测试或官方SOTA。 [完整正负结果与证据](reports/cxr_online_skill_r49_20261108/README.md)。
 <!-- R49_ONLINE_GT_WINDOW_SKILL_END -->
+
+<!-- R50_CXR6_START -->
+## R50 CXR6: user-stopped incomplete archive
+
+| Dataset | Completed / planned | Correct | Accuracy |
+|---|---:|---:|---:|
+| CheXBench | 435 / 618 | 336 | 77.24% |
+| SLAKE CXR | 0 / 114 | — | Not started |
+| VQA-RAD CXR | 0 / 116 | — | Not started |
+
+[Stopped report](reports/cxr_online_skill_r50_cxr6_20261109/README.md) · 435/848 completed;413unanswered. No Skill-causal/clinical/SOTA claim.
+<!-- R50_CXR6_END -->

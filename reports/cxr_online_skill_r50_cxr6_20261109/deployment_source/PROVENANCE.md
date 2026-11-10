@@ -1,0 +1,5 @@
+# User-stopped R50 source provenance
+
+Actual_CODE contains exactly the files/count in the actual stopped-run source capture. The original11producer files and the3actual A.4 extension modules are distinct from later local reporting compatibility code. Full original jobs/native nonzero exits, explicit stop, configs, controls, failed/retried outputs, helper errors and prior user-requested420-case analysis remain in the package. The revised DeepSeek queue was held at zero requests; it is not an executed comparison.
+
+The source is a post-execution snapshot, not a byte/weight/model identity attestation. Credential literals alone in outgoing source copies are redacted and counted; original files/predictions remain unchanged. Credential loaders/settings/keys/weights/unrelated user files are excluded. Workflow skills are installed guidance snapshots, separate from the learned card versions in raw window/context files. The publication is intentionally incomplete by explicit user instruction; original full-cohort code gates are not passed or forged. Complete-result review of this stopped scope is stored separately at report root.

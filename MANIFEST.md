@@ -3383,3 +3383,15 @@
 | [另列SLAKE证据](reports/cxr_online_skill_r49_20261108/evidence/slake/publication_manifest.json) | [公开重算](reports/cxr_online_skill_r49_20261108/public_reproduction/slake/summary.json) |
 | [VQA-RAD证据](reports/cxr_online_skill_r49_20261108/evidence/vqarad/publication_manifest.json) | [公开重算](reports/cxr_online_skill_r49_20261108/public_reproduction/vqarad/summary.json) |
 <!-- R49_ONLINE_GT_WINDOW_SKILL_END -->
+
+<!-- R50_CXR6_START -->
+## R50 CXR6: user-stopped incomplete archive
+
+| Dataset | Completed / planned | Correct | Accuracy |
+|---|---:|---:|---:|
+| CheXBench | 435 / 618 | 336 | 77.24% |
+| SLAKE CXR | 0 / 114 | — | Not started |
+| VQA-RAD CXR | 0 / 116 | — | Not started |
+
+[Stopped report](reports/cxr_online_skill_r50_cxr6_20261109/README.md) · 435/848 completed;413unanswered. No Skill-causal/clinical/SOTA claim.
+<!-- R50_CXR6_END -->
