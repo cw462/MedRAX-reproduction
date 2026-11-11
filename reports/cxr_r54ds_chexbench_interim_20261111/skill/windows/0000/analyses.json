@@ -1,0 +1,188 @@
+{
+  "chexbench_rad_restruct_0123": {
+    "skill_adoption": [],
+    "event_type": "evidence_sufficient_stop",
+    "evidence_steps": [
+      0,
+      1,
+      2
+    ],
+    "support_level": "observed",
+    "observed_operation": "Step 0 issued a single targeted presence query to chest_xray_expert ('any abnormality ... consolidation, effusion, pneumothorax, or masses?') which returned 'No'. Step 1 issued maira2_grounded_report with empty args, which returned report 'No significant findings' with zero grounded boxes. Step 2 compared the two independent negative outputs, noted concordance, and answered 'B. no' without any further localization, ROI crop, or third reader.",
+    "proposed_operation": "For a binary lung-abnormality presence question on a single frontal CXR, run one targeted yes/no abnormality query on the expert VQA backend and one full grounded report on a report backend; if both come back negative with no grounded boxes, treat the evidence as sufficient for 'no' and stop instead of escalating to grounding/ROI or additional readers.",
+    "trigger": "Binary (yes/no) lung-abnormality question, one frontal chest radiograph, no pre-activated skills.",
+    "stop_condition": "Two independent backends both report no abnormality (targeted answer 'No' and report 'No significant findings' with grounded_box_count = 0); answer is emitted at that point.",
+    "extracted_pattern": "Dual-independent-reader concordance gate for binary presence items: a targeted yes/no query plus a free-text grounded report; concordant negatives terminate the episode, disagreement would trigger further inspection.",
+    "output_intent": "CREATE",
+    "none_reason": null,
+    "patch_target_id": null,
+    "branch": "task_level"
+  },
+  "chexbench_rad_restruct_0124": {
+    "skill_adoption": [],
+    "event_type": "scope_gap",
+    "evidence_steps": [
+      1,
+      2
+    ],
+    "support_level": "observed",
+    "observed_operation": "Queried maira2_grounded_report as a second check for a trachea-specific question; the tool returned only a generic 'No significant findings' report with zero grounded boxes, and the final answer treated that generic report as corroborating absence of tracheal disease.",
+    "proposed_operation": "For structure-specific presence questions, count a report as corroboration only if it explicitly addresses the named structure; if the report is a global 'no significant findings' impression, do not treat it as structure-specific evidence and continue targeted verification or rely only on a structure-specific output.",
+    "trigger": "Binary presence/absence question about a named anatomic structure, with a generic whole-image report tool available as a second opinion.",
+    "stop_condition": "Stop when at least one output explicitly addresses the named structure and the evidence is concordant; a generic global report alone is insufficient corroboration.",
+    "extracted_pattern": "Structure-specific VQA questions need structure-specific evidence; global report outputs have broader scope and should not be counted as independent confirmation for a focal structure unless the structure is explicitly mentioned.",
+    "output_intent": "CREATE",
+    "none_reason": null,
+    "patch_target_id": null,
+    "branch": "task_level"
+  },
+  "chexbench_rad_restruct_0125": {
+    "skill_adoption": [],
+    "event_type": "targeted_verification",
+    "evidence_steps": [
+      0,
+      1,
+      2
+    ],
+    "support_level": "observed",
+    "observed_operation": "Step 0 called chest_xray_expert with a targeted skeletal question listing fractures, lytic lesions, and deformities; it returned 'No'. Step 1 called maira2_grounded_report explicitly to verify skeletal findings and rule out subtle abnormalities; the report stated 'No acute osseous changes' along with an incidental right paratracheal soft tissue density. Step 2 answered 'A. no', citing both sources' negative skeletal statements.",
+    "proposed_operation": "For chest X-ray VQA questions about skeletal abnormality, first send a targeted skeletal query to chest_xray_expert enumerating fractures, lytic lesions, and deformities, then corroborate with maira2_grounded_report; if both independently negate acute osseous abnormality, answer 'no' and do not treat incidental non-skeletal findings as skeletal abnormalities.",
+    "trigger": "Chest X-ray VQA question asking whether there is anything abnormal in the skeletal system, with yes/no options.",
+    "stop_condition": "Both the targeted chest X-ray expert and the grounded structured report independently state no acute osseous changes or skeletal abnormality; incidental non-skeletal findings do not override the skeletal-specific answer.",
+    "extracted_pattern": "targeted_skeletal_expert_query -> independent_grounded_report_corroboration -> osseous-specific negation -> answer_no; keep incidental non-osseous findings separate from the skeletal abnormality judgment.",
+    "output_intent": "CREATE",
+    "none_reason": null,
+    "patch_target_id": null,
+    "branch": "task_level"
+  },
+  "chexbench_rad_restruct_0126": {
+    "skill_adoption": [],
+    "event_type": "scope_gap",
+    "evidence_steps": [
+      1,
+      2
+    ],
+    "support_level": "observed",
+    "observed_operation": "Step 0 called chest_xray_expert with the exact question about tracheal disease and received 'No'. Step 1 called maira2_grounded_report to verify tracheal appearance, but its report covered lungs, heart, mediastinum, pleura, and skeleton, with no trachea-specific statement. Step 2 still answered 'B. no' and claimed both tools indicated normal tracheal appearance.",
+    "proposed_operation": "For a named-structure presence question, use the targeted expert with the exact anatomical question as primary evidence. If a broader grounded report is used for corroboration, first check that it explicitly addresses that structure; if it does not, do not treat it as target-specific confirmation and either stop on the targeted expert or obtain another targeted check.",
+    "trigger": "Binary disease-presence question about a specific anatomical structure, with a generic report tool available for corroboration.",
+    "stop_condition": "The targeted expert gives a clear yes/no and any cited corroborating report either explicitly covers the queried structure without conflict or is not claimed as target-specific evidence.",
+    "extracted_pattern": "Targeted exact-question VQA first; broad reports must be scope-checked before being cited as confirmation for an unmentioned structure.",
+    "output_intent": "CREATE",
+    "none_reason": null,
+    "patch_target_id": null,
+    "branch": "task_level"
+  },
+  "chexbench_rad_restruct_0127": {
+    "skill_adoption": [],
+    "event_type": "tool_disagreement",
+    "evidence_steps": [
+      0,
+      1,
+      2
+    ],
+    "support_level": "observed",
+    "observed_operation": "Step 0 called chest_xray_expert and received 'No'; step 1 called maira2_grounded_report, which listed hiatal hernia, calcified granuloma, and aortic elongation; step 2 answered 'B. yes' by treating those listed thoracic findings as sufficient for a positive disease-presence answer.",
+    "proposed_operation": "When a coarse binary thoracic-disease question receives conflicting outputs, reconcile the question scope before answering: distinguish incidental/common thoracic findings from the intended disease label, and if needed obtain a scope-aware second opinion or targeted verification rather than automatically converting any listed finding into 'disease present'.",
+    "trigger": "Disagreement between a direct VQA 'No' and a grounded report that lists thoracic findings on a binary 'any diseases in the thorax?' question.",
+    "stop_condition": "After the disagreement is adjudicated against the question's disease scope, not merely after receiving a positive finding list.",
+    "extracted_pattern": "Tool disagreement on a coarse presence question requires scope-aware adjudication; more numerous findings do not by themselves establish the requested positive label.",
+    "output_intent": "NONE",
+    "none_reason": "No skill was activated or adopted, no patch candidate applies, and the scope-aware adjudication was not executed or validated; the wrong final answer only exposes a hypothesis, not a supported reusable operation.",
+    "patch_target_id": null,
+    "branch": "task_level"
+  },
+  "chexbench_rad_restruct_0128": {
+    "skill_adoption": [],
+    "event_type": "targeted_verification",
+    "evidence_steps": [
+      0,
+      1,
+      2
+    ],
+    "support_level": "observed",
+    "observed_operation": "At step 0, reformulated the broad cardiovascular-signs question into a chest_xray_expert query naming cardiomegaly, vascular congestion, and aortic calcification; it returned 'No'. At step 1, called maira2_grounded_report to verify cardiovascular findings; it returned 'No significant findings'. At step 2, answered A (no).",
+    "proposed_operation": "For broad organ-system presence questions with yes/no options, decompose the question into named cardinal abnormalities for the expert model, then obtain an independent report for corroboration; if both are negative, stop and select 'no'.",
+    "trigger": "A yes/no VQA item asks whether there are any signs in a broad organ system and the relevant abnormal findings can be explicitly named.",
+    "stop_condition": "The targeted expert query and the independent report agree on absence of relevant abnormalities, with no disagreement requiring further tools.",
+    "extracted_pattern": "System-presence yes/no query -> explicit abnormality-list query to a domain expert -> independent report corroboration -> answer no when findings are concordantly absent.",
+    "output_intent": "CREATE",
+    "none_reason": null,
+    "patch_target_id": null,
+    "branch": "task_level"
+  },
+  "chexbench_rad_restruct_0129": {
+    "skill_adoption": [],
+    "event_type": "targeted_verification",
+    "evidence_steps": [
+      0,
+      1,
+      2
+    ],
+    "support_level": "observed",
+    "observed_operation": "Step 0 rewrote the broad pleural question into a chest_xray_expert query naming pleural effusion, pneumothorax, and pleural thickening. Step 1 called maira2_grounded_report for corroboration. Step 2 answered B. no, citing the expert's explicit negative pleural findings and the report's clear lung fields.",
+    "proposed_operation": "For broad anatomical-region presence questions, expand the region into a checklist of common specific abnormalities before querying a targeted CXR expert; use a second report as corroboration, then answer the original yes/no option.",
+    "trigger": "A yes/no VQA item asks broadly whether there are signs in an anatomical region, and a targeted expert tool accepts a free-text query.",
+    "stop_condition": "Stop after the targeted expert explicitly negates the enumerated region-specific abnormalities and a corroborating report is consistent; then answer the original option.",
+    "extracted_pattern": "Broad-region presence query -> region-specific abnormality checklist for expert query -> second-tool corroboration -> original yes/no answer.",
+    "output_intent": "CREATE",
+    "none_reason": null,
+    "patch_target_id": null,
+    "branch": "task_level"
+  },
+  "chexbench_rad_restruct_0130": {
+    "skill_adoption": [],
+    "event_type": "targeted_verification",
+    "evidence_steps": [
+      0,
+      1,
+      2
+    ],
+    "support_level": "observed",
+    "observed_operation": "After chest_xray_expert returned 'No' to thoracic disease presence, the agent called maira2_grounded_report to verify absence; the grounded report listed clear lungs, normal heart size, and no acute osseous abnormality, and the agent then answered B. no.",
+    "proposed_operation": "For a binary 'any disease in thorax?' question, use chest_xray_expert for the direct answer, then corroborate a negative result with maira2_grounded_report; if the grounded report shows no acute thoracic findings, finalize the negative option, treating non-thoracic incidental findings as not changing the thoracic disease label.",
+    "trigger": "Binary thoracic disease-presence question with an initial negative answer from chest_xray_expert.",
+    "stop_condition": "Grounded report corroborates absence of acute thoracic disease findings (e.g., clear lungs, normal heart size) and no thoracic acute finding is listed.",
+    "extracted_pattern": "Use a direct expert QA tool first and a structured grounded-report tool as targeted verification for a negative binary presence answer; stop once the structured report corroborates absence, and do not count clearly non-thoracic incidental hardware as thoracic disease.",
+    "output_intent": "CREATE",
+    "none_reason": null,
+    "patch_target_id": null,
+    "branch": "task_level"
+  },
+  "chexbench_rad_restruct_0131": {
+    "skill_adoption": [],
+    "event_type": "scope_gap",
+    "evidence_steps": [
+      1,
+      2
+    ],
+    "support_level": "observed",
+    "observed_operation": "After chest_xray_expert explicitly negated pleural effusion, pneumothorax, and pleural thickening, the agent called maira2_grounded_report for verification; that tool returned only a generic report ('The lungs are clear. The heart is unremarkable. The vasculature is unremarkable.') with no pleural mention or boxes, but the final answer cited it as showing no pleural abnormality.",
+    "proposed_operation": "For a region-specific presence/absence question, treat a secondary general report as corroboration only if its output explicitly names the target region or provides localized grounding; otherwise rely on the targeted expert alone or call a region-specific grounding/crop tool before citing it.",
+    "trigger": "A region-specific binary VQA item, such as pleura abnormality, where a targeted expert answer is followed by a generic report tool used as corroboration.",
+    "stop_condition": "All cited evidence explicitly covers the target region; if a secondary report is non-specific, obtain localized grounding or omit it before answering.",
+    "extracted_pattern": "Scope-check corroborating tool outputs: do not promote a generic global 'clear lungs' statement to a region-specific negative without explicit regional evidence or localization.",
+    "output_intent": "CREATE",
+    "none_reason": null,
+    "patch_target_id": null,
+    "branch": "task_level"
+  },
+  "chexbench_rad_restruct_0132": {
+    "skill_adoption": [],
+    "event_type": "targeted_verification",
+    "evidence_steps": [
+      1,
+      2
+    ],
+    "support_level": "observed",
+    "observed_operation": "After chest_xray_expert returned 'No, the abdomen appears normal,' the agent called maira2_grounded_report as a second independent check, then finalized the binary answer as 'A. no' when the grounded report also returned 'No significant findings.'",
+    "proposed_operation": "For binary presence/absence questions, after one targeted CXR expert tool returns a negative answer, run an independent grounded-report tool to check for concordant absence; if both are negative, stop and answer without adding more tools.",
+    "trigger": "A binary presence question receives a negative answer from the first targeted CXR expert tool.",
+    "stop_condition": "A second independent CXR tool returns a concordant negative/ no-significant-findings result, supporting finalization.",
+    "extracted_pattern": "Use one targeted expert response plus one independent grounded-report check to verify a negative binary CXR finding before stopping.",
+    "output_intent": "CREATE",
+    "none_reason": null,
+    "patch_target_id": null,
+    "branch": "task_level"
+  }
+}
