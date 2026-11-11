@@ -18,3 +18,12 @@ All 618 CheXBench questions completed. The generation runner and the whole-cohor
 All 300 CheXBench questions saved when R56 was paused matched the R54 questions on ID, question text, options and reference answer. R54 answered **241/300 (80.33%)** correctly and R56 **236/300 (78.67%)**. The R54 difference was **+1.67 percentage points**. R54 alone was correct on 23 questions, R56 alone on 18, both on 218, and neither on 41. All counts reuse the saved judgments from each run.
 
 R54 used eight tools with Skill disabled and retained previously released same-image feedback. R54 and R56 use different tool sets and run conditions. The paired results describe performance on the shared questions.
+
+
+## Per-question tool call evidence
+
+The CSV and JSON now include `tool_call_details` for all 618 questions. The CSV encodes the list as JSON in that column. Each entry records the tool and backend, call order, executed arguments, source image reference, status, original saved return, and the observation delivered to the agent. Questions with no executed tool calls have an empty list.
+
+The export covers **1,208 calls**. **1,199** calls have a saved raw artifact, including one failed call with a preserved partial artifact. Nine failed calls have no saved raw return and retain their error records. The failed calls remain failed. The separately recovered MedGemma call uses its actual recovery result.
+
+Dataset image paths are relative. References prefixed `r54-artifact:` name files in the original run archive. Image binaries are outside this supplement. Tool answer text and saved correctness values are preserved.
