@@ -43,3 +43,10 @@ Skill entered the answering process frequently. The paired historical difference
 - [Question-to-Skill mapping](question_skill_mapping.json) contains all 270 question IDs in run order, with candidate IDs, activated IDs, the card version visible when each question was answered, and any saved adoption assessment. Empty ID lists mark questions with no candidate or no activation. An adoption value of `null` means no assessment was saved for that question. Assessment statuses are the writer model's attributions.
 
 The mapping was captured after the last window in the original 270-question snapshot had committed. It contains 239 saved assessments across all 270 questions, including assessments with no Skill adoption entries. The accuracy and adoption counts above retain the earlier snapshot.
+
+
+## Negative-adoption trajectories
+
+[Read the 24 trajectories](negative_adoption_trajectories.json), including the question and options, decision steps, Skill activation and attribution evidence, all 26 raw tool returns, and every saved final answer, reference answer and grade. Image references use dataset-relative paths. Private runtime paths are redacted. An empty tool-call list records a question with no executed tool.
+
+For `s_38c22abca62437c5` version 4, 15 of the 23 negatively attributed answers were graded correct and eight incorrect. The single requested case for `s_4125ee0ecf1c5acc`, `chexbench_slake_0036`, was graded incorrect. The grades come from saved online feedback. The negative-adoption label describes the writer model's attribution to a Skill on an answer step.
