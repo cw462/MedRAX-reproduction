@@ -35,3 +35,11 @@ The comparisons match the first 270 R56 question IDs to [the previously publishe
 | R49 online Skill (`M43-IM-GT-S49`) | 218 / 270 | 80.74% | 12 | 14 | −0.74 percentage points |
 
 Skill entered the answering process frequently. The paired historical differences amount to a net gain of three answers over R47 and a net loss of two against R49. The historical arms and the R56 protocol differ, so these results cannot isolate a Skill effect. The snapshot aggregates already-saved records without new inference or rescoring.
+
+
+## Skill card text and per-question IDs
+
+- [Skill cards](skill_cards.json) contains seven Skill IDs and eleven distinct saved text versions. Each card's nine content fields are reproduced as recorded. Version numbers in this export enumerate the distinct content for each ID in chronological snapshot order.
+- [Question-to-Skill mapping](question_skill_mapping.json) contains all 270 question IDs in run order, with candidate IDs, activated IDs, the card version visible when each question was answered, and any saved adoption assessment. Empty ID lists mark questions with no candidate or no activation. An adoption value of `null` means no assessment was saved for that question. Assessment statuses are the writer model's attributions.
+
+The mapping was captured after the last window in the original 270-question snapshot had committed. It contains 239 saved assessments across all 270 questions, including assessments with no Skill adoption entries. The accuracy and adoption counts above retain the earlier snapshot.

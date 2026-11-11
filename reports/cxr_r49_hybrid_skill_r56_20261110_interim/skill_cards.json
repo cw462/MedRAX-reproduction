@@ -1,0 +1,332 @@
+{
+  "dataset": "CheXBench",
+  "question_scope": "first 270 in R56 run order",
+  "cards": {
+    "s_18dd3b11e0c30b49": [
+      {
+        "version": 1,
+        "content": {
+          "name": "Thoracic Disease Presence Binary Verification",
+          "description": "For binary chest-radiograph questions asking whether any thoracic disease or sign is present, use chest_xray_classifier finding scores as an initial screen and verify a negative or unresolved screen with chest_xray_expert using a focused acute-finding question before answering.",
+          "applicable_conditions": "Use when the item is a binary CXR VQA question whose object is general thoracic disease/sign presence (for example, asking whether any disease or sign is present in the thorax), and a chest radiograph is available. Triggering evidence: a chest_xray_classifier finding-score vector has been obtained or is about to be obtained for the image. Required tool capabilities: chest_xray_classifier to produce thoracic finding scores and chest_xray_expert to answer a focused visual question about listed acute findings. Exclusions: do not use for non-binary questions, for disease-specific questions where the named disease is the object, for severity grading, localization, temporal comparison, full differential diagnosis, or report generation; do not treat classifier scores as calibrated probabilities. If the question type or image does not match these conditions, do not apply this skill. Decisions must not depend on access to any answer key or unknown reference answer.",
+          "branch": "task_level",
+          "tool_name": null,
+          "task_category": "presence",
+          "required_tools": [
+            "chest_xray_classifier",
+            "chest_xray_expert"
+          ],
+          "risk_level": "medium",
+          "core_action": "1) Check the question text and image: confirm a binary CXR question asking about any thoracic disease/sign presence; if not, stop and route to the appropriate task. 2) Call chest_xray_classifier on the provided CXR and record the finding-score vector as screening context only, not as a calibrated probability. 3) Inspect the score vector for evidence relevant to the presence question; do not equate low or borderline scores with a definitive negative answer. 4) If classifier screening does not clearly establish presence and the binary question is still unresolved, call chest_xray_expert with a focused question listing acute/important thoracic findings such as consolidation, effusion, pneumothorax, or mass and ask whether any such signs are present. 5) A negative final answer requires a negative expert response for that focused list and no remaining evidence type requested by the task. 6) If the expert response is positive, equivocal, inconsistent with classifier screening, or unavailable, do not commit to a negative answer; report uncertainty or seek further focused verification with the same registered tools. Stop when the binary presence/absence question is resolved by the available evidence, or when evidence remains conflicting/unknown and uncertainty is explicitly reported."
+        },
+        "observed_in": [
+          "0000/repo.json",
+          "0001/read_snapshot.json",
+          "0001/repo.json",
+          "0002/read_snapshot.json",
+          "0002/repo.json",
+          "0003/read_snapshot.json",
+          "0003/repo.json",
+          "0004/read_snapshot.json",
+          "0004/repo.json",
+          "0005/read_snapshot.json",
+          "0005/repo.json",
+          "0006/read_snapshot.json",
+          "0006/repo.json",
+          "0007/read_snapshot.json",
+          "0007/repo.json",
+          "0008/read_snapshot.json",
+          "0008/repo.json",
+          "0009/read_snapshot.json",
+          "0009/repo.json",
+          "0010/read_snapshot.json",
+          "0010/repo.json"
+        ]
+      }
+    ],
+    "s_38c22abca62437c5": [
+      {
+        "version": 1,
+        "content": {
+          "name": "single_expert_call_for_binary_anatomical_presence_then_stop",
+          "description": "Use a chest X-ray expert tool once to answer a binary presence/absence VQA question about a named anatomical region, then map a direct yes/no tool response to the corresponding option and stop.",
+          "applicable_conditions": "Apply only when the question is a binary yes/no VQA about whether any disease or abnormality is present in one specified anatomical structure or region, and a chest X-ray image containing that region is available. Triggering evidence is an explicit presence/absence question naming an anatomical region and offering yes/no options. Exclude non-binary questions, severity or quantification questions, localization or differential-diagnosis questions, questions about multiple regions, and cases without an assessable chest X-ray. The required tool capability is chest_xray_expert accepting the exact natural-language question against the CXR and returning a direct yes/no answer.",
+          "branch": "task_level",
+          "tool_name": null,
+          "task_category": "presence",
+          "required_tools": [
+            "chest_xray_expert"
+          ],
+          "risk_level": "low",
+          "core_action": "Confirm the question is binary presence/absence for one named anatomical region with yes/no options. Call chest_xray_expert once with the exact original question and the image. If the tool returns a direct yes/no answer, map yes to the yes option and no to the no option, then stop. If the tool returns an ambiguous or non-binary response, errors, or produces no output, do not guess or invent findings; report the result as unresolved/unknown, or if direct visual inspection is permitted, check only for the requested presence/absence without adding unsupported details, then stop. Stop after one successful direct yes/no answer and do not repeat identical calls."
+        },
+        "observed_in": [
+          "0000/repo.json",
+          "0001/read_snapshot.json",
+          "0001/repo.json",
+          "0002/read_snapshot.json",
+          "0002/repo.json",
+          "0003/read_snapshot.json",
+          "0003/repo.json",
+          "0004/read_snapshot.json",
+          "0004/repo.json",
+          "0005/read_snapshot.json"
+        ]
+      },
+      {
+        "version": 2,
+        "content": {
+          "name": "conditional_binary_anatomical_or_system_presence_CXR_expert_query",
+          "description": "For binary presence/absence chest X-ray VQA, use chest_xray_expert once: if the question names a specific anatomical region, forward the exact question and map a direct yes/no result; if the question names a broad organ system too broad to send unchanged, rewrite it as a specialist checklist query enumerating plausible findings implied by the system or supplied options, map a clear binary verdict, and limit rationale to specialist output. Stop after a clear mapped verdict; preserve branch-specific unknown handling.",
+          "applicable_conditions": "Use only for binary presence/absence chest X-ray VQA with yes/no or present/absent options and a registered chest_xray_expert tool. Branch A applies when the question names one specified anatomical structure or region and can be forwarded unchanged; exclude non-binary questions, severity or quantification questions, localization or differential-diagnosis questions, questions about multiple regions, and cases without an assessable chest X-ray. Branch B applies when the question names a broad organ system whose wording is too broad to forward unchanged; exclude non-binary questions, localization/severity/quantification tasks, multi-finding report generation tasks, and questions that already specify a single concrete finding rather than a broad organ system. Do not add unrelated diseases, measurements, or findings not implied by the question, system, or supplied options.",
+          "branch": "task_level",
+          "tool_name": null,
+          "task_category": "presence",
+          "required_tools": [
+            "chest_xray_expert"
+          ],
+          "risk_level": "low",
+          "core_action": "Determine which branch applies. Branch A: confirm the question is binary presence/absence for one named anatomical region with yes/no options; call chest_xray_expert once with the exact original question and the image; if the tool returns a direct yes/no answer, map yes to the yes option and no to the no option, then stop; if ambiguous, non-binary, errors, or no output, do not guess or invent findings, report unresolved/unknown, or if direct visual inspection is permitted check only for the requested presence/absence without adding unsupported details, then stop; stop after one successful direct yes/no answer and do not repeat identical calls. Branch B: check that the question is binary presence/absence, names an organ system, and is too broad to send unchanged; rewrite it for chest_xray_expert as a specialist query enumerating plausible findings for that system using only terms implied by the question or answer options; send one chest_xray_expert call; if the output contains a clear binary verdict mapping one-to-one onto an answer option, answer with that mapped option and make the rationale state only what the tool returned plus the queried terms, without adding unqueried findings such as clear lungs or a normal silhouette unless returned; if unclear, non-binary, unmappable, or conflicting with another available registered tool, do not force an answer: re-query once with a clarified specialist prompt or consult another applicable registered CXR tool, and if still unresolved report unknown/insufficient evidence in the required answer format; stop after a clear specialist verdict maps to an option and make no further tool calls unless the verdict is ambiguous or conflicting."
+        },
+        "observed_in": [
+          "0005/repo.json",
+          "0006/read_snapshot.json"
+        ]
+      },
+      {
+        "version": 3,
+        "content": {
+          "name": "conditional_binary_anatomical_or_system_presence_CXR_expert_query",
+          "description": "For binary presence/absence chest X-ray VQA, use chest_xray_expert once: if the question names a specific anatomical region, forward the exact question and map a direct yes/no result; if the question names a broad organ system too broad to send unchanged, rewrite it as a specialist checklist query enumerating plausible findings implied by the system or supplied options, map a clear binary verdict, and limit rationale to specialist output. Stop after a clear mapped verdict; preserve branch-specific unknown handling.",
+          "applicable_conditions": "Use only for binary presence/absence chest X-ray VQA with yes/no or present/absent options and a registered chest_xray_expert tool. Branch A applies when the question names one specified anatomical structure or region and the wording can be forwarded unchanged to the specialist, including a single-organ/region health-status yes/no question such as asking whether the lung is healthy; a single-organ yes/no query is not Branch B merely because it names an organ system. Exclude non-binary questions, severity or quantification questions, localization or differential-diagnosis questions, questions about multiple regions, and cases without an assessable chest X-ray. Branch B applies only when the question names a broad organ system whose wording is genuinely too broad to forward unchanged or requires enumeration of multiple plausible findings; exclude non-binary questions, localization/severity/quantification tasks, multi-finding report generation tasks, single-organ/region yes/no questions that can be forwarded unchanged, and questions that already specify a single concrete finding rather than a broad organ system. Triggering evidence is an explicit binary yes/no question about presence/health of a named structure/region or a genuinely broad organ-system question requiring checklist rewriting. Required tool capability: chest_xray_expert accepts the original or rewritten natural-language question and returns a direct binary or clearly mappable verdict; unknown, ambiguous, or error output must not be converted into a guessed presence/absence answer and should follow the unknown handling in core_action. Do not add unrelated diseases, measurements, or findings not implied by the question, system, or supplied options.",
+          "branch": "task_level",
+          "tool_name": null,
+          "task_category": "presence",
+          "required_tools": [
+            "chest_xray_expert"
+          ],
+          "risk_level": "low",
+          "core_action": "Determine which branch applies. Branch A: confirm the question is binary presence/absence for one named anatomical region with yes/no options; call chest_xray_expert once with the exact original question and the image; if the tool returns a direct yes/no answer, map yes to the yes option and no to the no option, then stop; if ambiguous, non-binary, errors, or no output, do not guess or invent findings, report unresolved/unknown, or if direct visual inspection is permitted check only for the requested presence/absence without adding unsupported details, then stop; stop after one successful direct yes/no answer and do not repeat identical calls. Branch B: check that the question is binary presence/absence, names an organ system, and is too broad to send unchanged; rewrite it for chest_xray_expert as a specialist query enumerating plausible findings for that system using only terms implied by the question or answer options; send one chest_xray_expert call; if the output contains a clear binary verdict mapping one-to-one onto an answer option, answer with that mapped option and make the rationale state only what the tool returned plus the queried terms, without adding unqueried findings such as clear lungs or a normal silhouette unless returned; if unclear, non-binary, unmappable, or conflicting with another available registered tool, do not force an answer: re-query once with a clarified specialist prompt or consult another applicable registered CXR tool, and if still unresolved report unknown/insufficient evidence in the required answer format; stop after a clear specialist verdict maps to an option and make no further tool calls unless the verdict is ambiguous or conflicting."
+        },
+        "observed_in": [
+          "0006/repo.json",
+          "0007/read_snapshot.json"
+        ]
+      },
+      {
+        "version": 4,
+        "content": {
+          "name": "conditional_binary_anatomical_or_system_presence_CXR_expert_query",
+          "description": "For binary presence/absence chest X-ray VQA, use chest_xray_expert once according to branch: forward a named-region question unchanged; rewrite only a genuinely broad organ-system question as a specialist checklist using terms implied by the system or options; for generic global 'any abnormalities' questions, forward the exact question unchanged. Map a clear yes/no verdict to the supplied option and limit rationale to specialist output. Stop after a clear mapped verdict; preserve branch-specific unknown handling.",
+          "applicable_conditions": "Use only for binary presence/absence chest X-ray VQA with yes/no or present/absent options and a registered chest_xray_expert tool. Applicable question objects are: (A) a global whole-image assessment asking whether the chest X-ray looks abnormal or normal, with no named anatomical region required; this question is directly forwardable to the specialist and must not be rejected solely because it lacks a named region or because a checklist rewrite is unnecessary; (B) one specified anatomical structure or region whose wording can be forwarded unchanged, including a single-organ/region health-status yes/no question such as asking whether the lung is healthy; a single-organ yes/no query is not Branch B merely because it names an organ system; and (C) a broad organ system whose wording is genuinely too broad to forward unchanged or requires enumeration of multiple plausible findings. Exclude non-binary questions, severity or quantification questions, localization or differential-diagnosis questions, questions about multiple regions, multi-finding report generation tasks, questions that already specify a single concrete finding rather than a broad organ system, and cases without an assessable chest X-ray. Triggering evidence is an explicit binary yes/no question about global image abnormality/normality, presence/health of a named structure/region, or a genuinely broad organ-system question requiring checklist rewriting. Required tool capability: chest_xray_expert accepts the original or rewritten natural-language question and returns a direct binary or clearly mappable verdict; unknown, ambiguous, or error output must not be converted into a guessed presence/absence answer. For global whole-image abnormality questions, use the direct-forward and yes/no mapping path described for Branch A in core_action, treating the whole image as the object and requiring no named anatomical region or checklist rewrite. Stop after a clear specialist verdict is mapped to an answer option and make no further tool calls unless the verdict is ambiguous, unmappable, or conflicting; if unresolved, report unknown/insufficient evidence in the required answer format. Do not add unrelated diseases, measurements, or findings not implied by the question, system, or supplied options.",
+          "branch": "task_level",
+          "tool_name": null,
+          "task_category": "presence",
+          "required_tools": [
+            "chest_xray_expert"
+          ],
+          "risk_level": "low",
+          "core_action": "Determine branch. Branch A: for binary yes/no about one named anatomical region, call chest_xray_expert once with exact question and image; map direct yes/no to option and stop. If ambiguous, non-binary, error, or no output, do not guess; report unresolved/unknown, or if direct visual inspection is permitted check only requested presence/absence without extra findings; stop. Do not repeat identical calls.\nBranch B: for binary broad organ-system question too broad to forward unchanged, rewrite for chest_xray_expert as a specialist checklist enumerating only findings implied by the question/options; call once; map a clear one-to-one binary verdict to the option, limiting rationale to returned output and queried terms. If unclear, unmappable, or conflicts with another registered CXR tool, do not force an answer: re-query once with clarification or consult another applicable registered tool; if unresolved, report unknown/insufficient evidence. Stop after a clear mapped verdict.\nBranch C: for binary generic global 'any abnormalities' question without named region/system needing rewrite, call chest_xray_expert once with exact question and image; map clear yes/no to option, limit rationale to specialist output, and stop. If unclear, ambiguous, unmappable, missing, error, or conflicts with another registered tool, do not guess; report unresolved/unknown or insufficient evidence and stop. Do not require or infer a reference answer."
+        },
+        "observed_in": [
+          "0007/repo.json",
+          "0008/read_snapshot.json",
+          "0008/repo.json",
+          "0009/read_snapshot.json",
+          "0009/repo.json",
+          "0010/read_snapshot.json"
+        ]
+      },
+      {
+        "version": 5,
+        "content": {
+          "name": "conditional_binary_anatomical_or_system_presence_CXR_expert_query",
+          "description": "For chest X-ray VQA using chest_xray_expert once, handle three forward/rewrite cases and one forced-choice case: forward a named-region binary question unchanged; rewrite only a genuinely broad organ-system question as a specialist checklist using terms implied by the system or options; for generic global 'any abnormalities' questions, forward the exact question unchanged; for a two-option forced-choice between two mutually exclusive named anatomical findings in one region, ask one explicit 'A or B?' question using only the supplied alternatives. Map a clear yes/no or one-alternative verdict to the supplied option and limit rationale to specialist output. Stop after a clear mapped verdict; preserve branch-specific unknown handling.",
+          "applicable_conditions": "Use only for chest X-ray VQA with a registered chest_xray_expert tool and an assessable CXR. Applicable question objects are: (A) a global whole-image binary assessment asking whether the chest X-ray looks abnormal or normal, with no named anatomical region required; forward directly and do not reject solely because it lacks a named region or needs no checklist rewrite; (B) one specified anatomical structure or region whose binary yes/no wording can be forwarded unchanged, including a single-organ/region health-status question such as whether the lung is healthy; a single-organ yes/no query is not the broad-organ-system rewrite case merely because it names an organ system; (C) a broad organ system whose binary wording is genuinely too broad to forward unchanged or requires enumeration of multiple plausible findings; and (D) a two-option forced-choice question naming two mutually exclusive anatomical findings in one named region, such as elevated right versus elevated left diaphragm. Exclude non-binary questions other than D, severity or quantification, localization or differential-diagnosis, questions about multiple regions, multi-finding report generation, questions that already specify a single concrete finding rather than a broad organ system (except D's two supplied alternatives), and cases without an assessable chest X-ray. Triggering evidence is an explicit global abnormality/normality question, presence/health of a named structure/region, a genuinely broad organ-system question requiring checklist rewriting, or a two-option forced-choice naming mutually exclusive findings in one region. Required tool capability: chest_xray_expert accepts the original or rewritten natural-language question and returns a direct binary, clear finding/laterality, or clearly mappable verdict; unknown, ambiguous, or error output must not be converted into a guessed answer. Stop after a clear specialist verdict is mapped to an answer option and make no further tool calls unless the verdict is ambiguous, unmappable, or conflicting; if unresolved, report unknown/insufficient evidence in the required answer format. Do not add unrelated diseases, measurements, or findings not implied by the question, system, or supplied options.",
+          "branch": "task_level",
+          "tool_name": null,
+          "task_category": "presence",
+          "required_tools": [
+            "chest_xray_expert"
+          ],
+          "risk_level": "low",
+          "core_action": "Determine branch. Branch A: for binary yes/no about one named anatomical region, call chest_xray_expert once with the exact question and image; map a direct yes/no to the supplied option and stop. If ambiguous, non-binary, error, or no output, do not guess; report unresolved/unknown, or if direct visual inspection is permitted check only the requested presence/absence without extra findings; stop. Do not repeat identical calls. Branch B: for a binary broad organ-system question too broad to forward unchanged, rewrite for chest_xray_expert as a specialist checklist enumerating only findings implied by the question/options; call once; map a clear one-to-one binary verdict to the option, limiting rationale to returned output and queried terms. If unclear, unmappable, or conflicting with another registered CXR tool, do not force an answer: re-query once with clarification or consult another applicable registered tool; if unresolved, report unknown/insufficient evidence. Stop after a clear mapped verdict. Branch C: for a binary generic global 'any abnormalities' question without a named region/system needing rewrite, call chest_xray_expert once with the exact question and image; map a clear yes/no to the option, limit rationale to specialist output, and stop. If unclear, ambiguous, unmappable, missing, error, or conflicting with another registered tool, do not guess; report unresolved/unknown or insufficient evidence and stop. Branch D: for a two-option item naming two mutually exclusive anatomical findings in one named region, including side pairs, confirm the image and options match; call chest_xray_expert once with one direct 'A or B?' question using only the supplied alternatives. If the reply maps to exactly one option, answer with that option and limit rationale to specialist output plus the queried finding, side, and view; do not assert the side as independently image-confirmed. If the only image is a lateral projection, attribute side to the specialist response and note the projection limitation. If empty, ambiguous, names both/neither, unmappable, errors, or conflicts with other registered side-specific evidence, do not guess: re-query once with a clarified side prompt or consult another applicable registered CXR tool; if unresolved report unknown/insufficient evidence. Stop after one clear mapped verdict."
+        },
+        "observed_in": [
+          "0010/repo.json"
+        ]
+      }
+    ],
+    "s_a60b441a13114a23": [
+      {
+        "version": 1,
+        "content": {
+          "name": "Evidence-Bound System-Presence CXR Specialist Query",
+          "description": "For binary presence/absence chest X-ray VQA where the prompt names a broad organ system, convert the broad system question into a specialist query that enumerates plausible findings implied by that system or supplied options, send it to the chest X-ray expert tool, map a clear binary verdict to the corresponding answer option, and keep the final rationale limited to the specialist output.",
+          "applicable_conditions": "Use only when: (1) the task is binary presence/absence VQA; (2) the question object is a named organ system whose wording is too broad to forward unchanged to a specialist CXR model; (3) the answer options are a binary pair such as yes/no or present/absent; (4) a registered chest X-ray specialist tool is available. Triggering evidence: the broad system-level question was rewritten into an explicit checklist-style specialist query, the tool returned a terse binary verdict, and that verdict was mapped to an option. Exclude non-binary questions, localization/severity/quantification tasks, multi-finding report generation tasks, and questions that already specify a single concrete finding rather than a broad organ system. Do not add unrelated diseases, measurements, or findings not implied by the question, system, or supplied options.",
+          "branch": "task_level",
+          "tool_name": null,
+          "task_category": "presence",
+          "required_tools": [
+            "chest_xray_expert"
+          ],
+          "risk_level": "low",
+          "core_action": "Check that the question is binary presence/absence, names an organ system, and is too broad to send unchanged. Rewrite it for chest_xray_expert as a specialist query enumerating plausible findings for that system using only terms implied by the question or answer options. Send one chest_xray_expert call. Inspect the returned output: if it contains a clear binary verdict that maps one-to-one onto an answer option, answer with that mapped option and make the rationale state only what the tool returned plus the queried terms; do not add unqueried findings such as clear lungs or a normal silhouette unless they were returned. If the output is unclear, non-binary, unmappable to the options, or conflicts with another available registered tool, do not force an answer: re-query once with a clarified specialist prompt or consult another applicable registered CXR tool, and if still unresolved report unknown/insufficient evidence in the required answer format. Stop after a clear specialist verdict maps to an option; make no further tool calls unless the verdict is ambiguous or conflicting."
+        },
+        "observed_in": [
+          "0000/repo.json",
+          "0001/read_snapshot.json",
+          "0001/repo.json",
+          "0002/read_snapshot.json",
+          "0002/repo.json",
+          "0003/read_snapshot.json",
+          "0003/repo.json",
+          "0004/read_snapshot.json",
+          "0004/repo.json",
+          "0005/read_snapshot.json",
+          "0005/repo.json",
+          "0006/read_snapshot.json",
+          "0006/repo.json",
+          "0007/read_snapshot.json",
+          "0007/repo.json",
+          "0008/read_snapshot.json",
+          "0008/repo.json",
+          "0009/read_snapshot.json",
+          "0009/repo.json",
+          "0010/read_snapshot.json",
+          "0010/repo.json"
+        ]
+      }
+    ],
+    "s_e16f7c209e7359cf": [
+      {
+        "version": 1,
+        "content": {
+          "name": "Binary lung-abnormality expert-classifier corroboration",
+          "description": "For binary yes/no questions about whether the lung/chest radiograph shows any abnormality, obtain primary expert visual QA; if the expert reports no abnormality, use independent classifier finding scores as corroboration before finalizing a negative answer.",
+          "applicable_conditions": "Applies when the question is a presence/absence yes/no question about any lung abnormality, the image is a chest X-ray, and registered tools are available for chest X-ray expert visual QA and independent multi-finding classification. Triggering evidence: an initial broad lung-abnormality expert query followed by classifier scores as independent corroboration. Excludes questions about localization, severity, temporal change, report generation, non-chest-X-ray images, or single named findings requiring segmentation/grounding, and cases where either required corroborating tool is unavailable. Required tool capabilities: chest_xray_expert must answer a broad lung-abnormality visual QA prompt; chest_xray_classifier must return independent finding scores with its stated limitations. Classifier scores are not calibrated disease probabilities, severity grades, localization, or temporal-change evidence.",
+          "branch": "task_level",
+          "tool_name": null,
+          "task_category": "presence",
+          "required_tools": [
+            "chest_xray_expert",
+            "chest_xray_classifier"
+          ],
+          "risk_level": "low",
+          "core_action": "Confirm the question is a binary lung-abnormality presence question and the image is a chest X-ray. Call chest_xray_expert first with a broad lung-abnormality visual QA prompt. If the expert answer is clearly negative/no abnormality, call chest_xray_classifier to obtain independent finding scores. Check that classifier output is interpretable and concordant with the expert negative, with low acute-abnormality scores according to the tool output and its stated limitations. If expert is negative and classifier scores are low/concordant, stop and finalize a negative answer citing both sources. If the expert answer is positive or equivocal, do not enter the negative-corroboration pathway; use the expert evidence and document uncertainty or use another registered tool appropriate to the question. If either tool fails, the expert result is ambiguous, classifier output is missing/uninterpretable, or scores are discordant/not low, do not assert a normal lung; report the limitation or uncertainty and stop when a supported answer or explicit uncertainty is documented. Do not require or infer any reference answer."
+        },
+        "observed_in": [
+          "0000/repo.json",
+          "0001/read_snapshot.json",
+          "0001/repo.json",
+          "0002/read_snapshot.json",
+          "0002/repo.json",
+          "0003/read_snapshot.json",
+          "0003/repo.json",
+          "0004/read_snapshot.json",
+          "0004/repo.json",
+          "0005/read_snapshot.json",
+          "0005/repo.json",
+          "0006/read_snapshot.json",
+          "0006/repo.json",
+          "0007/read_snapshot.json",
+          "0007/repo.json",
+          "0008/read_snapshot.json",
+          "0008/repo.json",
+          "0009/read_snapshot.json",
+          "0009/repo.json",
+          "0010/read_snapshot.json",
+          "0010/repo.json"
+        ]
+      }
+    ],
+    "s_4125ee0ecf1c5acc": [
+      {
+        "version": 1,
+        "content": {
+          "name": "Laterality-specific CXR finding verification with side-specific expert evidence",
+          "description": "For chest X-ray VQA that asks about presence of a named finding in a specified side or lung region, obtain a side-specific chest_xray_expert response; if chest_xray_classifier is used, treat its scores as global, non-localizing context and not as laterality confirmation.",
+          "applicable_conditions": "Use when the task is visual question answering about presence/absence of a named chest finding in a named side or lung region on a chest radiograph, and the answer depends on side/region localization. Triggering evidence: a side-specific chest_xray_expert prompt returns a direct finding verdict, while chest_xray_classifier, if used, returns only global non-localized finding scores. Required tool capability: chest_xray_expert can answer a side/region-specific question; chest_xray_classifier may be used only as global auxiliary context when available. Exclude questions not requiring side/region localization, general presence questions without a named side or region, severity/quantification, temporal comparison, report generation, non-CXR images, and cases where no side-specific expert query is available. Do not infer laterality from global classifier output.",
+          "branch": "task_level",
+          "tool_name": null,
+          "task_category": "location",
+          "required_tools": [
+            "chest_xray_expert"
+          ],
+          "risk_level": "medium",
+          "core_action": "Check that the question names both a finding and a specific side or lung region. Query chest_xray_expert with a prompt that explicitly includes the named finding and side/region. Read the response as side-specific evidence only if it directly addresses that side/region. If chest_xray_classifier is also called, record its finding scores as global, non-localizing auxiliary context only; do not use those scores to confirm or deny the named side and do not describe them as corroborating laterality. Visual inspection may be reported as a separate image observation tied to the named side when the image is inspected. If the expert response is direct and side-specific, use it for the presence/absence answer; if it is negative for that side, do not assert presence there. If the expert response is unavailable, ambiguous, does not address the named side/region, fails, or conflicts with other side-specific evidence, state the uncertainty or provide only global context and avoid claiming localized confirmation. Stop after obtaining one direct side-specific expert response or after documenting uncertainty; do not repeat identical calls. Do not require or infer a reference answer."
+        },
+        "observed_in": [
+          "0006/repo.json",
+          "0007/read_snapshot.json",
+          "0007/repo.json",
+          "0008/read_snapshot.json",
+          "0008/repo.json",
+          "0009/read_snapshot.json",
+          "0009/repo.json",
+          "0010/read_snapshot.json",
+          "0010/repo.json"
+        ]
+      }
+    ],
+    "s_5337f79b65be3966": [
+      {
+        "version": 1,
+        "content": {
+          "name": "Region-Preserving Binary Pneumothorax Expert Query",
+          "description": "For location-specific binary pneumothorax presence/absence chest X-ray VQA, query chest_xray_expert once with explicit yes/no wording that retains the named lung region, then map the tool's clear No/Yes response to the corresponding absence/presence option.",
+          "applicable_conditions": "Use only when the question is a binary presence/absence chest X-ray VQA about pneumothorax in a named lung region and the options are a yes/no or present/absent pair. Triggering evidence: a region-scoped pneumothorax question was converted into an explicit yes/no expert query that preserved the anatomical region, the chest_xray_expert tool returned a clear binary response, and that response was mapped to the matching option. Required tool capability: chest_xray_expert must accept a natural-language CXR question and return a direct binary presence/absence answer. Exclude non-binary questions, questions without a named lung region, questions about multiple regions or whole-chest pneumothorax without a named region, localization-only tasks, severity or quantification tasks, differential diagnosis, report generation, non-chest-X-ray images, and cases where the expert tool is unavailable. Do not add unrelated diseases, measurements, or findings not implied by the question or options.",
+          "branch": "task_level",
+          "tool_name": null,
+          "task_category": "location",
+          "required_tools": [
+            "chest_xray_expert"
+          ],
+          "risk_level": "low",
+          "core_action": "Confirm the question asks a binary pneumothorax presence/absence question for one named lung region and offers yes/no or present/absent options. Call chest_xray_expert once with an explicit yes/no question that preserves the exact anatomical region from the prompt without adding new regions or findings. Inspect the returned output: if it is a clear binary response, map No to the absence option and Yes to the presence option, then stop. Keep the final rationale limited to the expert response and the queried region; do not claim a separate visual inspection unless one was actually performed. If the tool output is unclear, non-binary, unmappable to the options, missing, or the tool fails, do not guess or assert pneumothorax presence/absence; report the result as unresolved or insufficient evidence and stop. Do not require or infer any reference answer."
+        },
+        "observed_in": [
+          "0006/repo.json",
+          "0007/read_snapshot.json",
+          "0007/repo.json",
+          "0008/read_snapshot.json",
+          "0008/repo.json",
+          "0009/read_snapshot.json",
+          "0009/repo.json",
+          "0010/read_snapshot.json",
+          "0010/repo.json"
+        ]
+      }
+    ],
+    "s_62e1cbd628c6b651": [
+      {
+        "version": 1,
+        "content": {
+          "name": "Anatomical finding presence verification with expert QA and phrase grounding",
+          "description": "For binary chest X-ray VQA asking whether a named finding is present in a specified lung or anatomical region, obtain an expert yes/no assessment and independently ground the same finding-and-region phrase before finalizing the mapped option when the outputs are concordant.",
+          "applicable_conditions": "Applies when the item is a binary yes/no or present/absent chest X-ray VQA question whose object is one named radiographic finding in one specified lung or anatomical region, and the registered tools chest_xray_expert and xray_phrase_grounding are available. Triggering evidence: the question names both the finding and the target region, and the workflow uses the same finding-and-region phrase for expert QA and phrase grounding. Exclude non-binary questions, severity or quantification questions, temporal comparison, report generation, multi-region or multi-finding questions, non-chest-X-ray images, and cases where no specified region is named or either required tool is unavailable. Required tool capabilities: chest_xray_expert must accept a natural-language finding-and-region question and return a clear yes/no verdict; xray_phrase_grounding must accept the same finding-and-region phrase and return localization output for that phrase, such as a bounding box or visualization, or an explicit failure. Grounding output is evidence for localization, not a calibrated probability. Do not infer absence solely from missing grounding output, and do not require or use any reference answer.",
+          "branch": "task_level",
+          "tool_name": null,
+          "task_category": "location",
+          "required_tools": [
+            "chest_xray_expert",
+            "xray_phrase_grounding"
+          ],
+          "risk_level": "low",
+          "core_action": "Confirm the question is binary presence/absence for one named finding in one specified lung or anatomical region and the image is a chest X-ray. Call chest_xray_expert with a direct question using only the asked finding and location. Call xray_phrase_grounding with the same finding-and-location phrase. Inspect the outputs: the expert result must be a clear yes/no verdict, and the grounding result must localize the same phrase to the stated region or report an explicit failure or absence of localization. If the expert verdict and grounding localization are concordant, map the verdict to the original supplied binary option and finalize with a rationale limited to what the tools returned and the queried finding/location; do not add unqueried findings. If the expert output is ambiguous or non-binary, either tool errors or returns no interpretable output, the grounding localization contradicts the expert verdict, or only one tool supports the answer, do not force a presence or absence conclusion solely from the single source; report uncertainty or unresolved evidence in the required answer format. Stop after concordant evidence maps to the original option, or after explicit uncertainty is documented when concordance cannot be obtained."
+        },
+        "observed_in": [
+          "0006/repo.json",
+          "0007/read_snapshot.json",
+          "0007/repo.json",
+          "0008/read_snapshot.json",
+          "0008/repo.json",
+          "0009/read_snapshot.json",
+          "0009/repo.json",
+          "0010/read_snapshot.json",
+          "0010/repo.json"
+        ]
+      }
+    ]
+  }
+}
