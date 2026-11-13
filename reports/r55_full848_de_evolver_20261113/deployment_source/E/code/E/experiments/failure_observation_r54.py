@@ -1,0 +1,89 @@
+"""MedRAX A.4 terminal errors for both new R54 arms, without regeneration.
+
+Prior explicit user authorization is carried forward uniformly from question 1.
+Unknown sends/attempts still stop; raw failed cache and selection remain unchanged.
+"""
+import copy
+from pathlib import Path
+from cxr_online_primitives_r49 import read,tool_failure_reason
+from online_memory_r49 import save_once,safe_qid
+
+SCHEMA='r54_terminal_failure_observation_v1'
+
+def terminal(record):
+    reason=tool_failure_reason(record)
+    if not reason:raise ValueError('healthy_tool_is_not_failed')
+    if record.get('status') not in ('failed','error','completed'):
+        raise RuntimeError('unknown_tool_attempt_stop_no_retry')
+    return reason
+
+def source(services,qid,ordinal,observation,reader=read):
+    safe_qid(qid)
+    if type(ordinal) is not int or ordinal<1:raise ValueError('invalid_selection_ordinal')
+    key=observation.get('cache_key')
+    if not isinstance(key,str) or len(key)!=64 or any(c not in '0123456789abcdef' for c in key):
+        raise ValueError('invalid_existing_cache_identity')
+    selection=Path(services)/'tool_selections/R49-AGENT'/qid/(str(ordinal)+'.json')
+    cache=Path(services)/'tool_cache'/key
+    raw=reader(selection);result=reader(cache/'result.json');request=reader(cache/'request.json')
+    if raw!=observation or any(raw.get(k)!=v for k,v in result.items()):raise ValueError('failed_source_changed')
+    if request.get('tool')!=raw.get('tool') or not (cache/'started.json').is_file():raise ValueError('missing_terminal_source')
+    terminal(raw)
+    events=cache/'artifacts/backend_events.json'
+    backend_events = reader(events) if events.is_file() else []
+    unknown = [event for event in (*raw.get('actual_model_events', []), *backend_events)
+               if event.get('status') == 'started_unknown']
+    if unknown:
+        exit_path = cache/'backend.exit.json'
+        if not (exit_path.is_file() and raw.get('status') == 'failed' and raw.get('observation') is None
+                and not raw.get('derived_images') and all(event.get('kind') == 'generate' for event in unknown)):
+            raise RuntimeError('unknown_model_generation_stop_no_retry')
+        code = reader(exit_path).get('returncode')
+        if type(code) is not int or code == 0 or raw.get('error') != f'backend_exit_{code}':
+            raise RuntimeError('unknown_model_generation_stop_no_retry')
+    return raw,request,selection,cache
+
+def delivered_failure(services,row,ordinal,action,observation):
+    services=Path(services);qid=safe_qid(row['question_id'])
+    terminal(observation)
+    raw,request,selection,cache=source(services,qid,ordinal,observation)
+    if (raw.get('tool')!=action['tool'] or request.get('args')!=action.get('args',{})
+            or raw.get('image_index',1)!=action.get('image_index',1)):
+        raise ValueError('failed_action_binding_changed')
+    presented=dict(copy.deepcopy(raw),failure_observation={
+        'schema':SCHEMA,'selection_ordinal':ordinal,'failure_reason':terminal(raw),
+        'outcome':'tool_failed_no_usable_evidence','automatic_retry':False,
+        'instruction':'This tool failed. Partial output supplies no usable finding. Continue from the original images and other evidence; preserve the failure and do not repeat the failed call.'})
+    save_once(services.parent/'failure_observations'/qid/(str(ordinal)+'.json'),{
+        'schema':SCHEMA,'question_id':qid,'selection_ordinal':ordinal,'raw_selection':raw,
+        'delivered_observation':presented,'selection_file':str(selection.relative_to(services.parent)),
+        'cache_file':str((cache/'result.json').relative_to(services.parent)),
+        'tool_remains_failed':True,'backend_regenerated':False,'output_repaired':False,'current_reference_read':False})
+    return presented
+
+def validate_delivered_failure(out,qid,observation,reader=read):
+    out=Path(out);note=observation.get('failure_observation') or {};ordinal=note.get('selection_ordinal')
+    if note.get('schema')!=SCHEMA or type(ordinal) is not int:raise ValueError('failed_tool_without_receipt')
+    receipt=reader(out/'failure_observations'/safe_qid(qid)/(str(ordinal)+'.json'))
+    raw=copy.deepcopy(observation);raw.pop('failure_observation',None)
+    source(out/'services',qid,ordinal,raw,reader)
+    expected={'schema':SCHEMA,'question_id':qid,'selection_ordinal':ordinal,'raw_selection':raw,
+        'delivered_observation':observation,'tool_remains_failed':True,'backend_regenerated':False,
+        'output_repaired':False,'current_reference_read':False}
+    if any(receipt.get(k)!=v for k,v in expected.items()):raise ValueError('failure_delivery_changed')
+    return receipt
+
+def validate_prediction_failures(out,qid,prediction):
+    count=0
+    for observation in prediction.get('observations',[]):
+        if tool_failure_reason(observation):validate_delivered_failure(out,qid,observation);count+=1
+    return count
+
+def validate_selection_failures(out):
+    count=0
+    for path in (Path(out)/'services/tool_selections/R49-AGENT').glob('*/*.json'):
+        raw=read(path)
+        if tool_failure_reason(raw):
+            receipt=read(Path(out)/'failure_observations'/path.parent.name/path.name)
+            validate_delivered_failure(out,path.parent.name,receipt['delivered_observation']);count+=1
+    return count
