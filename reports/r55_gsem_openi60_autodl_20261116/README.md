@@ -13,6 +13,6 @@
 
 请求用量、模型返回标识、工具路线和计时见摘要。记录的 token 统计可与 Token Plan 扣费对账。 [摘要](summary.json)
 
-逐题记录包含题干、完整选项、预测、对错、工具观察和 Open-i 原图链接。完整调用记录和工具图像保存在 AutoDL，正分段同步到 H 盘。 [逐题记录](per-question.json) · [初始图](initial-graph.json) · [运行源码](source)
+逐题记录包含题干、完整选项、预测、对错、工具观察、原图及本轮生成图像路径。 [逐题记录](per-question.json) · [初始图](initial-graph.json) · [运行源码](source)
 
 题目来自 Stanford AIMI CheXBench。胸片来自 Indiana University 医院网络，由美国国立卫生研究院国家医学图书馆（NLM, NIH, Bethesda, MD, USA）发布。 [CheXBench 数据卡](https://huggingface.co/datasets/StanfordAIMI/chexbench) · [Open-i 数据来源](https://openi-vip.nlm.nih.gov/faq) · [Demner-Fushman 等](https://pubmed.ncbi.nlm.nih.gov/26133894/)
