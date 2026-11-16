@@ -1,0 +1,235 @@
+diff --git a/main_phase3.py b/main_phase3.py
+index 6ad0880..4b10a9e 100644
+--- a/main_phase3.py
++++ b/main_phase3.py
+@@ -31,16 +31,6 @@ from pathlib import Path
+ 
+ sys.path.insert(0, str(Path(__file__).parent))
+ 
+-from src.shared.config import config
+-from src.shared.logger import logger
+-from src.phase3.ttl import (
+-    GraphState,
+-    OnlineEvolutionPipeline,
+-    GSEMRetrievalAdapter,
+-)
+-from main import load_cases  # reuse Phase 1 case loader
+-
+-
+ def main():
+     parser = argparse.ArgumentParser(
+         description="GSEM TTL — Test-Time Learning (Online Self-Evolution)"
+@@ -88,6 +78,11 @@ def main():
+     )
+     args = parser.parse_args()
+ 
++    from src.shared.config import config
++    from src.shared.logger import logger
++    from src.phase3.ttl import GraphState, OnlineEvolutionPipeline, GSEMRetrievalAdapter
++    from main_phase1 import load_cases
++
+     # ------------------------------------------------------------------
+     # Redirect logger to a TTL-specific log file
+     # ------------------------------------------------------------------
+@@ -105,7 +100,7 @@ def main():
+     # ------------------------------------------------------------------
+     # Load test cases (reuse Phase 1 loader, forced to test split)
+     # ------------------------------------------------------------------
+-    os.environ["DATASET_SPLIT"] = "test"
++    config.paths.dataset_split = "test"
+ 
+     logger.log_info("\n" + "=" * 80)
+     logger.log_info("GSEM TTL — TEST-TIME LEARNING (ONLINE SELF-EVOLUTION)")
+diff --git a/src/phase3/retrieval/retriver.py b/src/phase3/retrieval/retriver.py
+index 071df67..beebafd 100644
+--- a/src/phase3/retrieval/retriver.py
++++ b/src/phase3/retrieval/retriver.py
+@@ -11,6 +11,8 @@ import json
+ import os
+ import re
+ from collections import defaultdict
++from contextlib import contextmanager
++from contextvars import ContextVar
+ from typing import Optional
+ 
+ from agent import call_llm
+@@ -39,6 +41,29 @@ for _link in _graph_data["links"]:
+ 
+ # ── 图工具函数 ────────────────────────────────────────────────────────────────
+ 
++_active_graph = ContextVar("active_graph", default=None)
++
++
++@contextmanager
++def use_graph_state(state):
++    token = _active_graph.set(state)
++    try:
++        yield
++    finally:
++        _active_graph.reset(token)
++
++
++def graph_nodes():
++    state = _active_graph.get()
++    return node_info if state is None else state.experiences
++
++
++def node_quality(node_id: str) -> float:
++    state = _active_graph.get()
++    static_quality = float(graph_nodes()[node_id].get("quality", 0.0))
++    return static_quality if state is None else state.node_qualities.get(node_id, static_quality)
++
++
+ def get_top_neighbors(
+     node_id: str,
+     visited: set[str],
+@@ -49,12 +74,21 @@ def get_top_neighbors(
+     综合分数 = (边权重 + 邻居节点 quality) / 2
+     """
+     candidates = []
+-    for neighbor_id, edge_w in adj.get(node_id, []):
++    state = _active_graph.get()
++    if state is None:
++        neighbors = adj.get(node_id, [])
++    else:
++        neighbors = (
++            (link["neighbor"], state.get_current_weight(node_id, link["neighbor"]))
++            for link in state.adjacency.get(node_id, [])
++        )
++    nodes = graph_nodes()
++    for neighbor_id, edge_w in neighbors:
+         if neighbor_id in visited:
+             continue
+-        if neighbor_id not in node_info:
++        if neighbor_id not in nodes:
+             continue
+-        quality = float(node_info[neighbor_id].get("quality", 0.0))
++        quality = node_quality(neighbor_id)
+         score = (edge_w + quality) / 2.0
+         candidates.append((neighbor_id, score))
+ 
+@@ -72,13 +106,13 @@ def _filter_unvisited(
+ 
+ def _get_node_context(node_id: str) -> str:
+     """返回节点 context；若无 context，则回退到 content。"""
+-    node = node_info.get(node_id, {})
++    node = graph_nodes().get(node_id, {})
+     return str(node.get("context") or node.get("content") or "N/A")
+ 
+ 
+ def _get_node_condition(node_id: str) -> str:
+     """返回节点 condition。"""
+-    return str(node_info.get(node_id, {}).get("condition", "N/A"))
++    return str(graph_nodes().get(node_id, {}).get("condition", "N/A"))
+ 
+ 
+ def _format_candidates(candidates: list[tuple[str, float]]) -> str:
+@@ -304,7 +338,7 @@ def _record_selection(current_id: str, selected: list[dict]) -> bool:
+         print(f"    ℹ 已选取过: {current_id}")
+         return False
+ 
+-    exp = {"id": current_id, **node_info.get(current_id, {})}
++    exp = {**graph_nodes()[current_id], "id": current_id, "quality": node_quality(current_id)}
+     selected.append(exp)
+ 
+     print(f"    ✔ 选取经验: {current_id}")
+@@ -346,7 +380,8 @@ def retrieve(case: dict, finder, max_steps: int = 60) -> list[dict]:
+         raise ValueError("finder.find() 返回空列表，无法开始遍历")
+ 
+     # 只保留图中存在的起始节点
+-    start_ids = [nid for nid in start_ids if nid in node_info]
++    nodes = graph_nodes()
++    start_ids = [nid for nid in start_ids if nid in nodes]
+     if not start_ids:
+         raise ValueError("finder.find() 返回的节点均不在图中，无法开始遍历")
+ 
+@@ -359,9 +394,9 @@ def retrieve(case: dict, finder, max_steps: int = 60) -> list[dict]:
+     # 这样 agent 回溯时随时可跳转到任意高质量起始点，
+     # 避免因图深度过大导致其他起始点永远无法被访问。
+     other_start_candidates: list[tuple[str, float]] = [
+-        (nid, float(node_info[nid].get("quality", 0.0)))
++        (nid, node_quality(nid))
+         for nid in start_ids[1:]
+-        if nid in node_info
++        if nid in nodes
+     ]
+ 
+     start_neighbors: list[tuple[str, float]] = get_top_neighbors(current_id, visited, top_k=5)
+diff --git a/src/phase3/retrieval/retriver_multi_start_no_fill.py b/src/phase3/retrieval/retriver_multi_start_no_fill.py
+index 31e2462..d3aaa96 100644
+--- a/src/phase3/retrieval/retriver_multi_start_no_fill.py
++++ b/src/phase3/retrieval/retriver_multi_start_no_fill.py
+@@ -16,7 +16,7 @@ from retriver import (
+     _record_selection,
+     call_llm,
+     get_top_neighbors,
+-    node_info,
++    graph_nodes,
+     parse_actions,
+ )
+ 
+@@ -178,12 +178,10 @@ def retrieve(case: dict, finder, max_steps: int = 60) -> list[dict]:
+     query = case.get("description", "")
+ 
+     start_ids: list[str] = finder.find(case)
++    nodes = graph_nodes()
++    start_ids = [nid for nid in start_ids if nid in nodes]
+     if not start_ids:
+-        raise ValueError("finder.find() 返回空列表，无法开始遍历")
+-
+-    start_ids = [nid for nid in start_ids if nid in node_info]
+-    if not start_ids:
+-        raise ValueError("finder.find() 返回的节点均不在图中，无法开始遍历")
++        return []
+ 
+     merged: list[dict] = []
+     merged_ids: set[str] = set()
+diff --git a/src/phase3/ttl/retrieval_tool.py b/src/phase3/ttl/retrieval_tool.py
+index 3cd8d01..ad102be 100644
+--- a/src/phase3/ttl/retrieval_tool.py
++++ b/src/phase3/ttl/retrieval_tool.py
+@@ -108,6 +108,8 @@ class GSEMRetrievalAdapter(BaseRetrievalInterface):
+         self.top_k = top_k
+         self._finder = None
+         self._last_exp_count: int = 0
++        self._last_graph = None
++        self._last_limit = None
+ 
+     def retrieve(
+         self,
+@@ -125,24 +127,30 @@ class GSEMRetrievalAdapter(BaseRetrievalInterface):
+             sys.path.insert(0, _retrieval_dir)
+ 
+         from find_start_two_stage import FindStartTwoStage
+-        from retriver import retrieve as _graph_retrieve
++        from retriver import use_graph_state
++        from retriver_multi_start_no_fill import retrieve as _graph_retrieve
+ 
+         # 经验数量变化时重新初始化 finder（含增量 embedding 生成）
+         current_count = len(graph_state.experiences)
+-        if self._finder is None or current_count != self._last_exp_count:
++        limit = top_k or self.top_k
++        if (self._finder is None or graph_state is not self._last_graph
++                or current_count != self._last_exp_count or limit != self._last_limit):
+             logger.log_info(
+                 f"  [GSEMRetrieval] 初始化检索器（经验数: {current_count}）…"
+             )
+             self._finder = FindStartTwoStage(
+                 experiences=dict(graph_state.experiences),
+-                top_k=top_k or self.top_k,
++                top_k=limit,
+             )
+             self._last_exp_count = current_count
++            self._last_graph = graph_state
++            self._last_limit = limit
+ 
+         try:
+-            exps = _graph_retrieve(case, self._finder)
++            with use_graph_state(graph_state):
++                exps = _graph_retrieve(case, self._finder)
+             # List[Dict] → List[Tuple[str, Dict]]
+-            return [(exp.get("id", ""), exp) for exp in exps if exp.get("id")]
++            return [(exp["id"], exp) for exp in exps if exp.get("id")][:limit]
+         except Exception as e:
+             logger.log_warning(f"  [GSEMRetrieval] 检索失败，返回空列表: {e}")
+             return []
