@@ -18,6 +18,8 @@ Corrections count questions changed from incorrect under DATA to correct. Harms 
 | GEPA → META | GEPA | 6/6 | 6 | — | — |
 | GEPA → META | Meta-Harness | 6/6 | — | 0 | 6 |
 
+See the [12 GEPA candidate records](GEPA_CANDIDATES.md) for each proposal and its disposition. The 12 duplicate dispositions for standalone GEPA consist of ten over-length updates that fell back to the parent prompt and two request failures with no saved candidate text.
+
 Each arm selected the same baseline policy snapshot, H0. The reported scores came from independent H0 replays. A later offline syntax check passed for all 18 rejected Meta-Harness proposals after the branch and return statements were rewritten as equivalent conditional expressions.
 
 The eight tools were CheXagent-8B, LLaVA-Med, LLaVA-Rad, MedGemma, MedVLM-R1, MAIRA-2 grounded report, X-ray phrase grounding, and ROI crop. After the resident pool was enabled, the GPU tools shared a single execution slot and ROI ran on the CPU. MAIRA-2 report and phrase grounding shared one model process.
