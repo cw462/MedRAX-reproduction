@@ -2,7 +2,7 @@
 
 These are the 12 GEPA proposal attempts for the standalone GEPA arm in the [eight-tool M5 development run](README.md). The recorded `duplicate: true` describes the effective result after the update was validated. Ten proposals generated new prompt text and exceeded the run's 2,400-character-per-component limit. The controller kept the parent prompt on validation failure. Two requests failed before producing candidate text. The archived optimizer state contains one candidate, the initial configuration used for the 69/100 development validation replay.
 
-The reported character counts are from the archived texts before publication edits. Training-example material is omitted in candidates 002 and 004. Candidate codes 007 and 008 have only request failure records.
+This edition includes the worked example from 004 and two illustrative examples from 002. Two examples containing actual item-level training predictions from 002 are omitted. The experiments used the public [Rad-ReStruct benchmark](https://github.com/ChantalMP/Rad-ReStruct) (Pellegrini et al., with IU X-Ray from Demner-Fushman et al.) and [SLAKE](https://huggingface.co/datasets/BoKelvin/SLAKE/tree/a9083ce6c34ac3ffb17671a605962924d8a8f9e9) (Liu et al., CC BY 4.0). Candidate codes 007 and 008 have only request failure records.
 
 | Attempt | Prompt component | Original characters | Outcome |
 | --- | --- | ---: | --- |
@@ -114,6 +114,22 @@ You must compare the assistant's `answer` against the `reference.answer`.
 
 ### Output Format
 Output only the integer `1` or `0`.
+
+### Examples for Context
+
+**Case 1: Mismatch despite plausible reasoning**
+- Reference: A (yes)
+- Assistant Answer: B. no
+- Reasoning: Tools reported no abnormalities.
+- Verdict: 0 (The model missed the abnormality present in the ground truth).
+
+**Case 2: Match**
+- Reference: B (no)
+- Assistant Answer: B. no
+- Reasoning: Tools confirmed normal contours.
+- Verdict: 1
+
+[Training-example material omitted.]
 
 [Training-example material omitted.]
 
@@ -236,7 +252,11 @@ You must output your reasoning and actions in a sequential JSON-like structure w
     - If calling tools: `{"calls": [{"tool": "tool_name", "args": {...}}], "reason": "Explanation for tool selection"}`
     - If answering: `{"answer": "Final Answer String", "reason": "Synthesis of evidence leading to this answer"}`
 
-[Training-example material omitted.]
+### Example Workflow for "Are there any signs in the breast?"
+1. **Call** `chest_xray_expert` with a specific question about breast masses/calcifications.
+2. **Call** `maira2_grounded_report` to get a full structured report and check for any grounded findings in the breast region.
+3. **Analyze** both outputs. If both indicate no findings, conclude "No". If one indicates findings, investigate further (e.g., using `roi_crop`).
+4. **Answer** based on the consolidated evidence.
 
 ### Final Instructions
 - Always justify your tool choices.
