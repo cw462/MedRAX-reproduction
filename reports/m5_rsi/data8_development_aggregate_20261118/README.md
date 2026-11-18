@@ -25,3 +25,5 @@ Each arm selected the same baseline policy snapshot, H0. The reported scores cam
 The eight tools were CheXagent-8B, LLaVA-Med, LLaVA-Rad, MedGemma, MedVLM-R1, MAIRA-2 grounded report, X-ray phrase grounding, and ROI crop. After the resident pool was enabled, the GPU tools shared a single execution slot and ROI ran on the CPU. MAIRA-2 report and phrase grounding shared one model process.
 
 Code provenance is pinned to the archived [RSI source revision](https://github.com/GaryTang32/RSI/tree/73564ae9b7f9ac3641fe276d5ceb9c549e8c17e8) and [GEPA 0.1.4](https://pypi.org/project/gepa/0.1.4/).
+
+Read the [fixed META supplement results and settings](META_SUPPLEMENTS.md).
