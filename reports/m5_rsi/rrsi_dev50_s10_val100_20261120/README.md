@@ -17,7 +17,8 @@ S10 的 100 题于北京时间 **2026-11-20 21:01:41** 完成。验证集来自 
 - [两次晋升的回放成绩和完整差异](development/promotions.json) · [实际源码补丁](source/promotions/)
 - [各轮回放成绩与候选决策](RRSI_SEARCH.md) · [全部候选、critic 与决策原件](search/) · [逐题配对回放](search/replays/)
 - [原始 M5 源码](source/initial/domains/med_m5/) · [本轮执行与搜索代码](source/runner/)
-- [资源记录](resources/summary.json) · [实验协议](protocol/experiment.json) · [离线复现](reproduce.py)：在本目录运行 `python reproduce.py`，从已保存首答复算配对统计。
+- [SLAKE 原图与工具派生图](images/README.md) · [完整图像索引](images/index.json)
+- [技术恢复记录](recovery/) · [资源记录](resources/summary.json) · [实验协议](protocol/experiment.json) · [离线复现](reproduce.py)：在本目录运行 `python reproduce.py`，从已保存首答复算配对统计。
 
 ## RRSI 的两次晋升
 
@@ -40,7 +41,7 @@ S10 的 100 题于北京时间 **2026-11-20 21:01:41** 完成。验证集来自 
 
 两组主模型均为 `qwen3.7-plus`，沿用 M5 的工具和评分接口。验证时关闭 RRSI 搜索，每组从空记忆初始化，逐题锁定首答后释放反馈并写入记忆；验证反馈不回流开发搜索。S0 在实验室运行，S10 在 AutoDL 运行，实际配置、运行标识和计时记录分别存放在 `protocol/`。已保存的逐题记录包含问题、完整选项、参考答案、主答理由、工具观测、记忆检索、写入回执与调用使用量。
 
-`resources/` 包含失败操作及已保存的使用量。累计操作秒数可能重叠，token 记录不是账单；计费金额和 GPU 成本没有账单依据。技术连接故障及其恢复保留在操作记录中，与合法但错误的首答分别记录。
+`resources/` 包含失败操作及已保存的使用量。累计操作秒数可能重叠，token 记录不是账单；计费金额和 GPU 成本没有账单依据。技术连接故障及其恢复保留在操作记录和 `recovery/` 中，与合法但错误的首答分别记录。M5 复用前 84 题的已保存结果与状态，从第 85 题接续；S10 在主模型连接中断后复用保存记录续跑。
 
 ## 已知限制
 

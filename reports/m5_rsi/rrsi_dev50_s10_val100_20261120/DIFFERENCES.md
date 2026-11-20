@@ -38,6 +38,8 @@ S10 保存的理由：The axial CT image shows the liver dome as a large soft-ti
 
 [原图 1: source.jpg](https://huggingface.co/datasets/BoKelvin/SLAKE/blob/main/imgs.zip)
 
+![原图 1](images/slake/M5/0385_source.jpg)
+
 ## 第 29 题 · slake · m5rsi_slake_10575
 
 Which part of the body does this image belong to?
@@ -54,6 +56,8 @@ S10 保存的理由：The image shows an axial cross-section of the brain with v
 [M5 完整轨迹](validation/M5/q000029.json) · [S10 完整轨迹](validation/S10/q000029.json)
 
 [原图 1: source.jpg](https://huggingface.co/datasets/BoKelvin/SLAKE/blob/main/imgs.zip)
+
+![原图 1](images/slake/M5/0398_source.jpg)
 
 ## 第 42 题 · rad_restruct · m5rsi_rad_3609_0012
 
@@ -110,6 +114,8 @@ S10 保存的理由：The verifier identified multiple abnormalities including c
 
 [原图 1: source.jpg](https://huggingface.co/datasets/BoKelvin/SLAKE/blob/main/imgs.zip)
 
+![原图 1](images/slake/M5/0382_source.jpg)
+
 ## 第 80 题 · slake · m5rsi_slake_10367
 
 Can atelectasis be observed on the lower right lung in this picture?
@@ -126,6 +132,8 @@ S10 保存的理由：The verify tool confirmed the proposed answer is correct a
 [M5 完整轨迹](validation/M5/q000080.json) · [S10 完整轨迹](validation/S10/q000080.json)
 
 [原图 1: source.jpg](https://huggingface.co/datasets/BoKelvin/SLAKE/blob/main/imgs.zip)
+
+![原图 1](images/slake/M5/0393_source.jpg)
 
 ## 第 81 题 · rad_restruct · m5rsi_rad_10_0003
 
@@ -182,6 +190,8 @@ S10 保存的理由：The image shows dark white matter and bright CSF, which is
 
 [原图 1: source.jpg](https://huggingface.co/datasets/BoKelvin/SLAKE/blob/main/imgs.zip)
 
+![原图 1](images/slake/M5/0400_source.jpg)
+
 ## 第 100 题 · slake · m5rsi_slake_10863
 
 Does the picture contain spinal cord?
@@ -198,3 +208,5 @@ S10 保存的理由：The image shows a pelvic CT slice at the sacral level wher
 [M5 完整轨迹](validation/M5/q000100.json) · [S10 完整轨迹](validation/S10/q000100.json)
 
 [原图 1: source.jpg](https://huggingface.co/datasets/BoKelvin/SLAKE/blob/main/imgs.zip)
+
+![原图 1](images/slake/M5/0408_source.jpg)
