@@ -12,6 +12,7 @@ S10 的 100 题于北京时间 **2026-11-20 21:01:41** 完成。验证集来自 
 
 ## 分析入口
 
+- [上传 GPT 的完整轨迹 JSON（100 道配对题）](downloads/Qwen37_M5_S10_full_trajectories_100pairs.json) · [含图像与源码的完整资料包（ZIP）](downloads/Qwen37_M5_S10_report_with_images_and_code.zip)
 - [11 道结果不同题目的原文、答案与保存理由](DIFFERENCES.md)
 - [全部 100 题 CSV](validation/per_question.csv) · [逐题配对 JSON](validation/paired_records.json) · [正式评分](validation/summary.json)
 - [两次晋升的回放成绩和完整差异](development/promotions.json) · [实际源码补丁](source/promotions/)
