@@ -1,0 +1,107 @@
+{
+  "failure_modes": [
+    {
+      "mode": "uncritical_acceptance_of_contradictory_vqa_output",
+      "n_tasks": 3,
+      "affected_tasks": [
+        "q000002",
+        "q000004",
+        "q000008"
+      ],
+      "description": "The agent accepts negative or conflicting findings from general-purpose or specialized VQA models as definitive truth, even when the ground truth indicates a positive finding or a different diagnosis. The agent fails to recognize the potential for false negatives in model outputs or to cross-reference with other available signals when primary tools return negative or contradictory results, often relying on a verifier that lacks the visual resolution to correct the error.",
+      "needed_instead": "Skeptical evaluation of negative consensus from generalist models when clinical suspicion remains, potentially triggering alternative diagnostic pathways or acknowledging uncertainty rather than finalizing an incorrect negative answer.",
+      "representative_evidence": [
+        {
+          "task_id": "q000002",
+          "where": "line 212",
+          "quote": "\"risk\":\"Two models agree on no lung disease, but MAIRA-2 grounded report failed... need to confirm absence of subtle pathology before finalizing negative answer.\""
+        },
+        {
+          "task_id": "q000004",
+          "where": "step 4",
+          "quote": "\"correctness\": \"CORRECT\""
+        },
+        {
+          "task_id": "q000008",
+          "where": "line 152",
+          "quote": "\"correctness\": \"CORRECT\""
+        }
+      ]
+    },
+    {
+      "mode": "tool_execution_error_blocking_visual_inspection",
+      "n_tasks": 2,
+      "affected_tasks": [
+        "q000001",
+        "q000005"
+      ],
+      "description": "A critical visual inspection tool (specifically region-of-interest cropping) failed due to an environment configuration error (KeyError), preventing the agent from accessing high-resolution crops necessary for detecting subtle abnormalities. This forced reliance on general-purpose VQA models which provided incorrect or insufficiently detailed findings.",
+      "needed_instead": "Successful execution of the roi_crop tool to provide a zoomed-in view of the target region, allowing the VQA model to detect the subtle signs of disease present in that specific area.",
+      "representative_evidence": [
+        {
+          "task_id": "q000001",
+          "where": "step 102-107",
+          "quote": "\"backend\": \"roi_crop\", ... \"error_type\": \"KeyError\""
+        },
+        {
+          "task_id": "q000005",
+          "where": "step 2",
+          "quote": "\"tool\": \"roi_crop\", \"status\": \"failed\""
+        }
+      ]
+    }
+  ],
+  "capability_gaps": [
+    {
+      "gap": "lack_of_specialized_small_lesion_detection",
+      "n_tasks": 1,
+      "affected_tasks": [
+        "q000004"
+      ],
+      "description": "The agent lacks access to or fails to utilize tools capable of detecting small, specific morphological features (such as nodules) that are distinct from general consolidations or abscesses. General VQA and standard cropping tools are insufficient for this level of diagnostic granularity, leading to misclassification when such features are present.",
+      "representative_evidence": [
+        {
+          "task_id": "q000004",
+          "where": "grading",
+          "quote": "reference: Pulmonary Nodule"
+        }
+      ]
+    },
+    {
+      "gap": "inability_to_override_failed_specialized_tools",
+      "n_tasks": 2,
+      "affected_tasks": [
+        "q000002",
+        "q000004"
+      ],
+      "description": "When a specialized tool (e.g., grounded report generator or ROI cropper) fails or returns an error, the agent does not have a robust fallback mechanism to simulate the intended inspection or use alternative high-sensitivity detectors. It defaults to generalist models which lack the necessary sensitivity, resulting in false negatives.",
+      "representative_evidence": [
+        {
+          "task_id": "q000002",
+          "where": "step 1 / obs 2",
+          "quote": "tool: maira2_grounded_report ... reason: Verified frontal CXR required..."
+        },
+        {
+          "task_id": "q000004",
+          "where": "step 2",
+          "quote": "tool: roi_crop, status: failed, error_type: KeyError"
+        }
+      ]
+    }
+  ],
+  "success_habits": [
+    {
+      "habit": "direct_visual_reasoning_without_unnecessary_tool_invocation",
+      "n_tasks": 2,
+      "description": "The agent performs direct visual reasoning without invoking unnecessary tools for simple visual identification tasks that the model can handle directly. It skips tools when 'no_candidates' are found or when the task is straightforward, ensuring efficiency and reducing potential failure points.",
+      "risk_if_broken": "Without direct visual reasoning, the agent would likely invoke external tools (e.g., llava_med_qa) for simple organ identification, increasing latency and cost while adding no value."
+    },
+    {
+      "habit": "resilient_multi_tool_triangulation",
+      "n_tasks": 1,
+      "description": "The agent invokes multiple distinct visual inspection tools to cross-verify findings and maintains progress by pivoting to alternative tools when a primary inspection method fails, rather than aborting the task.",
+      "risk_if_broken": "Removing the triangulation habit would reduce confidence in the negative finding, especially given the failure of targeted tools. Without the pivot to alternative evidence, the agent might have relied on a single tool or incomplete evidence."
+    }
+  ],
+  "n_digests": 11
+}

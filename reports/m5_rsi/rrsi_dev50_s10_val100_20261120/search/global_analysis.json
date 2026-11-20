@@ -1,0 +1,67 @@
+{
+  "failure_modes": [
+    {
+      "mode": "tool_execution_error_blocking_visual_inspection",
+      "n_tasks": 5,
+      "affected_tasks": [
+        "q000001",
+        "q000002",
+        "q000004",
+        "q000005",
+        "q000008"
+      ],
+      "description": "A critical visual inspection tool (specifically region-of-interest cropping) fails due to an environment configuration error (KeyError), preventing the agent from accessing high-resolution crops necessary for detecting subtle abnormalities. This forces reliance on general-purpose VQA models which provide incorrect or insufficiently detailed findings.",
+      "needed_instead": "The agent needed to either recover from the crop failure by using alternative visual evidence or correctly interpret the original image without relying on the failed tool's output.",
+      "representative_evidence": [
+        {
+          "task_id": "q000001",
+          "where": "line 106",
+          "quote": "\"error\": \"'R55_MEMEVOLVE_GPU'\""
+        },
+        {
+          "task_id": "q000005",
+          "where": "step 2",
+          "quote": "\"error\": \"'R55_MEMEVOLVE_GPU'\", \"error_type\": \"KeyError\""
+        }
+      ]
+    },
+    {
+      "mode": "uncritical_acceptance_of_contradictory_vqa_output",
+      "n_tasks": 4,
+      "affected_tasks": [
+        "q000001",
+        "q000002",
+        "q000005",
+        "q000008"
+      ],
+      "description": "The agent accepts negative or conflicting findings from general-purpose or specialized VQA models as definitive truth, even when the ground truth indicates a positive finding or a different diagnosis. The agent fails to recognize the potential for false negatives in model outputs or to cross-reference with other available signals when primary tools return negative or contradictory results, often relying on a verifier that lacks the visual resolution to correct the error.",
+      "needed_instead": "The agent needed to distrust the consensus negative VQA outputs when one expert tool failed unexpectedly, or use a different verification method to inspect the pixels directly for subtle findings.",
+      "representative_evidence": [
+        {
+          "task_id": "q000008",
+          "where": "step 4",
+          "quote": "\"answer\":\"B. no\",\"reason\":\"Both CheXagent and LLaVA-Med independently confirm normal mediastinal width\""
+        },
+        {
+          "task_id": "q000002",
+          "where": "step 4",
+          "quote": "\"answer\":\"B. no\",\"reason\":\"Two independent visual QA models and a verification audit confirm the chest X-ray shows clear lung fields with no signs of disease.\""
+        }
+      ]
+    }
+  ],
+  "success_habits": [
+    {
+      "habit": "resilient_multi_tool_triangulation",
+      "n_tasks": 3,
+      "description": "The agent invokes multiple distinct visual inspection tools to cross-verify findings and maintains progress by pivoting to alternative tools when a primary inspection method fails, rather than aborting the task.",
+      "risk_if_broken": "Without triangulation, reliance on a single model could lead to error if that model misinterprets subtle features; without graceful failure handling, the agent might loop on broken tools or abort prematurely."
+    },
+    {
+      "habit": "direct_visual_reasoning_without_unnecessary_tool_invocation",
+      "n_tasks": 1,
+      "description": "The agent performs direct visual reasoning without invoking unnecessary tools for simple visual identification tasks that the model can handle directly. It skips tools when 'no_candidates' are found or when the task is straightforward, ensuring efficiency and reducing potential failure points.",
+      "risk_if_broken": "If the agent strictly followed planned multi-tool triangulation without assessing necessity, it would incur higher latency and cost, and increase exposure to tool failures."
+    }
+  ]
+}

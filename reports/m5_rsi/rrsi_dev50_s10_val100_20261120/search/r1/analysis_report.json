@@ -1,0 +1,94 @@
+{
+  "failure_modes": [
+    {
+      "mode": "uncritical_acceptance_of_contradictory_vqa_output",
+      "n_tasks": 2,
+      "affected_tasks": [
+        "q000001",
+        "q000002"
+      ],
+      "description": "The agent accepted a negative finding from a general or specialized VQA model as definitive truth, despite the ground truth indicating a positive finding. The agent failed to recognize the potential for false negatives in the model's output or to cross-reference with other available signals when the primary specialized tool failed or returned a negative result.",
+      "needed_instead": "The agent needed a mechanism to verify clinical accuracy against ground truth patterns or detect false negatives, rather than blindly accepting concordant negative results from fallible tools.",
+      "representative_evidence": [
+        {
+          "task_id": "q000002",
+          "where": "final",
+          "quote": "reason: \"Both chest_xray_expert and llava_med_qa independently report no signs...\""
+        },
+        {
+          "task_id": "q000001",
+          "where": "step 267",
+          "quote": "{\"correct\": 0, \"reference\": {\"answer\": \"A\", \"answer_text\": \"yes\"}}"
+        }
+      ]
+    },
+    {
+      "mode": "tool_execution_error_blocking_visual_inspection",
+      "n_tasks": 1,
+      "affected_tasks": [
+        "q000001"
+      ],
+      "description": "A critical visual inspection tool failed due to an environment configuration error (KeyError), preventing the agent from accessing region-of-interest crops. This forced reliance on a general-purpose VQA model which provided incorrect or insufficiently detailed findings, leading to a wrong conclusion.",
+      "needed_instead": "The agent needed to either retry the specialized tool if possible, or use a different reliable specialized tool instead of falling back solely to the general VQA model which hallucinated a normal finding.",
+      "representative_evidence": [
+        {
+          "task_id": "q000001",
+          "where": "step 107",
+          "quote": "\"error_type\": \"KeyError\""
+        },
+        {
+          "task_id": "q000001",
+          "where": "step 166",
+          "quote": "\"The chest x-ray shows a trachea that is midline and normal in caliber, with no evidence of tracheal disease such as deviation, narrowing, or mass.\""
+        }
+      ]
+    }
+  ],
+  "capability_gaps": [
+    {
+      "gap": "fallback_tool_selection_after_specialized_failure",
+      "n_tasks": 1,
+      "affected_tasks": [
+        "q000001"
+      ],
+      "description": "When a specific specialized visual tool fails due to an environment error, the agent defaults to a general-purpose VQA model rather than attempting other available specialized tools that might still function. The agent interprets failure instructions as a directive to stop using specialized tools entirely, rather than just the failed one.",
+      "representative_evidence": [
+        {
+          "task_id": "q000001",
+          "where": "step 3 / line 231",
+          "quote": "\"response\": \"{\\\"calls\\\":[{\\\"tool\\\":\\\"llava_med_qa\\\",...}]},\\\"reason\\\":\\\"To obtain an independent visual QA assessment of the trachea after roi_crop failure.\\\"}\""
+        }
+      ]
+    },
+    {
+      "gap": "handling_inconclusive_specialized_tool_outputs",
+      "n_tasks": 1,
+      "affected_tasks": [
+        "q000002"
+      ],
+      "description": "The agent fails to adequately handle cases where a specialized tool returns an 'not_applicable' or inconclusive status due to metadata verification logic, even when the image metadata suggests compatibility. The agent proceeds to rely on less specialized tools without accounting for the loss of the primary specialized signal.",
+      "representative_evidence": [
+        {
+          "task_id": "q000002",
+          "where": "observation (line 87-88)",
+          "quote": "\"analysis_status\": \"not_applicable\", \"reason\": \"Verified frontal CXR required; lateral-only, non-CXR and unknown views are not converted to frontal.\""
+        }
+      ]
+    }
+  ],
+  "success_habits": [
+    {
+      "habit": "sequential_multi_tool_triangulation",
+      "n_tasks": 2,
+      "description": "The agent systematically invokes multiple independent visual assessment tools (e.g., a specialized expert model and a general medical VQA model) to cross-verify findings before forming a final conclusion.",
+      "risk_if_broken": "Without sequential triangulation, the agent relies on a single potentially noisy observation, increasing the risk of false negatives or positives in medical imaging tasks where subtle findings can be missed by one architecture."
+    },
+    {
+      "habit": "explicit_synthesis_of_tool_consensus",
+      "n_tasks": 2,
+      "description": "The final answer reasoning explicitly references the agreement between multiple tools to justify the conclusion, providing a defensible chain of evidence.",
+      "risk_if_broken": "Without explicit synthesis of consensus, the final answer lacks defensibility and may ignore contradictory evidence from intermediate steps, making it harder to debug errors."
+    }
+  ],
+  "n_digests": 8
+}

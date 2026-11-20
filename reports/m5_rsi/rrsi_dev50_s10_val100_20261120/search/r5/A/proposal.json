@@ -1,0 +1,98 @@
+{
+  "status": "done",
+  "summary": "Strengthen executor system prompt to enforce skepticism of general VQA negatives when ROI crop fails, targeting tool_execution_error_blocking_visual_inspection.",
+  "edits": [
+    {
+      "id": "C1",
+      "component": "control_flow",
+      "hypothesis": "Injecting a specific override in the executor's system prompt construction ensures that when roi_crop fails, the agent is explicitly instructed not to trust general VQA negatives, addressing the recurring failure mode where agents accept false negatives from llava_med_qa/chest_xray_expert after roi_crop crashes.",
+      "targets_mode": "tool_execution_error_blocking_visual_inspection",
+      "why_not_lower_lever": "The previous accepted edit moved this instruction to AGENT_SYSTEM, but the executor dynamically modifies the system prompt for the 'M' arm. A plain instruction edit in toolset.py was already tried and rejected (t=4 variant B critic_reject for missing exploration, but t=4 variant A was accepted on client_tool which is actually toolset.py). However, the executor's replace logic might be overwriting or diluting the specific 'roi_crop' context. By adding a targeted replacement in the executor, we ensure the instruction is present and emphasized specifically for the M-arm execution loop where the failure occurs.",
+      "trigger_condition": "Always active for M-arm tasks, specifically triggering mental check when roi_crop failure is observed in trajectory.",
+      "predicted_affected": [
+        "q000001",
+        "q000004",
+        "q000005"
+      ],
+      "retroactive_check": "(corrective) In q000001, q000004, and q000005, the agent called roi_crop, it failed with KeyError, and then the agent relied on llava_med_qa/chest_xray_expert negatives. With this edit, the system prompt explicitly forbids uncritical acceptance of these negatives when high-res inspection fails, likely prompting the agent to try other tools or express uncertainty/look harder at original pixels. (preservative) q000006 succeeded by pivoting to llava_med_qa after roi_crop failure, but it also used verify. The new instruction doesn't prevent pivoting, it just adds a constraint against *uncritical* acceptance, which aligns with q000006's use of verify. (transfer) Generalizes to any task where a specific inspection tool fails and general models provide potentially misleading negative consensus.",
+      "regression_risk": "May cause the agent to over-hedge or use more steps trying to find alternative verification methods, potentially hitting step limits in complex cases, but accuracy is the priority.",
+      "mechanism": "Injecting a specific override in the executor's system prompt construction ensures that when roi_crop fails, the agent is explicitly instructed not to trust general VQA negatives, addressing the recurring failure mode where agents accept false negatives from llava_med_qa/chest_xray_expert after roi_crop crashes."
+    }
+  ],
+  "mechanism": "Strengthen executor system prompt to enforce skepticism of general VQA negatives when ROI crop fails, targeting tool_execution_error_blocking_visual_inspection.",
+  "targets_mode": "tool_execution_error_blocking_visual_inspection",
+  "n_edits": 3,
+  "log": [
+    {
+      "action": "list_files"
+    },
+    {
+      "action": "read_trace",
+      "task_id": "q000001",
+      "from_step": 90,
+      "to_step": 140,
+      "detail": true
+    },
+    {
+      "action": "read_trace",
+      "task_id": "q000002",
+      "from_step": 100,
+      "to_step": 180,
+      "detail": true
+    },
+    {
+      "action": "read_trace",
+      "task_id": "q000004",
+      "from_step": 0,
+      "to_step": 150,
+      "detail": true
+    },
+    {
+      "action": "read_trace",
+      "task_id": "q000005",
+      "from_step": 90,
+      "to_step": 120,
+      "detail": true
+    },
+    {
+      "action": "edit_file",
+      "path": "m5_native/toolset.py",
+      "old": "AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate planning, evidence validation '\n                'and expert stages must use the stage-specific schema requested in the curre...",
+      "new": "AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate planning, evidence validation '\n                'and expert stages must use the stage-specific schema requested in the curre..."
+    },
+    {
+      "action": "edit_file",
+      "path": "m5_native/toolset.py",
+      "old": "AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate planning, evidence validation '\n                'and expert stages must use the stage-specific schema requested in the curre...",
+      "new": "AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate planning, evidence validation '\n                'and expert stages must use the stage-specific schema requested in the curre..."
+    },
+    {
+      "action": "edit_file",
+      "path": "m5_native/executor.py",
+      "old": "        system=self.base.agent_system('M').replace('You may select zero, one or two registered tools, with early stopping when appropriate.',\n            'Select useful registered tools as needed; the...",
+      "new": "        system=self.base.agent_system('M').replace('You may select zero, one or two registered tools, with early stopping when appropriate.',\n            'Select useful registered tools as needed; the..."
+    },
+    {
+      "action": "done",
+      "summary": "Strengthen executor system prompt to enforce skepticism of general VQA negatives when ROI crop fails, targeting tool_execution_error_blocking_visual_inspection.",
+      "edits": [
+        {
+          "id": "C1",
+          "component": "control_flow",
+          "hypothesis": "Injecting a specific override in the executor's system prompt construction ensures that when roi_crop fails, the agent is explicitly instructed not to trust general VQA negatives, addressing the recurring failure mode where agents accept false negatives from llava_med_qa/chest_xray_expert after roi_crop crashes.",
+          "targets_mode": "tool_execution_error_blocking_visual_inspection",
+          "why_not_lower_lever": "The previous accepted edit moved this instruction to AGENT_SYSTEM, but the executor dynamically modifies the system prompt for the 'M' arm. A plain instruction edit in toolset.py was already tried and rejected (t=4 variant B critic_reject for missing exploration, but t=4 variant A was accepted on client_tool which is actually toolset.py). However, the executor's replace logic might be overwriting or diluting the specific 'roi_crop' context. By adding a targeted replacement in the executor, we ensure the instruction is present and emphasized specifically for the M-arm execution loop where the failure occurs.",
+          "trigger_condition": "Always active for M-arm tasks, specifically triggering mental check when roi_crop failure is observed in trajectory.",
+          "predicted_affected": [
+            "q000001",
+            "q000004",
+            "q000005"
+          ],
+          "retroactive_check": "(corrective) In q000001, q000004, and q000005, the agent called roi_crop, it failed with KeyError, and then the agent relied on llava_med_qa/chest_xray_expert negatives. With this edit, the system prompt explicitly forbids uncritical acceptance of these negatives when high-res inspection fails, likely prompting the agent to try other tools or express uncertainty/look harder at original pixels. (preservative) q000006 succeeded by pivoting to llava_med_qa after roi_crop failure, but it also used verify. The new instruction doesn't prevent pivoting, it just adds a constraint against *uncritical* acceptance, which aligns with q000006's use of verify. (transfer) Generalizes to any task where a specific inspection tool fails and general models provide potentially misleading negative consensus.",
+          "regression_risk": "May cause the agent to over-hedge or use more steps trying to find alternative verification methods, potentially hitting step limits in complex cases, but accuracy is the priority.",
+          "mechanism": "Injecting a specific override in the executor's system prompt construction ensures that when roi_crop fails, the agent is explicitly instructed not to trust general VQA negatives, addressing the recurring failure mode where agents accept false negatives from llava_med_qa/chest_xray_expert after roi_crop crashes."
+        }
+      ]
+    }
+  ]
+}

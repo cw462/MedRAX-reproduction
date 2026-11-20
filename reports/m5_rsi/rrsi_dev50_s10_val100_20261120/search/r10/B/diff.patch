@@ -1,0 +1,37 @@
+diff --git a/domains/med_m5/harness/m5_native/executor.py b/domains/med_m5/harness/m5_native/executor.py
+index 0bcfc09..70a17d7 100644
+--- a/domains/med_m5/harness/m5_native/executor.py
++++ b/domains/med_m5/harness/m5_native/executor.py
+@@ -71,12 +71,17 @@ class Executor:
+                 if invalid>=3:return {'activated_skill_ids':sorted(self.activated),'answer':None,'reason':None,'status':'repeated_invalid_plan','main_calls':n,'tool_calls':used,'observations':observations,'terminal_raw':raw},calls
+                 next_prompt='Use only registered tool names and valid arguments, or give final answer/reason JSON.';continue
+             fresh=[]
++            has_tool_failure=False
+             for action_item in actions:
+                 actual=self.base.resolve_action(action_item,observations);signature=digest(actual);seen[signature]=seen.get(signature,0)+1
+                 if seen[signature]>=3:
+                     return {'activated_skill_ids':sorted(self.activated),'answer':None,'reason':None,'status':'repeated_identical_action_no_progress','main_calls':n,'tool_calls':used,'observations':observations,'terminal_raw':raw},calls
+                 used+=1;obs=self.tools.call(row,actual,'R49-AGENT',used)
+                 failure=tool_failure_reason(obs)
+-                if failure:obs=delivered_failure(self.out,row,used,actual,obs)
++                if failure:
++                    has_tool_failure=True
++                    obs=delivered_failure(self.out,row,used,actual,obs)
+                 observations.append(obs);fresh.append(obs)
++            if has_tool_failure:
++                messages.append({'role':'user','content':'CRITICAL: A requested tool failed and provided no usable evidence. Treat this absence of specific data as a source of uncertainty. Do not rely solely on general-purpose model outputs if they conflict with the need for the missing specific evidence.'})
+             self.base.append_observations(messages,fresh,self.out,'M')
+diff --git a/domains/med_m5/harness/m5_native/toolset.py b/domains/med_m5/harness/m5_native/toolset.py
+index b660f31..966fc13 100644
+--- a/domains/med_m5/harness/m5_native/toolset.py
++++ b/domains/med_m5/harness/m5_native/toolset.py
+@@ -16,7 +16,8 @@ AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate plan
+                 'Tool claims are unverified: inspect original pixels, do not treat classifier scores as '
+                 'severity, and do not infer temporal change from a single-image report. '
+                 'Negative findings from tools are probabilistic, not definitive. '
+-                'If tools disagree or a high-resolution inspection fails, do NOT uncritically accept negative consensus. Re-examine original pixels for subtle signs before answering. '
++                'If a targeted inspection tool fails or tools disagree, do NOT uncritically accept negative consensus from general models. Prioritize explicit positive findings over general negative assessments when evidence is ambiguous or low-resolution. '
++                'When high-resolution inspection is unavailable, treat concordant negative VQA outputs as provisional and seek alternative evidence before answering. '
+                 'No cross-case skills, sibling question context or additional patient history is available.')
+ 
+ ACTION = ('You may answer directly with the final answer/reason JSON, or request useful auxiliary evidence '
