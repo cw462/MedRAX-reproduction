@@ -1,0 +1,100 @@
+{
+  "status": "done",
+  "summary": "Add control_flow activation for recent tool failures to trigger fallback inspection strategies.",
+  "edits": [
+    {
+      "id": "C1",
+      "component": "control_flow",
+      "hypothesis": "Adding a simple activation signal when recent tool failures are detected allows the harness to trigger fallback strategies or alternative inspection methods, addressing the capability gap where agents stall or guess after a critical tool like roi_crop fails.",
+      "targets_mode": "tool_execution_error_blocking_visual_inspection",
+      "why_not_lower_lever": "Prompt edits alone cannot force the agent to recognize a pattern of failures across steps; a control-flow signal ensures the agent is explicitly aware of the failure context and can pivot its strategy.",
+      "trigger_condition": "When the last 3 observations contain a failed tool call.",
+      "predicted_affected": [
+        "q000001",
+        "q000005",
+        "q000008",
+        "q000009",
+        "q000015"
+      ],
+      "retroactive_check": "(corrective) In q000001/q000005/q000008/q000009/q000015, the roi_crop tool failed. The new activation signal will flag this failure, prompting the agent to consider alternative inspection methods or rely more heavily on original pixel inspection rather than guessing. (preservative) Does not interfere with successful tool chains. (transfer) Generalizes to any tool-using agent where infrastructure failures occur.",
+      "regression_risk": "Minimal; the activation is informational and does not force a specific action, allowing the agent to decide the best fallback.",
+      "mechanism": "Adding a simple activation signal when recent tool failures are detected allows the harness to trigger fallback strategies or alternative inspection methods, addressing the capability gap where agents stall or guess after a critical tool like roi_crop fails."
+    }
+  ],
+  "mechanism": "Add control_flow activation for recent tool failures to trigger fallback inspection strategies.",
+  "targets_mode": "tool_execution_error_blocking_visual_inspection",
+  "n_edits": 3,
+  "log": [
+    {
+      "action": "read_file",
+      "path": "m5_native/executor.py"
+    },
+    {
+      "action": "read_file",
+      "path": "m5_native/toolset.py"
+    },
+    {
+      "action": "edit_file",
+      "path": "m5_native/executor.py",
+      "old": "    def call(self, row, arm, ordinal, messages):\n        return self.services.main(messages)",
+      "new": "    def call(self, row, arm, ordinal, messages):\n        if (\n            isinstance(messages, list)\n            and len(messages) >= 2\n            and messages[-1].get(\"role\") == \"user\"\n        ):\n  ..."
+    },
+    {
+      "action": "edit_file",
+      "path": "m5_native/executor.py",
+      "old": "    def call(self, row, arm, ordinal, messages):\n        if (\n            isinstance(messages, list)\n            and len(messages) >= 2\n            and messages[-1].get(\"role\") == \"user\"\n        ):\n  ...",
+      "new": "    def call(self, row, arm, ordinal, messages):\n        return self.services.main(messages)"
+    },
+    {
+      "action": "done",
+      "summary": "Revert executor.py to remove undeclared formatting changes; submit C1 prompt edit with generalized predicted_affected and retroactive check.",
+      "edits": [
+        {
+          "id": "C1",
+          "component": "prompt",
+          "hypothesis": "Removing specific references to 'specialized diagnostic tools' and 'high-resolution inspection' eliminates domain-specific leakage while preserving the general instruction to re-examine original pixels when tools fail or disagree.",
+          "targets_mode": "leakage / grader_gaming",
+          "why_not_lower_lever": "The previous prompt contained hard-coded medical domain dynamics (tool hierarchy) that violated the generalizability litmus test. Removing this specific language is necessary to pass the constitution check without altering the core resilience strategy.",
+          "trigger_condition": "Always active in the M-arm system prompt.",
+          "predicted_affected": [
+            "q000001",
+            "q000005",
+            "q000008"
+          ],
+          "retroactive_check": "(corrective) In tasks where roi_crop failed (e.g., q000001, q000005), the agent will no longer be biased by a hardcoded rule to prioritize 'specialized' tools but will rely on the general instruction to re-examine original pixels. This prevents the agent from hallucinating a hierarchy that doesn't exist in the current context. (preservative) Does not disrupt successful tool usage or direct visual reasoning. (transfer) Generalizes to any domain as it removes medical-specific tool hierarchy logic.",
+          "regression_risk": "Low; the removed heuristic was likely overfitting to the specific failure modes of the evolve set."
+        }
+      ]
+    },
+    {
+      "action": "edit_file",
+      "path": "m5_native/executor.py",
+      "old": "    def activate(self, row, observations, step):\n        # Check for recent tool failures to trigger fallback strategy\n        recent_failures = [obs for obs in observations[-3:] if obs.get('status') ...",
+      "new": "    def activate(self, row, observations, step):\n        # Check for recent tool failures to trigger fallback strategy\n        recent_failures = []\n        for obs in observations[-3:]:\n            if..."
+    },
+    {
+      "action": "done",
+      "summary": "Add control_flow activation for recent tool failures to trigger fallback inspection strategies.",
+      "edits": [
+        {
+          "id": "C1",
+          "component": "control_flow",
+          "hypothesis": "Adding a simple activation signal when recent tool failures are detected allows the harness to trigger fallback strategies or alternative inspection methods, addressing the capability gap where agents stall or guess after a critical tool like roi_crop fails.",
+          "targets_mode": "tool_execution_error_blocking_visual_inspection",
+          "why_not_lower_lever": "Prompt edits alone cannot force the agent to recognize a pattern of failures across steps; a control-flow signal ensures the agent is explicitly aware of the failure context and can pivot its strategy.",
+          "trigger_condition": "When the last 3 observations contain a failed tool call.",
+          "predicted_affected": [
+            "q000001",
+            "q000005",
+            "q000008",
+            "q000009",
+            "q000015"
+          ],
+          "retroactive_check": "(corrective) In q000001/q000005/q000008/q000009/q000015, the roi_crop tool failed. The new activation signal will flag this failure, prompting the agent to consider alternative inspection methods or rely more heavily on original pixel inspection rather than guessing. (preservative) Does not interfere with successful tool chains. (transfer) Generalizes to any tool-using agent where infrastructure failures occur.",
+          "regression_risk": "Minimal; the activation is informational and does not force a specific action, allowing the agent to decide the best fallback.",
+          "mechanism": "Adding a simple activation signal when recent tool failures are detected allows the harness to trigger fallback strategies or alternative inspection methods, addressing the capability gap where agents stall or guess after a critical tool like roi_crop fails."
+        }
+      ]
+    }
+  ]
+}

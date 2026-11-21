@@ -1,0 +1,101 @@
+{
+  "failure_modes": [
+    {
+      "mode": "tool_execution_error_blocking_visual_inspection",
+      "n_tasks": 5,
+      "affected_tasks": [
+        "q000001",
+        "q000004",
+        "q000005",
+        "q000008",
+        "q000009"
+      ],
+      "description": "A critical visual inspection tool (specifically region-of-interest cropping) fails due to an environment configuration error (KeyError), preventing the agent from accessing high-resolution crops necessary for detecting subtle abnormalities. This forces reliance on general-purpose VQA models which provide incorrect or insufficiently detailed findings.",
+      "needed_instead": "The agent needed to either recover from the ROI crop failure by trying different coordinates or recognizing that the general VQA models were missing subtle pathology visible only in a cropped view.",
+      "representative_evidence": [
+        {
+          "task_id": "q000001",
+          "where": "step 107",
+          "quote": "\"error_type\": \"KeyError\""
+        },
+        {
+          "task_id": "q000004",
+          "where": "step 2",
+          "quote": "\"tool\": \"roi_crop\", \"status\": \"failed\", \"error_type\": \"KeyError\""
+        }
+      ]
+    },
+    {
+      "mode": "uncritical_acceptance_of_contradictory_vqa_output",
+      "n_tasks": 2,
+      "affected_tasks": [
+        "q000002",
+        "q000009"
+      ],
+      "description": "The agent accepts negative or conflicting findings from general-purpose or specialized VQA models as definitive truth, even when the ground truth indicates a positive finding or a different diagnosis. The agent fails to recognize the potential for false negatives in model outputs or to cross-reference with other available signals when primary tools return negative or contradictory results, often relying on a verifier that lacks the visual resolution to correct the error.",
+      "needed_instead": "The agent needed to detect the discrepancy between model outputs and ground truth expectations, potentially by invoking higher-resolution tools or questioning the negative consensus.",
+      "representative_evidence": [
+        {
+          "task_id": "q000002",
+          "where": "step 3",
+          "quote": "verify observation: correctness: CORRECT"
+        },
+        {
+          "task_id": "q000009",
+          "where": "step 2",
+          "quote": "{\"answer\":\"B\",\"reason\":\"LLaVA-Med assessed the mediastinal contour and width as normal...\"}"
+        }
+      ]
+    }
+  ],
+  "capability_gaps": [
+    {
+      "gap": "silent_tool_failure_handling",
+      "n_tasks": 1,
+      "affected_tasks": [
+        "q000009"
+      ],
+      "description": "The agent initiates a tool call but receives no execution record, error message, or observation in the trace history. Instead of halting to investigate the missing feedback or retrying the call, the agent proceeds to the next step as if the tool had executed successfully or was unnecessary, leading to unverified conclusions.",
+      "representative_evidence": [
+        {
+          "task_id": "q000009",
+          "where": "step 1 vs step 2",
+          "quote": "Step 1 calls roi_crop; Step 2 provides answer without any observation from roi_crop."
+        }
+      ]
+    },
+    {
+      "gap": "passive_fallback_to_global_vqa",
+      "n_tasks": 4,
+      "affected_tasks": [
+        "q000001",
+        "q000004",
+        "q000005",
+        "q000008"
+      ],
+      "description": "When a specific visual inspection tool (ROI crop) fails, the agent defaults to general-purpose full-image VQA without attempting alternative cropping strategies, adjusting coordinates, or explicitly acknowledging the loss of resolution. This passive fallback assumes global VQA can compensate for the lack of focused visual evidence, which it often cannot for subtle pathologies.",
+      "representative_evidence": [
+        {
+          "task_id": "q000004",
+          "where": "step 3",
+          "quote": "\"tool\": \"llava_med_qa\", \"args\": {\"question\": \"What disease is shown in the right lung?\"}"
+        }
+      ]
+    }
+  ],
+  "success_habits": [
+    {
+      "habit": "resilient_multi_tool_triangulation",
+      "n_tasks": 5,
+      "description": "The agent invokes multiple distinct visual inspection tools to cross-verify findings and maintains progress by pivoting to alternative tools when a primary inspection method fails, rather than aborting the task.",
+      "risk_if_broken": "Without multi-tool verification, the agent might rely on a single model's potential hallucination. Without graceful failure handling, a single tool error could prevent answer generation."
+    },
+    {
+      "habit": "direct_visual_reasoning_without_unnecessary_tool_invocation",
+      "n_tasks": 3,
+      "description": "The agent performs direct visual reasoning without invoking unnecessary tools for simple visual identification tasks that the model can handle directly. It skips tools when 'no_candidates' are found or when the task is straightforward, ensuring efficiency and reducing potential failure points.",
+      "risk_if_broken": "Removing the habit of direct reasoning would introduce unnecessary latency and potential tool failure points for tasks where the model's internal knowledge is sufficient."
+    }
+  ],
+  "n_digests": 16
+}

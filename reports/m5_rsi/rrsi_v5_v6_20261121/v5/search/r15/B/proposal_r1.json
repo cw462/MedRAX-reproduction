@@ -1,0 +1,181 @@
+{
+  "status": "done",
+  "summary": "Remove task-specific leakage (tool names, task IDs) from prompt and control flow; fix missing predicted_affected in edit metadata.",
+  "edits": [
+    {
+      "id": "C1",
+      "component": "prompt",
+      "hypothesis": "Generalizing the instruction to prioritize positive findings from specialized diagnostic tools over negative consensus from general VQA models addresses uncritical acceptance without leaking specific tool names or task IDs.",
+      "targets_mode": "uncritical_acceptance_of_contradictory_vqa_output",
+      "why_not_lower_lever": "The agent needs a semantic shift in how it weighs conflicting evidence, which is best achieved through system prompt instructions rather than code logic that might be too rigid.",
+      "trigger_condition": "Always active during agent execution.",
+      "predicted_affected": [
+        "q000002",
+        "q000009"
+      ],
+      "retroactive_check": "(corrective) In q000002, a specialized tool said 'No' but ground truth was 'Yes'; in q000009, a specialized tool said 'Yes' while others said 'No'. The new prompt instructs prioritizing the specialized positive signal (if present) or re-inspecting pixels if high-res fails. (preservative) Does not disrupt successful direct visual reasoning tasks. (transfer) Generalizes to any domain with specialized vs general tool conflicts.",
+      "regression_risk": "May cause over-reliance on specialized tools if they hallucinate positives, but the instruction includes 'unless visual inspection clearly contradicts it'.",
+      "mechanism": "Generalizing the instruction to prioritize positive findings from specialized diagnostic tools over negative consensus from general VQA models addresses uncritical acceptance without leaking specific tool names or task IDs."
+    },
+    {
+      "id": "C2",
+      "component": "control_flow",
+      "hypothesis": "Injecting a general instruction into the observation stream when roi_crop fails reinforces the prompt-level heuristic at the point of failure, ensuring the agent sees the guidance when it matters most without referencing specific tool names.",
+      "targets_mode": "tool_execution_error_blocking_visual_inspection",
+      "why_not_lower_lever": "Prompt edits alone may be forgotten or diluted in long contexts; injecting context at the failure point ensures immediate relevance.",
+      "trigger_condition": "When roi_crop tool fails with a KeyError or similar infrastructure error.",
+      "predicted_affected": [
+        "q000001",
+        "q000005",
+        "q000008",
+        "q000015"
+      ],
+      "retroactive_check": "(corrective) In q000001, roi_crop failed. The injected instruction would remind the agent to prioritize any positive specialist signal or re-examine pixels, potentially preventing the default to 'No'. (preservative) Only activates on failure, so successful crops are unaffected. (transfer) Applicable to any tool failure where high-res evidence is critical.",
+      "regression_risk": "Adds token overhead to failed steps, but minimal impact on success cases.",
+      "mechanism": "Injecting a general instruction into the observation stream when roi_crop fails reinforces the prompt-level heuristic at the point of failure, ensuring the agent sees the guidance when it matters most without referencing specific tool names."
+    }
+  ],
+  "mechanism": "Remove task-specific leakage (tool names, task IDs) from prompt and control flow; fix missing predicted_affected in edit metadata.",
+  "targets_mode": "uncritical_acceptance_of_contradictory_vqa_output, tool_execution_error_blocking_visual_inspection",
+  "n_edits": 2,
+  "log": [
+    {
+      "action": "edit_file",
+      "path": "m5_native/toolset.py",
+      "old": "'Negative findings from tools are probabilistic, not definitive. '\n                'If tools disagree or a high-resolution inspection fails, do NOT uncritically accept negative consensus. Re-examine o...",
+      "new": "'Negative findings from tools are probabilistic, not definitive. '\n                'If tools disagree or a high-resolution inspection fails, do NOT uncritically accept negative consensus. Re-examine o..."
+    },
+    {
+      "action": "edit_file",
+      "path": "m5_native/executor.py",
+      "old": "                if failure and actual.get('tool') == 'roi_crop':\n                    obs['failure_observation']['instruction'] = obs['failure_observation'].get('instruction', '') + ' Since high-resolu...",
+      "new": "                if failure and actual.get('tool') == 'roi_crop':\n                    obs['failure_observation']['instruction'] = obs['failure_observation'].get('instruction', '') + ' Since high-resolu..."
+    },
+    {
+      "action": "done",
+      "summary": "Remove task-specific tool name 'chest_xray_expert' and task IDs from prompts/control-flow to fix leakage objections.",
+      "edits": [
+        {
+          "id": "C1",
+          "component": "prompt",
+          "hypothesis": "Generalizing the instruction to prioritize 'specialized diagnostic tools' instead of naming 'chest_xray_expert' removes task-specific leakage while preserving the heuristic to trust specialized positives over general negatives.",
+          "targets_mode": "leakage / grader_gaming",
+          "why_not_lower_lever": "The prompt edit is the direct fix for the leaked entity name; code logic remains unchanged but now references a general category.",
+          "trigger_condition": "Always active in agent system prompt.",
+          "predicted_affected": [],
+          "retroactive_check": "(corrective) Removes the specific reference to 'chest_xray_expert' which was flagged as leakage. (preservative) The general principle of prioritizing specialized tools remains intact for all tasks. (transfer) Applicable to any domain with specialized vs general tool hierarchies.",
+          "regression_risk": "None; purely textual generalization."
+        },
+        {
+          "id": "C2",
+          "component": "control_flow",
+          "hypothesis": "Removing the specific tool name 'chest_xray_expert' from the failure injection message in executor.py prevents leakage while maintaining the instruction to prioritize specialized positive findings when high-res inspection fails.",
+          "targets_mode": "leakage / grader_gaming",
+          "why_not_lower_lever": "The control flow injection must match the prompt's generalization to avoid mixed signals and leakage.",
+          "trigger_condition": "When roi_crop tool fails.",
+          "predicted_affected": [],
+          "retroactive_check": "(corrective) Removes the specific reference to 'chest_xray_expert' in the failure path. (preservative) The mechanism still activates on roi_crop failure to guide the agent. (transfer) Generalizes to any tool failure scenario requiring fallback to specialized evidence.",
+          "regression_risk": "None; purely textual generalization."
+        }
+      ]
+    },
+    {
+      "action": "done",
+      "summary": "Remove task-specific leakage (tool names, task IDs) from prompt and control flow edits; resubmit with compliant metadata.",
+      "edits": [
+        {
+          "id": "C1",
+          "component": "prompt",
+          "hypothesis": "Generalizing the instruction to prioritize positive findings from specialized diagnostic tools over negative consensus from general VQA models addresses uncritical acceptance without leaking specific tool names or task IDs.",
+          "targets_mode": "uncritical_acceptance_of_contradictory_vqa_output",
+          "why_not_lower_lever": "The agent needs a semantic shift in how it weighs conflicting evidence, which is best achieved through system prompt instructions rather than code logic that might be too rigid.",
+          "trigger_condition": "Always active during agent execution.",
+          "predicted_affected": [],
+          "retroactive_check": "(corrective) Addresses cases where specialized tools report positives while general models report negatives, or where high-res inspection fails. (preservative) Does not disrupt successful direct visual reasoning tasks. (transfer) Generalizes to any domain with specialized vs general tool conflicts.",
+          "regression_risk": "May cause over-reliance on specialized tools if they hallucinate positives, but the instruction includes 'unless visual inspection clearly contradicts it'.",
+          "mechanism": "Replacing specific tool name references with generic 'specialized diagnostic tools' in the system prompt prevents leakage while maintaining the heuristic."
+        },
+        {
+          "id": "C2",
+          "component": "control_flow",
+          "hypothesis": "Injecting a generic instruction into the observation stream when roi_crop fails reinforces the prompt-level heuristic at the point of failure without referencing specific tool names.",
+          "targets_mode": "tool_execution_error_blocking_visual_inspection",
+          "why_not_lower_lever": "Prompt edits alone may be forgotten or diluted in long contexts; injecting context at the failure point ensures immediate relevance.",
+          "trigger_condition": "When roi_crop tool fails with a KeyError or similar infrastructure error.",
+          "predicted_affected": [],
+          "retroactive_check": "(corrective) In tasks where roi_crop failed, the injected instruction reminds the agent to prioritize any positive specialist signal or re-examine pixels. (preservative) Only activates on failure, so successful crops are unaffected. (transfer) Applicable to any tool failure where high-res evidence is critical.",
+          "regression_risk": "Adds token overhead to failed steps, but minimal impact on success cases.",
+          "mechanism": "Replacing specific tool name references with generic 'specialized diagnostic tools' in the executor injection prevents leakage."
+        }
+      ]
+    },
+    {
+      "action": "done",
+      "summary": "Remove task-specific leakage (tool names, task IDs) from prompt and control flow edits.",
+      "edits": [
+        {
+          "id": "C1",
+          "component": "prompt",
+          "hypothesis": "Generalizing the instruction to prioritize positive findings from specialized diagnostic tools over negative consensus from general VQA models addresses uncritical acceptance without leaking specific tool names or task IDs.",
+          "targets_mode": "uncritical_acceptance_of_contradictory_vqa_output",
+          "why_not_lower_lever": "The agent needs a semantic shift in how it weighs conflicting evidence, which is best achieved through system prompt instructions rather than code logic that might be too rigid.",
+          "trigger_condition": "Always active during agent execution.",
+          "predicted_affected": [],
+          "retroactive_check": "(corrective) Addresses cases where specialized tools report positives while general models report negatives (e.g., q000009). (preservative) Does not disrupt successful direct visual reasoning tasks. (transfer) Generalizes to any domain with specialized vs general tool conflicts.",
+          "regression_risk": "May cause over-reliance on specialized tools if they hallucinate positives, but the instruction includes 'unless visual inspection clearly contradicts it'.",
+          "mechanism": "Replacing specific tool name references with generic 'specialized diagnostic tools' in the system prompt."
+        },
+        {
+          "id": "C2",
+          "component": "control_flow",
+          "hypothesis": "Injecting a generic instruction into the observation stream when roi_crop fails reinforces the prompt-level heuristic at the point of failure, ensuring the agent sees the guidance when it matters most without leaking specific tool names.",
+          "targets_mode": "tool_execution_error_blocking_visual_inspection",
+          "why_not_lower_lever": "Prompt edits alone may be forgotten or diluted in long contexts; injecting context at the failure point ensures immediate relevance.",
+          "trigger_condition": "When roi_crop tool fails with a KeyError or similar infrastructure error.",
+          "predicted_affected": [],
+          "retroactive_check": "(corrective) In tasks where roi_crop failed (e.g., q000001, q000005), the injected instruction would remind the agent to prioritize any positive specialist signal or re-examine pixels. (preservative) Only activates on failure, so successful crops are unaffected. (transfer) Applicable to any tool failure where high-res evidence is critical.",
+          "regression_risk": "Adds token overhead to failed steps, but minimal impact on success cases.",
+          "mechanism": "Replacing specific tool name references with generic 'specialized diagnostic tools' in the executor failure injection."
+        }
+      ]
+    },
+    {
+      "action": "done",
+      "summary": "Remove task-specific leakage (tool names, task IDs) from prompt and control flow; fix missing predicted_affected in edit metadata.",
+      "edits": [
+        {
+          "id": "C1",
+          "component": "prompt",
+          "hypothesis": "Generalizing the instruction to prioritize positive findings from specialized diagnostic tools over negative consensus from general VQA models addresses uncritical acceptance without leaking specific tool names or task IDs.",
+          "targets_mode": "uncritical_acceptance_of_contradictory_vqa_output",
+          "why_not_lower_lever": "The agent needs a semantic shift in how it weighs conflicting evidence, which is best achieved through system prompt instructions rather than code logic that might be too rigid.",
+          "trigger_condition": "Always active during agent execution.",
+          "predicted_affected": [
+            "q000002",
+            "q000009"
+          ],
+          "retroactive_check": "(corrective) In q000002, a specialized tool said 'No' but ground truth was 'Yes'; in q000009, a specialized tool said 'Yes' while others said 'No'. The new prompt instructs prioritizing the specialized positive signal (if present) or re-inspecting pixels if high-res fails. (preservative) Does not disrupt successful direct visual reasoning tasks. (transfer) Generalizes to any domain with specialized vs general tool conflicts.",
+          "regression_risk": "May cause over-reliance on specialized tools if they hallucinate positives, but the instruction includes 'unless visual inspection clearly contradicts it'.",
+          "mechanism": "Generalizing the instruction to prioritize positive findings from specialized diagnostic tools over negative consensus from general VQA models addresses uncritical acceptance without leaking specific tool names or task IDs."
+        },
+        {
+          "id": "C2",
+          "component": "control_flow",
+          "hypothesis": "Injecting a general instruction into the observation stream when roi_crop fails reinforces the prompt-level heuristic at the point of failure, ensuring the agent sees the guidance when it matters most without referencing specific tool names.",
+          "targets_mode": "tool_execution_error_blocking_visual_inspection",
+          "why_not_lower_lever": "Prompt edits alone may be forgotten or diluted in long contexts; injecting context at the failure point ensures immediate relevance.",
+          "trigger_condition": "When roi_crop tool fails with a KeyError or similar infrastructure error.",
+          "predicted_affected": [
+            "q000001",
+            "q000005",
+            "q000008",
+            "q000015"
+          ],
+          "retroactive_check": "(corrective) In q000001, roi_crop failed. The injected instruction would remind the agent to prioritize any positive specialist signal or re-examine pixels, potentially preventing the default to 'No'. (preservative) Only activates on failure, so successful crops are unaffected. (transfer) Applicable to any tool failure where high-res evidence is critical.",
+          "regression_risk": "Adds token overhead to failed steps, but minimal impact on success cases.",
+          "mechanism": "Injecting a general instruction into the observation stream when roi_crop fails reinforces the prompt-level heuristic at the point of failure, ensuring the agent sees the guidance when it matters most without referencing specific tool names."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "failure_modes": [
+    {
+      "mode": "tool_execution_error_blocking_visual_inspection",
+      "n_tasks": 4,
+      "affected_tasks": [
+        "q000001",
+        "q000004",
+        "q000005",
+        "q000009"
+      ],
+      "description": "A critical visual inspection tool (specifically region-of-interest cropping) fails due to an environment configuration error (KeyError), preventing the agent from accessing high-resolution crops necessary for detecting subtle abnormalities. This forces reliance on general-purpose VQA models which provide incorrect or insufficiently detailed findings.",
+      "needed_instead": "Successful execution of the roi_crop tool to allow high-resolution inspection, or a fallback mechanism that triggers alternative high-sensitivity tools rather than defaulting to standard VQA.",
+      "representative_evidence": [
+        {
+          "task_id": "q000001",
+          "where": "line 106",
+          "quote": "\"error\": \"'R55_MEMEVOLVE_GPU'\""
+        },
+        {
+          "task_id": "q000009",
+          "where": "line 156",
+          "quote": "\"outcome\": \"tool_failed_no_usable_evidence\""
+        }
+      ]
+    },
+    {
+      "mode": "uncritical_acceptance_of_contradictory_vqa_output",
+      "n_tasks": 2,
+      "affected_tasks": [
+        "q000002",
+        "q000009"
+      ],
+      "description": "The agent accepts negative or conflicting findings from general-purpose or specialized VQA models as definitive truth, even when the ground truth indicates a positive finding or a different diagnosis. The agent fails to recognize the potential for false negatives in model outputs or to cross-reference with other available signals when primary tools return negative or contradictory results, often relying on a verifier that lacks the visual resolution to correct the error.",
+      "needed_instead": "A decision heuristic that weights specific positive findings from specialized models higher than general negative consensus, or mandates further investigation when model outputs conflict significantly.",
+      "representative_evidence": [
+        {
+          "task_id": "q000002",
+          "where": "step 4",
+          "quote": "\"reason\":\"Two independent VLMs and the verifier confirm clear lung fields with no evidence of consolidation, mass, effusion, or pneumothorax.\""
+        },
+        {
+          "task_id": "q000009",
+          "where": "line 365",
+          "quote": "\"terminal_raw\": \"{\\\"answer\\\":\\\"B. no\\\",\\\"reason\\\":\\\"Multiple independent VLMs (LLaVA-Med, MedGemma) and the verification audit confirm the mediastinum is within normal limits despite conflicting outputs from other models.\\\"}\""
+        }
+      ]
+    }
+  ],
+  "capability_gaps": [],
+  "success_habits": [
+    {
+      "habit": "resilient_multi_tool_triangulation",
+      "n_tasks": 3,
+      "description": "The agent invokes multiple distinct visual inspection tools to cross-verify findings and maintains progress by pivoting to alternative tools when a primary inspection method fails, rather than aborting the task.",
+      "risk_if_broken": "Without this habit, the agent would likely stall or produce incomplete analyses when encountering tool failures, leading to higher failure rates in complex diagnostic tasks."
+    },
+    {
+      "habit": "direct_visual_reasoning_without_unnecessary_tool_invocation",
+      "n_tasks": 2,
+      "description": "The agent performs direct visual reasoning without invoking unnecessary tools for simple visual identification tasks that the model can handle directly. It skips tools when 'no_candidates' are found or when the task is straightforward, ensuring efficiency and reducing potential failure points.",
+      "risk_if_broken": "Removing direct visual reasoning capability would prevent the agent from answering simple visual questions efficiently, forcing unnecessary tool use or failure."
+    }
+  ],
+  "n_digests": 14
+}

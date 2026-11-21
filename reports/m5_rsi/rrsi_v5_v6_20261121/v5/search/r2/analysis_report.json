@@ -1,0 +1,78 @@
+{
+  "failure_modes": [
+    {
+      "mode": "tool_execution_error_blocking_visual_inspection",
+      "n_tasks": 1,
+      "affected_tasks": [
+        "q000001"
+      ],
+      "description": "A critical visual inspection tool failed due to an environment configuration error (KeyError), preventing the agent from accessing region-of-interest crops. This forced reliance on a general-purpose VQA model which provided incorrect or insufficiently detailed findings, leading to a wrong conclusion.",
+      "needed_instead": "The agent should have treated the specialized tool failure as missing evidence and either attempted a different specialized tool or explicitly stated uncertainty rather than relying solely on a general VQA model's negative finding.",
+      "representative_evidence": [
+        {
+          "task_id": "q000001",
+          "where": "line 107",
+          "quote": "\"error_type\": \"KeyError\""
+        },
+        {
+          "task_id": "q000001",
+          "where": "step 4",
+          "quote": "\"answer\":\"B. no\",\"reason\":\"Both chest_xray_expert and llava_med_qa confirm...\""
+        }
+      ]
+    },
+    {
+      "mode": "uncritical_acceptance_of_contradictory_vqa_output",
+      "n_tasks": 1,
+      "affected_tasks": [
+        "q000002"
+      ],
+      "description": "The agent accepted a negative finding from a general or specialized VQA model as definitive truth, despite the ground truth indicating a positive finding. The agent failed to recognize the potential for false negatives in the model's output or to cross-reference with other available signals when the primary specialized tool failed or returned a negative result.",
+      "needed_instead": "The agent needed to either use a more sensitive detection tool, critically evaluate the 'not_applicable' status of the second tool, or recognize that the consensus of two general VQA models might be wrong in the presence of subtle pathology.",
+      "representative_evidence": [
+        {
+          "task_id": "q000002",
+          "where": "step 1",
+          "quote": "\"response\": \"No\""
+        },
+        {
+          "task_id": "q000002",
+          "where": "final answer",
+          "quote": "\"reason\":\"Two independent visual QA models agree the chest X-ray shows no signs of lung disease such as consolidation, masses, nodules, or interstitial patterns.\""
+        }
+      ]
+    }
+  ],
+  "capability_gaps": [
+    {
+      "gap": "lack_of_independent_visual_verification",
+      "n_tasks": 2,
+      "affected_tasks": [
+        "q000001",
+        "q000002"
+      ],
+      "description": "The agent relied exclusively on tool outputs without performing independent visual verification. It treated tool failures or 'not_applicable' statuses as lack of usable evidence but did not investigate the cause or perform a self-check when models returned negative results. There is no evidence that the agent identified specific visual features missed by the tools, as it had no direct visual access and did not express uncertainty.",
+      "representative_evidence": [
+        {
+          "task_id": "q000002",
+          "where": "observation 2 (lines 87-88)",
+          "quote": "\"analysis_status\": \"not_applicable\", \"reason\": \"Verified frontal CXR required; lateral-only, non-CXR and unknown views are not converted to frontal.\""
+        },
+        {
+          "task_id": "q000001",
+          "where": "lines 107-112",
+          "quote": "\"failure_reason\": \"outer_status_not_completed\", ... \"outcome\": \"tool_failed_no_usable_evidence\""
+        }
+      ]
+    }
+  ],
+  "success_habits": [
+    {
+      "habit": "direct_visual_reasoning_without_unnecessary_tool_invocation",
+      "n_tasks": 1,
+      "description": "The agent performs direct visual reasoning without invoking unnecessary tools for simple visual identification tasks that the model can handle directly. It skips tools when 'no_candidates' are found, ensuring efficiency and reducing potential failure points.",
+      "risk_if_broken": "If the agent were forced to use tools for every query, it would introduce latency and potential failure points for simple visual identification tasks. The current habit ensures efficiency by avoiding redundant tool calls."
+    }
+  ],
+  "n_digests": 5
+}

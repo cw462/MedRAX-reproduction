@@ -1,0 +1,67 @@
+{
+  "failure_modes": [
+    {
+      "mode": "uncritical_tool_acceptance",
+      "n_tasks": 3,
+      "affected_tasks": [
+        "q000001",
+        "q000002",
+        "q000005"
+      ],
+      "description": "The agent accepts negative or normal findings from diagnostic tools as definitive truth without seeking secondary verification or performing independent visual inspection, even when the clinical context suggests potential pathology. This leads to false negatives where the tool misses subtle abnormalities.",
+      "needed_instead": "A skepticism heuristic that triggers additional visual analysis (e.g., ROI cropping followed by generic VQA) or alternative tool invocation when primary specialized tools return negative results for high-probability conditions.",
+      "representative_evidence": [
+        {
+          "task_id": "q000001",
+          "where": "line 51",
+          "quote": "\"response\": \"No\""
+        },
+        {
+          "task_id": "q000002",
+          "where": "line 132",
+          "quote": "\"The chest x-ray appears to be normal, with no lung abnormalities detected.\""
+        },
+        {
+          "task_id": "q000005",
+          "where": "step 1",
+          "quote": "\"response\": \"No\""
+        }
+      ]
+    },
+    {
+      "mode": "consensus_hallucination",
+      "n_tasks": 1,
+      "affected_tasks": [
+        "q000004"
+      ],
+      "description": "The agent synthesizes consistent but incorrect outputs from multiple general-purpose vision-language models into a final answer, ignoring the failure of a specialized grounded reporting tool due to input mismatch. The agreement between flawed models reinforces the error.",
+      "needed_instead": "Input validation logic to handle tool inapplicability (e.g., view classification errors) and a weighting mechanism that prioritizes specialized tool capabilities over general model consensus, or flags low-confidence consensus for manual review.",
+      "representative_evidence": [
+        {
+          "task_id": "q000004",
+          "where": "line 87-93",
+          "quote": "\"analysis_status\": \"not_applicable\", \"reason\": \"Verified frontal CXR required... view\": \"unknown\""
+        },
+        {
+          "task_id": "q000004",
+          "where": "line 132",
+          "quote": "\"The chest X-ray shows a right lung field abnormality, which is consistent with pneumonia.\""
+        }
+      ]
+    }
+  ],
+  "success_habits": [
+    {
+      "habit": "direct_visual_reasoning",
+      "n_tasks": 1,
+      "description": "For straightforward anatomical or functional questions, the agent bypasses unnecessary tool invocation and relies on direct visual interpretation of the image, providing explicit identification of the target organ and its function.",
+      "risk_if_broken": "Introduction of latency and potential tool-related errors (e.g., connection failures, irrelevant outputs) for simple queries that do not require specialized diagnostic augmentation."
+    },
+    {
+      "habit": "sequential_multi_tool_verification",
+      "n_tasks": 1,
+      "description": "The agent employs a structured workflow: initial assessment with a specialized diagnostic tool, followed by cross-validation using region-of-interest cropping and subsequent visual inspection to ground the final answer in specific visual evidence.",
+      "risk_if_broken": "Loss of evidentiary support for answers, increased risk of missing subtle abnormalities that require focused attention, and reduced robustness against single-tool failures."
+    }
+  ]
+}

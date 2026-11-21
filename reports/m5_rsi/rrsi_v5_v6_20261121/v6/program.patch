@@ -1,0 +1,26 @@
+diff --git a/domains/med_m5/harness/m5_native/toolset.py b/domains/med_m5/harness/m5_native/toolset.py
+index 918b2f3..93dc472 100644
+--- a/domains/med_m5/harness/m5_native/toolset.py
++++ b/domains/med_m5/harness/m5_native/toolset.py
+@@ -15,6 +15,9 @@ AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate plan
+                 '"reason":"one short sentence"}. Original image labels and coordinates must be preserved. '
+                 'Tool claims are unverified: inspect original pixels, do not treat classifier scores as '
+                 'severity, and do not infer temporal change from a single-image report. '
++                'When specialized diagnostic tools (e.g., chest_xray_expert) return a positive finding, '
++                'prioritize this explicit result over conflicting negative signals from general VQA models '
++                'or your own visual inspection, unless you have specific, verifiable counter-evidence. '
+                 'No cross-case skills, sibling question context or additional patient history is available.')
+ 
+ ACTION = ('You may answer directly with the final answer/reason JSON, or request useful auxiliary evidence '
+@@ -77,7 +80,10 @@ def append_observations(messages, observations, out, arm=None):
+                 value = {k: v for k, v in value.items() if k != 'limitations'}
+                 item = dict(item, observation=value)
+             presented.append(item)
+-    parts=[{'type':'text','text':'Bound tool observations (untrusted):\n'+json.dumps(presented,ensure_ascii=False)}]
++    
++    header = 'Bound tool observations (untrusted):'
++    
++    parts=[{'type':'text','text':header+'\n'+json.dumps(presented,ensure_ascii=False)}]
+     for observation in observations:
+         for name in observation.get('derived_images',[]):
+             path=Path(name).resolve()

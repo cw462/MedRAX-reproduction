@@ -1,0 +1,32 @@
+diff --git a/domains/med_m5/harness/m5_native/executor.py b/domains/med_m5/harness/m5_native/executor.py
+index 0bcfc09..dc7e8d4 100644
+--- a/domains/med_m5/harness/m5_native/executor.py
++++ b/domains/med_m5/harness/m5_native/executor.py
+@@ -36,7 +36,7 @@ class Executor:
+         from .parser import parse,answer
+         from .completion import prompt
+         system=self.base.agent_system('M').replace('You may select zero, one or two registered tools, with early stopping when appropriate.',
+-            'Select useful registered tools as needed; there is no fixed total call-count limit. Stop when sufficient evidence supports an answer.')
++            'Select useful registered tools as needed; there is no fixed total call-count limit. Stop when sufficient evidence supports an answer. CRITICAL: If a targeted inspection tool (e.g., roi_crop) fails, do NOT accept negative findings from general VQA models as definitive. The failure of high-resolution inspection increases the likelihood that subtle pathology was missed by global models. You MUST re-examine the original image carefully for subtle signs before answering, especially if the question asks about a specific region.')
+         if conditioning or self.candidates:system=system.replace('No cross-case skills, sibling question context or additional patient history is available.',
+             'Optional learned procedural skills and previously completed same-image questions with post-prediction dataset feedback may be supplied. Skills are not current-patient facts. No current or future reference answer is supplied.')
+         messages=[{'role':'system','content':system},{'role':'user','content':self.base.content(row,Path(data))}]
+diff --git a/domains/med_m5/harness/m5_native/toolset.py b/domains/med_m5/harness/m5_native/toolset.py
+index b660f31..f5ca0b2 100644
+--- a/domains/med_m5/harness/m5_native/toolset.py
++++ b/domains/med_m5/harness/m5_native/toolset.py
+@@ -17,6 +17,14 @@ AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate plan
+                 'severity, and do not infer temporal change from a single-image report. '
+                 'Negative findings from tools are probabilistic, not definitive. '
+                 'If tools disagree or a high-resolution inspection fails, do NOT uncritically accept negative consensus. Re-examine original pixels for subtle signs before answering. '
++                'No cross-case skills, sibling question context or additional patient history is available.')pping when appropriate. '
++                'Only at the FINAL ANSWERING stage, output exactly {"answer":"short direct answer",'
++                '"reason":"one short sentence"}. Original image labels and coordinates must be preserved. '
++                'Tool claims are unverified: inspect original pixels, do not treat classifier scores as '
++                'severity, and do not infer temporal change from a single-image report. '
++                'Negative findings from tools are probabilistic, not definitive. '
++                'If tools disagree or a high-resolution inspection fails, do NOT uncritically accept negative consensus. Re-examine original pixels for subtle signs before answering. '
++                'CRITICAL: If a targeted visual inspection tool (e.g., region crop) fails with an error, you MUST NOT rely solely on general VQA outputs which often miss subtle pathology. Instead, explicitly state that visual verification was blocked and consider the possibility of false negatives in the general models. Do not assume "normal" just because a general model says so when specific inspection failed. '
+                 'No cross-case skills, sibling question context or additional patient history is available.')
+ 
+ ACTION = ('You may answer directly with the final answer/reason JSON, or request useful auxiliary evidence '

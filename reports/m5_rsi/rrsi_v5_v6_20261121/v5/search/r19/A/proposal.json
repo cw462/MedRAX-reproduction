@@ -1,0 +1,155 @@
+{
+  "status": "done",
+  "summary": "Add prompt instruction to prefer anatomical region names over physiological systems and inject failure-aware retry hint in executor.",
+  "edits": [
+    {
+      "id": "C1",
+      "component": "prompt",
+      "hypothesis": "Adding a general heuristic to prefer standard radiological region names (e.g., 'Chest') over physiological systems (e.g., 'Respiratory system') addresses the granularity mismatch failure mode observed in q000016 without leaking task-specific entities.",
+      "targets_mode": "granularity_mismatch_in_anatomical_identification",
+      "why_not_lower_lever": "This is a semantic alignment issue requiring explicit guidance in the system prompt; control flow changes cannot fix the model's inherent preference for functional labels over anatomical ones.",
+      "trigger_condition": "always",
+      "predicted_affected": [
+        "q000016"
+      ],
+      "retroactive_check": "(corrective) q000016 would have received explicit instruction to output 'Chest' instead of 'Respiratory system', likely correcting the answer. (preservative) Success habits like direct visual reasoning are preserved as this only affects label selection semantics. (transfer) Generalizes to any anatomical identification task where dataset taxonomy prefers structural over functional labels.",
+      "regression_risk": "Minimal; may cause slight verbosity in reasoning but improves accuracy on taxonomy-sensitive tasks.",
+      "mechanism": "Adding a general heuristic to prefer standard radiological region names (e.g., 'Chest') over physiological systems (e.g., 'Respiratory system') addresses the granularity mismatch failure mode observed in q000016 without leaking task-specific entities."
+    },
+    {
+      "id": "C2",
+      "component": "control_flow",
+      "hypothesis": "Injecting a specific retry prompt when tool failures occur forces the agent to acknowledge the missing evidence and re-examine original pixels, addressing the uncritical acceptance of negative consensus seen in q000001, q000009, etc.",
+      "targets_mode": "uncritical_acceptance_of_contradictory_vqa_output / tool_execution_error_blocking_visual_inspection",
+      "why_not_lower_lever": "The agent currently proceeds silently after tool failure; a prompt injection at the control flow level ensures the agent explicitly adjusts its strategy rather than ignoring the failure.",
+      "trigger_condition": "has_failure is True in executor loop",
+      "predicted_affected": [
+        "q000001",
+        "q000009",
+        "q000005",
+        "q000008",
+        "q000019"
+      ],
+      "retroactive_check": "(corrective) In q000001 and q000009, the agent would be explicitly told to re-examine pixels after roi_crop failure, potentially overriding the false negative VQA consensus. (preservative) Does not disrupt successful tool usage or direct reasoning paths. (transfer) Applies to any task where critical inspection tools fail, promoting resilience.",
+      "regression_risk": "May increase token usage slightly due to additional prompt text, but improves robustness against tool failures.",
+      "mechanism": "Injecting a specific retry prompt when tool failures occur forces the agent to acknowledge the missing evidence and re-examine original pixels, addressing the uncritical acceptance of negative consensus seen in q000001, q000009, etc."
+    }
+  ],
+  "mechanism": "Add prompt instruction to prefer anatomical region names over physiological systems and inject failure-aware retry hint in executor.",
+  "targets_mode": "granularity_mismatch_in_anatomical_identification, uncritical_acceptance_of_contradictory_vqa_output / tool_execution_error_blocking_visual_inspection",
+  "n_edits": 5,
+  "log": [
+    {
+      "action": "list_traces"
+    },
+    {
+      "action": "read_trace",
+      "task_id": "q000001",
+      "from_step": 90,
+      "to_step": 250,
+      "detail": true
+    },
+    {
+      "action": "read_trace",
+      "task_id": "q000009",
+      "from_step": 100,
+      "to_step": 320,
+      "detail": true
+    },
+    {
+      "action": "read_file",
+      "path": "m5_native/executor.py"
+    },
+    {
+      "action": "read_trace",
+      "task_id": "q000016",
+      "from_step": 0,
+      "to_step": 100,
+      "detail": true
+    },
+    {
+      "action": "read_file",
+      "path": "m5_native/toolset.py"
+    },
+    {
+      "action": "edit_file",
+      "path": "m5_native/toolset.py",
+      "old": "AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate planning, evidence validation '\n                'and expert stages must use the stage-specific schema requested in the curre...",
+      "new": "AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate planning, evidence validation '\n                'and expert stages must use the stage-specific schema requested in the curre..."
+    },
+    {
+      "action": "edit_file",
+      "path": "m5_native/toolset.py",
+      "old": "AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate planning, evidence validation '\n                'and expert stages must use the stage-specific schema requested in the curre...",
+      "new": "AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate planning, evidence validation '\n                'and expert stages must use the stage-specific schema requested in the curre..."
+    },
+    {
+      "action": "edit_file",
+      "path": "m5_native/toolset.py",
+      "old": "AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate planning, evidence validation '\n                'and expert stages must use the stage-specific schema requested in the curre...",
+      "new": "AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate planning, evidence validation '\n                'and expert stages must use the stage-specific schema requested in the curre..."
+    },
+    {
+      "action": "read_file",
+      "path": "m5_native/toolset.py"
+    },
+    {
+      "action": "edit_file",
+      "path": "m5_native/toolset.py",
+      "old": "AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate planning, evidence validation '\n                'and expert stages must use the stage-specific schema requested in the curre...",
+      "new": "AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate planning, evidence validation '\n                'and expert stages must use the stage-specific schema requested in the curre..."
+    },
+    {
+      "action": "read_file",
+      "path": "m5_native/toolset.py"
+    },
+    {
+      "action": "edit_file",
+      "path": "m5_native/executor.py",
+      "old": "            fresh=[]\n            has_failure=False\n            for action_item in actions:\n                actual=self.base.resolve_action(action_item,observations);signature=digest(actual);seen[signa...",
+      "new": "            fresh=[]\n            has_failure=False\n            for action_item in actions:\n                actual=self.base.resolve_action(action_item,observations);signature=digest(actual);seen[signa..."
+    },
+    {
+      "action": "read_file",
+      "path": "m5_native/executor.py"
+    },
+    {
+      "action": "done",
+      "summary": "Add prompt instruction to prefer anatomical region names over physiological systems and inject failure-aware retry hint in executor.",
+      "edits": [
+        {
+          "id": "C1",
+          "component": "prompt",
+          "hypothesis": "Adding a general heuristic to prefer standard radiological region names (e.g., 'Chest') over physiological systems (e.g., 'Respiratory system') addresses the granularity mismatch failure mode observed in q000016 without leaking task-specific entities.",
+          "targets_mode": "granularity_mismatch_in_anatomical_identification",
+          "why_not_lower_lever": "This is a semantic alignment issue requiring explicit guidance in the system prompt; control flow changes cannot fix the model's inherent preference for functional labels over anatomical ones.",
+          "trigger_condition": "always",
+          "predicted_affected": [
+            "q000016"
+          ],
+          "retroactive_check": "(corrective) q000016 would have received explicit instruction to output 'Chest' instead of 'Respiratory system', likely correcting the answer. (preservative) Success habits like direct visual reasoning are preserved as this only affects label selection semantics. (transfer) Generalizes to any anatomical identification task where dataset taxonomy prefers structural over functional labels.",
+          "regression_risk": "Minimal; may cause slight verbosity in reasoning but improves accuracy on taxonomy-sensitive tasks.",
+          "mechanism": "Adding a general heuristic to prefer standard radiological region names (e.g., 'Chest') over physiological systems (e.g., 'Respiratory system') addresses the granularity mismatch failure mode observed in q000016 without leaking task-specific entities."
+        },
+        {
+          "id": "C2",
+          "component": "control_flow",
+          "hypothesis": "Injecting a specific retry prompt when tool failures occur forces the agent to acknowledge the missing evidence and re-examine original pixels, addressing the uncritical acceptance of negative consensus seen in q000001, q000009, etc.",
+          "targets_mode": "uncritical_acceptance_of_contradictory_vqa_output / tool_execution_error_blocking_visual_inspection",
+          "why_not_lower_lever": "The agent currently proceeds silently after tool failure; a prompt injection at the control flow level ensures the agent explicitly adjusts its strategy rather than ignoring the failure.",
+          "trigger_condition": "has_failure is True in executor loop",
+          "predicted_affected": [
+            "q000001",
+            "q000009",
+            "q000005",
+            "q000008",
+            "q000019"
+          ],
+          "retroactive_check": "(corrective) In q000001 and q000009, the agent would be explicitly told to re-examine pixels after roi_crop failure, potentially overriding the false negative VQA consensus. (preservative) Does not disrupt successful tool usage or direct reasoning paths. (transfer) Applies to any task where critical inspection tools fail, promoting resilience.",
+          "regression_risk": "May increase token usage slightly due to additional prompt text, but improves robustness against tool failures.",
+          "mechanism": "Injecting a specific retry prompt when tool failures occur forces the agent to acknowledge the missing evidence and re-examine original pixels, addressing the uncritical acceptance of negative consensus seen in q000001, q000009, etc."
+        }
+      ]
+    }
+  ]
+}

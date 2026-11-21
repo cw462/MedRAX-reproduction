@@ -1,0 +1,75 @@
+{
+  "failure_modes": [
+    {
+      "mode": "uncritical_acceptance_of_contradictory_vqa_output",
+      "n_tasks": 3,
+      "affected_tasks": [
+        "q000001",
+        "q000002",
+        "q000005"
+      ],
+      "description": "The agent accepts negative findings from general-purpose or specialized VQA models as definitive truth, even when the ground truth indicates a positive finding. The agent fails to recognize the potential for false negatives in model outputs or to cross-reference with other available signals when primary tools return negative results. This occurs both when tools succeed but miss subtle pathology, and when high-resolution inspection tools fail, forcing reliance on lower-resolution models that also miss the pathology.",
+      "needed_instead": "The agent needed to treat negative VQA outputs as probabilistic rather than definitive, especially when inspecting for subtle abnormalities or when high-resolution tools are unavailable. It should have employed strategies to handle potential model disagreement or failure, such as seeking additional opinions, re-prompting, or acknowledging uncertainty.",
+      "representative_evidence": [
+        {
+          "task_id": "q000001",
+          "where": "final answer",
+          "quote": "Both chest_xray_expert and llava_med_qa confirm the trachea is midline with normal caliber and no signs of disease."
+        },
+        {
+          "task_id": "q000005",
+          "where": "step 4",
+          "quote": "Both CheXagent and LLaVA-Med independently confirm normal mediastinal width with no masses or abnormal contours."
+        }
+      ]
+    },
+    {
+      "mode": "tool_execution_error_blocking_visual_inspection",
+      "n_tasks": 2,
+      "affected_tasks": [
+        "q000004",
+        "q000005"
+      ],
+      "description": "A critical visual inspection tool (specifically region-of-interest cropping) failed due to an environment configuration error (KeyError), preventing the agent from accessing high-resolution crops necessary for detecting subtle abnormalities. This forced reliance on general-purpose VQA models which provided incorrect or insufficiently detailed findings. In one case, this led to a wrong conclusion about mediastinal health; in another, it triggered a complex resolution process where the agent ultimately relied on a verifier's heuristic reasoning over initial VQA predictions.",
+      "needed_instead": "The agent needed to successfully execute the high-resolution inspection tool to verify subtle findings. When the tool failed, the agent needed to recognize the loss of high-resolution capability as critical and either attempt a different high-resolution inspection method or express uncertainty rather than confidently answering based on low-resolution VQA outputs.",
+      "representative_evidence": [
+        {
+          "task_id": "q000005",
+          "where": "step 3",
+          "quote": "\"error\": \"'R55_MEMEVOLVE_GPU'\""
+        },
+        {
+          "task_id": "q000004",
+          "where": "step 135-136",
+          "quote": "\"error\": \"'R55_MEMEVOLVE_GPU'\", \"error_type\": \"KeyError\""
+        }
+      ]
+    }
+  ],
+  "capability_gaps": [
+    {
+      "gap": "handling_ambiguous_tool_status_as_failure",
+      "n_tasks": 1,
+      "affected_tasks": [
+        "q000002"
+      ],
+      "description": "The agent treats a 'not_applicable' status from a specialized grounded report tool as a non-result rather than a failure requiring alternative inspection. It proceeds to rely on other tools that return negative findings, failing to attempt any fallback strategy (e.g., re-prompting, different view analysis, or acknowledging the limitation) beyond accepting the negative findings. This indicates a gap in recognizing when a tool's refusal to analyze constitutes a critical missing signal.",
+      "representative_evidence": [
+        {
+          "task_id": "q000002",
+          "where": "step 1",
+          "quote": "\"analysis_status\": \"not_applicable\", \"reason\": \"Verified frontal CXR required; lateral-only, non-CXR and unknown views are not converted to frontal.\""
+        }
+      ]
+    }
+  ],
+  "success_habits": [
+    {
+      "habit": "direct_visual_reasoning_without_unnecessary_tool_invocation",
+      "n_tasks": 1,
+      "description": "The agent performs direct visual reasoning without invoking unnecessary tools for simple visual identification tasks that the model can handle directly. It skips tools when 'no_candidates' are found or when the task is straightforward, ensuring efficiency and reducing potential failure points.",
+      "risk_if_broken": "Removing the capability for the VLM to directly interpret medical images would prevent answering visual questions efficiently, as no external visual inspection tools were invoked in successful cases. Over-reliance on tools could introduce unnecessary latency and failure modes."
+    }
+  ],
+  "n_digests": 13
+}

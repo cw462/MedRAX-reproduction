@@ -1,0 +1,87 @@
+{
+  "status": "done",
+  "summary": "Generalize tool-failure prompt injection to remove medical leakage and add predicted_affected.",
+  "edits": [
+    {
+      "id": "C1",
+      "component": "control_flow",
+      "hypothesis": "Injecting a domain-agnostic instruction when a tool failure is detected forces the agent to re-examine original inputs rather than relying on generalist model consensus that may miss subtle details due to lack of high-resolution evidence.",
+      "targets_mode": "tool_execution_error_blocking_visual_inspection / uncritical_acceptance_of_contradictory_vqa_output",
+      "why_not_lower_lever": "Prompt edits alone are static; this mechanism activates conditionally based on actual runtime tool failure events observed in the trajectory, providing dynamic context that static prompts cannot.",
+      "trigger_condition": "Any tool call in the current step returns a failure status (detected via tool_failure_reason).",
+      "predicted_affected": [
+        "q000001",
+        "q000004",
+        "q000005",
+        "q000009",
+        "q000015"
+      ],
+      "retroactive_check": "(corrective) In q000001, roi_crop failed. The new next_prompt would have instructed the agent to ignore the lack of crop evidence and inspect original pixels directly, likely overriding the negative llava_med_qa result. In q000009, the same instruction would have countered the negative llava_med_qa after roi_crop failure. (preservative) Success cases like q000003 and q000007 do not trigger tool failures, so the mechanism remains inactive and does not disrupt direct visual reasoning habits. (transfer) Generalizes to any task where a specialized inspection tool fails, ensuring the agent doesn't treat 'no tool output' as 'negative finding'.",
+      "regression_risk": "Minimal; only activates on failure. Could potentially cause the agent to over-inspect if it misinterprets a non-critical tool failure, but the instruction is scoped to 'original input', aligning with the core task requirement.",
+      "mechanism": "Injecting a domain-agnostic instruction when a tool failure is detected forces the agent to re-examine original inputs rather than relying on generalist model consensus that may miss subtle details due to lack of high-resolution evidence."
+    }
+  ],
+  "mechanism": "Generalize tool-failure prompt injection to remove medical leakage and add predicted_affected.",
+  "targets_mode": "tool_execution_error_blocking_visual_inspection / uncritical_acceptance_of_contradictory_vqa_output",
+  "n_edits": 1,
+  "log": [
+    {
+      "action": "read_trace",
+      "task_id": "q000001",
+      "from_step": 100,
+      "to_step": 120,
+      "detail": true
+    },
+    {
+      "action": "read_file",
+      "path": "m5_native/executor.py"
+    },
+    {
+      "action": "edit_file",
+      "path": "m5_native/executor.py",
+      "old": "            if has_tool_failure:\n                next_prompt='A requested inspection tool failed and provided no usable evidence. Do NOT rely on general VQA consensus to override this missing high-res...",
+      "new": "            if has_tool_failure:\n                next_prompt='A requested inspection tool failed and provided no usable evidence. Do NOT rely on general model consensus to override this missing eviden..."
+    },
+    {
+      "action": "done",
+      "summary": "Generalize tool-failure prompt injection to remove medical/domain-specific terminology and task-specific leakage.",
+      "edits": [
+        {
+          "id": "C1",
+          "component": "control_flow",
+          "hypothesis": "Replacing domain-specific instructions in the dynamic tool-failure prompt with general-purpose directives prevents leakage while maintaining the mechanism that forces re-examination of original inputs when specialized tools fail.",
+          "targets_mode": "leakage / task_specialization",
+          "why_not_lower_lever": "The mechanism itself (injecting a prompt on failure) is valid and necessary to address the 'uncritical acceptance' failure mode; only the content of the injected string was non-compliant. A static prompt edit cannot provide this conditional context.",
+          "trigger_condition": "Any tool call in the current step returns a failure status (detected via tool_failure_reason).",
+          "predicted_affected": [],
+          "retroactive_check": "(corrective) The previous version targeted q000001/q000004 but was rejected for leakage. This generalized version preserves the behavioral correction (ignoring failed tool output) without referencing 'pathology' or 'high-resolution', making it compliant. (preservative) Success cases like q000003 do not trigger tool failures, so the mechanism remains inactive. (transfer) Generalizes to any domain where a tool fails, ensuring the agent doesn't treat 'no tool output' as 'negative finding'.",
+          "regression_risk": "Minimal; the instruction is now generic ('original input') rather than specific ('original pixels'), which might be slightly less precise for visual tasks but is safe for all domains."
+        }
+      ]
+    },
+    {
+      "action": "done",
+      "summary": "Generalize tool-failure prompt injection to remove medical leakage and add predicted_affected.",
+      "edits": [
+        {
+          "id": "C1",
+          "component": "control_flow",
+          "hypothesis": "Injecting a domain-agnostic instruction when a tool failure is detected forces the agent to re-examine original inputs rather than relying on generalist model consensus that may miss subtle details due to lack of high-resolution evidence.",
+          "targets_mode": "tool_execution_error_blocking_visual_inspection / uncritical_acceptance_of_contradictory_vqa_output",
+          "why_not_lower_lever": "Prompt edits alone are static; this mechanism activates conditionally based on actual runtime tool failure events observed in the trajectory, providing dynamic context that static prompts cannot.",
+          "trigger_condition": "Any tool call in the current step returns a failure status (detected via tool_failure_reason).",
+          "predicted_affected": [
+            "q000001",
+            "q000004",
+            "q000005",
+            "q000009",
+            "q000015"
+          ],
+          "retroactive_check": "(corrective) In q000001, roi_crop failed. The new next_prompt would have instructed the agent to ignore the lack of crop evidence and inspect original pixels directly, likely overriding the negative llava_med_qa result. In q000009, the same instruction would have countered the negative llava_med_qa after roi_crop failure. (preservative) Success cases like q000003 and q000007 do not trigger tool failures, so the mechanism remains inactive and does not disrupt direct visual reasoning habits. (transfer) Generalizes to any task where a specialized inspection tool fails, ensuring the agent doesn't treat 'no tool output' as 'negative finding'.",
+          "regression_risk": "Minimal; only activates on failure. Could potentially cause the agent to over-inspect if it misinterprets a non-critical tool failure, but the instruction is scoped to 'original input', aligning with the core task requirement.",
+          "mechanism": "Injecting a domain-agnostic instruction when a tool failure is detected forces the agent to re-examine original inputs rather than relying on generalist model consensus that may miss subtle details due to lack of high-resolution evidence."
+        }
+      ]
+    }
+  ]
+}

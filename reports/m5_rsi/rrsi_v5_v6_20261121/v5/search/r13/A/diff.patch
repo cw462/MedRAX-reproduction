@@ -1,0 +1,19 @@
+diff --git a/domains/med_m5/harness/m5_native/executor.py b/domains/med_m5/harness/m5_native/executor.py
+index 0bcfc09..c509ed8 100644
+--- a/domains/med_m5/harness/m5_native/executor.py
++++ b/domains/med_m5/harness/m5_native/executor.py
+@@ -76,7 +76,13 @@ class Executor:
+                 if seen[signature]>=3:
+                     return {'activated_skill_ids':sorted(self.activated),'answer':None,'reason':None,'status':'repeated_identical_action_no_progress','main_calls':n,'tool_calls':used,'observations':observations,'terminal_raw':raw},calls
+                 used+=1;obs=self.tools.call(row,actual,'R49-AGENT',used)
+-                failure=tool_failure_reason(obs)
++                # Detect silent failures where the tool returns no observation and no explicit error status
++                if obs.get('observation') is None and obs.get('status') == 'completed' and not obs.get('failure_observation'):
++                    # Treat as a failed call to prevent the agent from proceeding with missing evidence
++                    obs['status'] = 'failed'
++                    obs['error'] = 'silent_tool_failure_no_observation'
++                    obs['error_type'] = 'SilentFailure'
++                failure = tool_failure_reason(obs)
+                 if failure:obs=delivered_failure(self.out,row,used,actual,obs)
+                 observations.append(obs);fresh.append(obs)
+             self.base.append_observations(messages,fresh,self.out,'M')

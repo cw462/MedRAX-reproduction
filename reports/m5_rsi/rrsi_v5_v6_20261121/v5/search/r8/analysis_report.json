@@ -1,0 +1,71 @@
+{
+  "failure_modes": [
+    {
+      "mode": "uncritical_acceptance_of_contradictory_vqa_output",
+      "n_tasks": 6,
+      "affected_tasks": [
+        "q000001",
+        "q000002",
+        "q000004",
+        "q000005",
+        "q000008",
+        "q000009"
+      ],
+      "description": "The agent accepts negative or conflicting findings from general-purpose or specialized VQA models as definitive truth, even when the ground truth indicates a positive finding or a different diagnosis. The agent fails to recognize the potential for false negatives in model outputs or to cross-reference with other available signals when primary tools return negative or contradictory results, often relying on a verifier that lacks the visual resolution to correct the error.",
+      "needed_instead": "The agent needed to successfully crop the region of interest or use a model capable of handling 'unknown' view images to detect the small pulmonary nodule, rather than relying on general VQA models prone to hallucinating common pathologies like pneumonia.",
+      "representative_evidence": [
+        {
+          "task_id": "q000002",
+          "where": "line 132",
+          "quote": "\"No, the chest X-ray does not show any signs of lung disease\""
+        },
+        {
+          "task_id": "q000008",
+          "where": "final answer / line 280",
+          "quote": "{\"answer\":\"B. no\",\"reason\":\"The verifier confirmed that the chest X-ray shows no signs of cardiomegaly, widened mediastinum, or vascular congestion.\"}"
+        }
+      ]
+    },
+    {
+      "mode": "tool_execution_error_blocking_visual_inspection",
+      "n_tasks": 5,
+      "affected_tasks": [
+        "q000001",
+        "q000004",
+        "q000005",
+        "q000008",
+        "q000009"
+      ],
+      "description": "A critical visual inspection tool (specifically region-of-interest cropping) failed due to an environment configuration error (KeyError), preventing the agent from accessing high-resolution crops necessary for detecting subtle abnormalities. This forced reliance on general-purpose VQA models which provided incorrect or insufficiently detailed findings.",
+      "needed_instead": "The agent needed to handle the roi_crop failure by either retrying with different parameters, using an alternative cropping method, or critically evaluating the full-image VQA result against the known failure of the targeted inspection.",
+      "representative_evidence": [
+        {
+          "task_id": "q000001",
+          "where": "line 107",
+          "quote": "\"error_type\": \"KeyError\""
+        },
+        {
+          "task_id": "q000008",
+          "where": "step 2 / line 111",
+          "quote": "\"instruction\": \"This tool failed. Partial output supplies no usable finding. Continue from the original images and other evidence; preserve the failure and do not repeat the failed call.\""
+        }
+      ]
+    }
+  ],
+  "capability_gaps": [],
+  "success_habits": [
+    {
+      "habit": "direct_visual_reasoning_without_unnecessary_tool_invocation",
+      "n_tasks": 3,
+      "description": "The agent performs direct visual reasoning without invoking unnecessary tools for simple visual identification tasks that the model can handle directly. It skips tools when 'no_candidates' are found or when the task is straightforward, ensuring efficiency and reducing potential failure points.",
+      "risk_if_broken": "Without the habit of skipping tools for obvious visual tasks, the agent would incur unnecessary latency and token costs by invoking external tools for simple image recognition, potentially complicating the trajectory without improving accuracy."
+    },
+    {
+      "habit": "resilient_multi_tool_triangulation",
+      "n_tasks": 1,
+      "description": "The agent invokes multiple distinct visual inspection tools to cross-verify findings and maintains progress by pivoting to alternative tools when a primary inspection method fails, rather than aborting the task.",
+      "risk_if_broken": "Without multi-tool triangulation, the agent would rely on a single model's output which may miss subtle abnormalities; without the fallback strategy after roi_crop failure, the agent might stall or produce an unverified answer."
+    }
+  ],
+  "n_digests": 9
+}

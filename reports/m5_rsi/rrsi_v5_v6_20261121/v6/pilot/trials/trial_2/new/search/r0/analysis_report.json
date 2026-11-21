@@ -1,0 +1,58 @@
+{
+  "failure_modes": [
+    {
+      "mode": "expert_tool_disregard",
+      "n_tasks": 2,
+      "affected_tasks": [
+        "q000008",
+        "q000009"
+      ],
+      "description": "The agent receives a positive finding from a specialized diagnostic tool but overrides it with a negative conclusion derived from either a conflicting general-purpose VQA model or its own visual inspection. This indicates a failure to weight domain-specific tool outputs appropriately against contradictory signals.",
+      "needed_instead": "The agent needed to prioritize the explicit positive finding from the specialized expert tool as the primary evidence, treating conflicting negative signals from general models or visual checks as secondary unless they provided specific, verifiable counter-evidence.",
+      "representative_evidence": [
+        {
+          "task_id": "q000008",
+          "where": "line 51 vs line 132",
+          "quote": "chest_xray_expert returned \"Yes\"... llava_med_qa returned \"No... does not show any enlargement\"... agent answered \"B. no\""
+        },
+        {
+          "task_id": "q000009",
+          "where": "step 1 vs step 4",
+          "quote": "chest_xray_expert output 'Yes'... agent distrusted this result... called verify tool with proposed answer 'B. no'"
+        }
+      ]
+    },
+    {
+      "mode": "verifier_false_positive",
+      "n_tasks": 1,
+      "affected_tasks": [
+        "q000009"
+      ],
+      "description": "The internal verification mechanism incorrectly validates a wrong answer as correct, reinforcing the agent's erroneous conclusion and preventing self-correction. This creates a closed loop where the agent is misled into confidence in an incorrect response.",
+      "needed_instead": "The verifier needed to detect the contradiction between the specialized tool's positive output and the agent's negative conclusion, flagging the answer as incorrect or requiring further reconciliation.",
+      "representative_evidence": [
+        {
+          "task_id": "q000009",
+          "where": "step 4",
+          "quote": "\"correctness\": \"CORRECT\"... grading: {\"correct\": 0, \"reference\": {\"answer\": \"A\", \"answer_text\": \"yes\"}}"
+        }
+      ]
+    }
+  ],
+  "capability_gaps": [],
+  "success_habits": [
+    {
+      "habit": "multi_tool_triangulation",
+      "n_tasks": 3,
+      "description": "The agent chains multiple independent tools (specialized expert, general VQA, grounded report, ROI crop) to cross-validate findings. It explicitly acknowledges modality limitations and uses targeted visual inspections to resolve ambiguities or confirm negative findings in limited views.",
+      "risk_if_broken": "Without multi-tool triangulation, the agent becomes susceptible to single-model bias or errors. Removing targeted visual checks or limitation acknowledgments increases the risk of false positives/negatives and medically unsound overconfidence."
+    },
+    {
+      "habit": "direct_visual_reasoning",
+      "n_tasks": 1,
+      "description": "In the absence of available tools or when tools are unnecessary, the agent performs direct visual feature extraction (e.g., bone density, lung parenchyma) to justify its answer, avoiding hallucination or dependency on missing external data.",
+      "risk_if_broken": "Removing this habit forces reliance on external tools that may be absent, leading to failure or hallucination when direct observation is the only viable path."
+    }
+  ],
+  "n_digests": 7
+}

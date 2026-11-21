@@ -1,0 +1,77 @@
+{
+  "status": "done",
+  "summary": "Inject failure-recovery heuristic into delivered_failure instruction to counter uncritical acceptance of negative VQA after tool crash.",
+  "edits": [
+    {
+      "id": "C1",
+      "component": "client_tool",
+      "hypothesis": "Adding a specific directive to the failure observation instruction forces the agent to treat negative findings from general models as uncertain when a targeted inspection tool fails, prompting re-examination of original pixels.",
+      "targets_mode": "uncritical_acceptance_of_contradictory_vqa_output / tool_execution_error_blocking_visual_inspection",
+      "why_not_lower_lever": "The system prompt (AGENT_SYSTEM) already contains a similar heuristic, but traces show the agent ignores it when a tool explicitly fails. Embedding the directive directly in the failure observation ensures it is present in the immediate context of the error, acting as a local override or reinforcement at the point of failure.",
+      "trigger_condition": "Always, when a tool call results in a failed status and delivered_failure is invoked.",
+      "predicted_affected": [
+        "q000001",
+        "q000004",
+        "q000005",
+        "q000008",
+        "q000009"
+      ],
+      "retroactive_check": "(corrective) In q000001, q000004, q000005, q000008, and q000009, the roi_crop tool failed with a KeyError. The agent then accepted negative/incorrect findings from llava_med_qa or chest_xray_expert. With this edit, the failure observation would explicitly instruct the agent to treat those subsequent negative findings as uncertain and re-examine original pixels, potentially leading to a different conclusion or at least a more cautious reasoning path that might catch the subtle sign. (preservative) Success cases like q000003 and q000007 do not involve tool failures, so this instruction is never injected, preserving their direct visual reasoning habits. (transfer) This mechanism generalizes to any task where a high-resolution or targeted tool fails, preventing over-reliance on lower-resolution general models.",
+      "regression_risk": "Minimal. The instruction is advisory and does not change tool behavior or output schema. It may increase token usage slightly in failure cases but aims to improve accuracy.",
+      "mechanism": "Adding a specific directive to the failure observation instruction forces the agent to treat negative findings from general models as uncertain when a targeted inspection tool fails, prompting re-examination of original pixels."
+    }
+  ],
+  "mechanism": "Inject failure-recovery heuristic into delivered_failure instruction to counter uncritical acceptance of negative VQA after tool crash.",
+  "targets_mode": "uncritical_acceptance_of_contradictory_vqa_output / tool_execution_error_blocking_visual_inspection",
+  "n_edits": 1,
+  "log": [
+    {
+      "action": "read_trace",
+      "task_id": "q000001",
+      "from_step": 0,
+      "to_step": 10,
+      "detail": true
+    },
+    {
+      "action": "read_trace",
+      "task_id": "q000004",
+      "from_step": 0,
+      "to_step": 15,
+      "detail": true
+    },
+    {
+      "action": "read_file",
+      "path": "m5_native/failures.py"
+    },
+    {
+      "action": "edit_file",
+      "path": "m5_native/failures.py",
+      "old": "        'instruction': 'This tool failed. Partial output supplies no usable finding. Continue from the original images and other evidence; preserve the failure and do not repeat the failed call.'})",
+      "new": "        'instruction': 'This tool failed. Partial output supplies no usable finding. Continue from the original images and other evidence; preserve the failure and do not repeat the failed call. When ..."
+    },
+    {
+      "action": "done",
+      "summary": "Inject failure-recovery heuristic into delivered_failure instruction to counter uncritical acceptance of negative VQA after tool crash.",
+      "edits": [
+        {
+          "id": "C1",
+          "component": "client_tool",
+          "hypothesis": "Adding a specific directive to the failure observation instruction forces the agent to treat negative findings from general models as uncertain when a targeted inspection tool fails, prompting re-examination of original pixels.",
+          "targets_mode": "uncritical_acceptance_of_contradictory_vqa_output / tool_execution_error_blocking_visual_inspection",
+          "why_not_lower_lever": "The system prompt (AGENT_SYSTEM) already contains a similar heuristic, but traces show the agent ignores it when a tool explicitly fails. Embedding the directive directly in the failure observation ensures it is present in the immediate context of the error, acting as a local override or reinforcement at the point of failure.",
+          "trigger_condition": "Always, when a tool call results in a failed status and delivered_failure is invoked.",
+          "predicted_affected": [
+            "q000001",
+            "q000004",
+            "q000005",
+            "q000008",
+            "q000009"
+          ],
+          "retroactive_check": "(corrective) In q000001, q000004, q000005, q000008, and q000009, the roi_crop tool failed with a KeyError. The agent then accepted negative/incorrect findings from llava_med_qa or chest_xray_expert. With this edit, the failure observation would explicitly instruct the agent to treat those subsequent negative findings as uncertain and re-examine original pixels, potentially leading to a different conclusion or at least a more cautious reasoning path that might catch the subtle sign. (preservative) Success cases like q000003 and q000007 do not involve tool failures, so this instruction is never injected, preserving their direct visual reasoning habits. (transfer) This mechanism generalizes to any task where a high-resolution or targeted tool fails, preventing over-reliance on lower-resolution general models.",
+          "regression_risk": "Minimal. The instruction is advisory and does not change tool behavior or output schema. It may increase token usage slightly in failure cases but aims to improve accuracy.",
+          "mechanism": "Adding a specific directive to the failure observation instruction forces the agent to treat negative findings from general models as uncertain when a targeted inspection tool fails, prompting re-examination of original pixels."
+        }
+      ]
+    }
+  ]
+}

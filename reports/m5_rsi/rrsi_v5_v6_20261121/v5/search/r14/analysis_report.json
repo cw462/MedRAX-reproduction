@@ -1,0 +1,68 @@
+{
+  "failure_modes": [
+    {
+      "mode": "tool_execution_error_blocking_visual_inspection",
+      "n_tasks": 6,
+      "affected_tasks": [
+        "q000001",
+        "q000002",
+        "q000004",
+        "q000005",
+        "q000008",
+        "q000015"
+      ],
+      "description": "A critical visual inspection tool (specifically region-of-interest cropping) fails due to an environment configuration error (KeyError), preventing the agent from accessing high-resolution crops necessary for detecting subtle abnormalities. This forces reliance on general-purpose VQA models which provide incorrect or insufficiently detailed findings.",
+      "needed_instead": "The agent needed the roi_crop tool to succeed so it could visually confirm the subtle tracheal abnormality that general VQA models missed.",
+      "representative_evidence": [
+        {
+          "task_id": "q000001",
+          "where": "step 107",
+          "quote": "\"error_type\": \"KeyError\""
+        },
+        {
+          "task_id": "q000004",
+          "where": "step 3",
+          "quote": "\"tool\": \"roi_crop\", \"error_type\": \"KeyError\", \"error\": \"'R55_MEMEVOLVE_GPU'\""
+        }
+      ]
+    },
+    {
+      "mode": "uncritical_acceptance_of_contradictory_vqa_output",
+      "n_tasks": 2,
+      "affected_tasks": [
+        "q000009",
+        "q000002"
+      ],
+      "description": "The agent accepts negative or conflicting findings from general-purpose or specialized VQA models as definitive truth, even when the ground truth indicates a positive finding or a different diagnosis. The agent fails to recognize the potential for false negatives in model outputs or to cross-reference with other available signals when primary tools return negative or contradictory results, often relying on a verifier that lacks the visual resolution to correct the error.",
+      "needed_instead": "The agent should have trusted the specialized chest_xray_expert's positive finding or performed a more robust visual inspection when the ROI crop failed, rather than accepting the generalist LLaVA-Med's negative assessment.",
+      "representative_evidence": [
+        {
+          "task_id": "q000009",
+          "where": "step 5",
+          "quote": "correctness: \"CORRECT\""
+        },
+        {
+          "task_id": "q000002",
+          "where": "step 0",
+          "quote": "response\": \"No\""
+        }
+      ]
+    }
+  ],
+  "capability_gaps": [],
+  "success_habits": [
+    {
+      "habit": "resilient_multi_tool_triangulation",
+      "n_tasks": 3,
+      "description": "The agent invokes multiple distinct visual inspection tools to cross-verify findings and maintains progress by pivoting to alternative tools when a primary inspection method fails, rather than aborting the task.",
+      "risk_if_broken": "Removing the multi-tool verification habit would increase the risk of false negatives or positives by relying on a single model's potentially biased or limited visual interpretation."
+    },
+    {
+      "habit": "direct_visual_reasoning_without_unnecessary_tool_invocation",
+      "n_tasks": 3,
+      "description": "The agent performs direct visual reasoning without invoking unnecessary tools for simple visual identification tasks that the model can handle directly. It skips tools when 'no_candidates' are found or when the task is straightforward, ensuring efficiency and reducing potential failure points.",
+      "risk_if_broken": "Removing the habit of skipping unnecessary tools would introduce latency and potential error from tool failures (e.g., roi_crop) on tasks where visual inspection alone yields high-confidence answers."
+    }
+  ],
+  "n_digests": 13
+}

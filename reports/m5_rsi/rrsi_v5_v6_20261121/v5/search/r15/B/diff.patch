@@ -1,0 +1,42 @@
+diff --git a/domains/med_m5/harness/m5_native/executor.py b/domains/med_m5/harness/m5_native/executor.py
+index 0bcfc09..e6ded6f 100644
+--- a/domains/med_m5/harness/m5_native/executor.py
++++ b/domains/med_m5/harness/m5_native/executor.py
+@@ -27,6 +27,15 @@ class Executor:
+             ('agent_system', 'ACTION', 'evidence_catalog', 'validate_actions', 'resolve_action', 'append_observations')})
+         self.base.content = lambda row, data: toolset.content(row, services.image_views)
+     def activate(self, row, observations, step):
++        # Check for recent tool failures to trigger fallback strategy
++        recent_failures = []
++        for obs in observations[-3:]:
++            if obs.get('status') == 'failed':
++                recent_failures.append(obs)
++            elif obs.get('observation') and isinstance(obs['observation'], dict) and obs['observation'].get('error'):
++                recent_failures.append(obs)
++        if recent_failures:
++            return ['fallback_inspection'], {'ids': ['fallback_inspection'], 'reason': 'recent_tool_failure_detected'}
+         return [], {'ids': [], 'reason': 'no_candidates'}
+     def call(self, row, arm, ordinal, messages):
+         return self.services.main(messages)
+@@ -77,6 +86,7 @@ class Executor:
+                     return {'activated_skill_ids':sorted(self.activated),'answer':None,'reason':None,'status':'repeated_identical_action_no_progress','main_calls':n,'tool_calls':used,'observations':observations,'terminal_raw':raw},calls
+                 used+=1;obs=self.tools.call(row,actual,'R49-AGENT',used)
+                 failure=tool_failure_reason(obs)
+-                if failure:obs=delivered_failure(self.out,row,used,actual,obs)
++                if failure:
++                    obs=delivered_failure(self.out,row,used,actual,obs)
+                 observations.append(obs);fresh.append(obs)
+             self.base.append_observations(messages,fresh,self.out,'M')
+diff --git a/domains/med_m5/harness/m5_native/toolset.py b/domains/med_m5/harness/m5_native/toolset.py
+index b660f31..91ff2b8 100644
+--- a/domains/med_m5/harness/m5_native/toolset.py
++++ b/domains/med_m5/harness/m5_native/toolset.py
+@@ -16,7 +16,7 @@ AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate plan
+                 'Tool claims are unverified: inspect original pixels, do not treat classifier scores as '
+                 'severity, and do not infer temporal change from a single-image report. '
+                 'Negative findings from tools are probabilistic, not definitive. '
+-                'If tools disagree or a high-resolution inspection fails, do NOT uncritically accept negative consensus. Re-examine original pixels for subtle signs before answering. '
++                'If tools disagree or a requested inspection fails, do NOT uncritically accept negative consensus. Re-examine original pixels for subtle signs before answering. '
+                 'No cross-case skills, sibling question context or additional patient history is available.')
+ 
+ ACTION = ('You may answer directly with the final answer/reason JSON, or request useful auxiliary evidence '
