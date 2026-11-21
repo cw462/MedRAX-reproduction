@@ -1,60 +1,51 @@
 {
   "failure_modes": [
     {
-      "mode": "tool_execution_error_blocking_visual_inspection",
-      "n_tasks": 7,
+      "mode": "uncritical_acceptance_of_contradictory_vqa_output",
+      "n_tasks": 5,
       "affected_tasks": [
-        "q000001",
         "q000002",
-        "q000004",
-        "q000005",
         "q000008",
-        "q000009",
         "q000015",
-        "q000019"
+        "q000021",
+        "q000005"
       ],
-      "description": "A critical visual inspection tool (specifically region-of-interest cropping) fails due to an environment configuration error (KeyError), preventing the agent from accessing high-resolution crops necessary for detecting subtle abnormalities. This forces reliance on general-purpose VQA models which provide incorrect or insufficiently detailed findings.",
-      "needed_instead": "Successful execution of the roi_crop tool to provide high-resolution visual evidence, or a fallback mechanism that triggers alternative high-sensitivity detection methods when cropping is unavailable.",
+      "description": "The agent accepts negative or conflicting findings from general-purpose or specialized VQA models as definitive truth, even when the ground truth indicates a positive finding or a different diagnosis. The agent fails to recognize the potential for false negatives in model outputs or to cross-reference with other available signals when primary tools return negative or contradictory results, often relying on a verifier that lacks the visual resolution to correct the error.",
+      "needed_instead": "The agent needed to recognize the discrepancy between the VQA outputs and the lack of grounded evidence, potentially trying alternative visualization tools or questioning the VQA results more critically when primary verification tools failed.",
       "representative_evidence": [
         {
-          "task_id": "q000001",
-          "where": "step 106",
-          "quote": "\"error\": \"'R55_MEMEVOLVE_GPU'\""
+          "task_id": "q000008",
+          "where": "step 4",
+          "quote": "\"answer\":\"B. no\",\"reason\":\"The verifier confirmed that there are no signs of cardiovascular abnormality in the chest X-ray, resolving the initial tool conflict.\""
         },
         {
-          "task_id": "q000005",
-          "where": "step 2",
-          "quote": "\"tool\": \"roi_crop\", \"status\": \"failed\", \"error_type\": \"KeyError\""
-        },
-        {
-          "task_id": "q000019",
-          "where": "step 107",
-          "quote": "\"error_type\": \"KeyError\""
+          "task_id": "q000002",
+          "where": "line 5",
+          "quote": "\"answer\": \"B. no\""
         }
       ]
     },
     {
-      "mode": "uncritical_acceptance_of_contradictory_vqa_output",
-      "n_tasks": 5,
+      "mode": "tool_execution_error_blocking_visual_inspection",
+      "n_tasks": 4,
       "affected_tasks": [
-        "q000001",
-        "q000002",
+        "q000004",
         "q000005",
-        "q000008",
-        "q000009"
+        "q000009",
+        "q000019"
       ],
-      "description": "The agent accepts negative or conflicting findings from general-purpose or specialized VQA models as definitive truth, even when the ground truth indicates a positive finding or a different diagnosis. The agent fails to recognize the potential for false negatives in model outputs or to cross-reference with other available signals when primary tools return negative or contradictory results, often relying on a verifier that lacks the visual resolution to correct the error.",
-      "needed_instead": "Explicit verification of negative findings against raw pixels or multiple independent models to mitigate the risk of false negatives, especially when high-resolution tools fail.",
+      "description": "A critical visual inspection tool (specifically region-of-interest cropping) fails due to an environment configuration error (KeyError), preventing the agent from accessing high-resolution crops necessary for detecting subtle abnormalities. This forces reliance on general-purpose VQA models which provide incorrect or insufficiently detailed findings.",
+      "needed_instead": "The successful path required identifying the specific area of disease using a region-of-interest cropping tool or a more sensitive detection method, rather than relying on general VQA consensus which missed the pathology.",
       "representative_evidence": [
         {
-          "task_id": "q000001",
-          "where": "step 239",
-          "quote": "\"answer\":\"B. no\",\"reason\":\"Both chest_xray_expert and llava_med_qa independently confirm...\""
+          "task_id": "q000004",
+          "where": "step 2",
+          "quote": "\"error_type\": \"KeyError\""
         },
         {
           "task_id": "q000009",
-          "where": "step 307",
-          "quote": "\"answer\":\"B. no\",\"reason\":\"Two independent VQAs and the verifier confirm normal mediastinal contour...\""
+          "where": "step 2",
+          "quote": "\"error\": \"'R55_MEMEVOLVE_GPU'\", \"error_type\": \"KeyError\""
         }
       ]
     },
@@ -65,12 +56,12 @@
         "q000016"
       ],
       "description": "The agent provides an answer at the wrong level of abstraction (e.g., physiological system instead of anatomical region) despite having access to the correct visual information. This occurs when the agent relies on internal semantic associations rather than verifying the specific label granularity required by the task.",
-      "needed_instead": "Alignment of the final answer with the specific taxonomy expected by the dataset, potentially by using tools to verify anatomical landmarks if available, or by adhering to the specific label space.",
+      "needed_instead": "The agent needed to activate a visual QA skill to inspect the image and align its output with the specific dataset label rather than inferring the biological system.",
       "representative_evidence": [
         {
           "task_id": "q000016",
-          "where": "line 87",
-          "quote": "{\"correct\": 0, \"reference\": {\"answer\": \"Chest\", \"answer_text\": \"Chest\"}}"
+          "where": "trace.prediction",
+          "quote": "\"answer\": \"Respiratory system\""
         }
       ]
     }
@@ -78,21 +69,21 @@
   "success_habits": [
     {
       "habit": "resilient_multi_tool_triangulation",
-      "n_tasks": 4,
+      "n_tasks": 3,
       "description": "The agent invokes multiple distinct visual inspection tools to cross-verify findings and maintains progress by pivoting to alternative tools when a primary inspection method fails, rather than aborting the task.",
-      "risk_if_broken": "Without resilient triangulation, the agent may rely on a single potentially flawed model output, missing subtle abnormalities or misinterpreting normal anatomy, leading to higher false negative rates."
+      "risk_if_broken": "Without multi-tool triangulation and explicit verification of negative findings, the agent would likely rely on a single model's output, increasing the risk of missing subtle pathology and producing an incorrect conclusion."
     },
     {
       "habit": "direct_visual_reasoning_without_unnecessary_tool_invocation",
-      "n_tasks": 3,
+      "n_tasks": 2,
       "description": "The agent performs direct visual reasoning without invoking unnecessary tools for simple visual identification tasks that the model can handle directly. It skips tools when 'no_candidates' are found or when the task is straightforward, ensuring efficiency and reducing potential failure points.",
-      "risk_if_broken": "Removing this habit would lead to unnecessary tool calls for straightforward tasks, increasing latency and cost without improving accuracy, and potentially introducing new failure modes via tool errors."
+      "risk_if_broken": "If the agent did not skip unnecessary tools, it would invoke additional models for trivially visible features, adding latency and cost while introducing potential noise or conflicting outputs from less reliable general-purpose models."
     },
     {
       "habit": "explicit_verification_of_negative_findings",
-      "n_tasks": 2,
+      "n_tasks": 3,
       "description": "The agent explicitly verifies negative findings against raw pixels or multiple independent models to mitigate the risk of false negatives, which are common in radiological assessments.",
-      "risk_if_broken": "Without explicit verification, the agent risks accepting a negative answer based solely on two VQA models without auditing for tool failures or subtle pathology, potentially missing critical diagnoses."
+      "risk_if_broken": "Removing the habit of explicit verification would reduce the verifiability of negative findings, making it harder to distinguish between a reasoned conclusion and a guess, and increasing the likelihood of accepting false negatives from single-model outputs."
     }
   ]
 }

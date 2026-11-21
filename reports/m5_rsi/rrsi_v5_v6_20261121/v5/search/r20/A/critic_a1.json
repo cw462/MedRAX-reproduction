@@ -1,0 +1,11 @@
+{
+  "verdict": "reject",
+  "reasons": [
+    "LEAKAGE / TASK-SPECIALIZATION: Edit C1 explicitly lists 'predicted_affected' question IDs (q000004, q000005, etc.) and references specific tool names ('roi_crop', 'llava_med_qa') in the retroactive check. While the code change itself is a generic failure handler, the justification and targeting reveal that the change was derived from inspecting specific evolve-set failures rather than general principles. The prompt injection 'Re-examine the original image pixels' is highly specific to the visual nature of this suite and may not generalize to other domains as required by the litmus test.",
+    "UNDECLARED BUNDLING: The diff contains two distinct changes: one in executor.py (control flow message injection) and one in toolset.py (prompt cleanup). These are declared as C1 and C2 respectively, which is allowed. However, the prompt cleanup in toolset.py removes specific anatomical examples ('Chest', 'Heart'). This removal is justified as fixing leakage, but the specific examples removed suggest the previous prompt was indeed specialized. The combination of removing specialization while adding a specific recovery mechanism for tool failures in this specific domain raises concerns about overfitting to the 'med_m5' task structure."
+  ],
+  "risk_notes": [
+    "The injected user message in executor.py is a strong heuristic for this specific type of VQA task but might be considered 'task-specific knowledge' if the 'original image pixels' concept is not universally applicable or if the failure mode (tool crash leading to uncritical acceptance) is unique to this harness setup. The litmus test asks if it would help on an unfamiliar task from a different suite; a generic 'tool failed' message is fine, but instructing to 're-examine original pixels' assumes a visual modality and a specific agent capability that may not exist elsewhere.",
+    "The removal of 'Chest' and 'Heart' from the system prompt is a good anti-leakage step, but the fact that they were there suggests prior overfitting. The current change corrects this, but the simultaneous addition of the failure handler suggests a coordinated effort to fix specific observed failures in the evolve set, which borders on task-specialization."
+  ]
+}
