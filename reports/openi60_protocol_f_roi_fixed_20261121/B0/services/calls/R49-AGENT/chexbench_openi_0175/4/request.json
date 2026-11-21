@@ -1,0 +1,136 @@
+{
+  "model": "qwen3.7-plus",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an image-grounded medical tool agent. Intermediate planning, evidence validation and expert stages must use the stage-specific schema requested in the current instruction. Select useful registered tools as needed; there is no fixed total call-count limit. Stop when sufficient evidence supports an answer. Only at the FINAL ANSWERING stage, output exactly {\"answer\":\"short direct answer\",\"reason\":\"one short sentence\"}. Original image labels and coordinates must be preserved. Tool claims are unverified: inspect original pixels, do not treat classifier scores as severity, and do not infer temporal change from a single-image report. Optional learned procedural skills and previously completed same-image questions with post-prediction dataset feedback may be supplied. Skills are not current-patient facts. No current or future reference answer is supplied.\n\n以下是动作通信协议，不改变原有医学任务、工具权限或取证策略。\n\n在允许选择工具或完成答案的决策阶段，每次回复必须是单个合法 JSON 对象。\n不要在 JSON 前后输出解释、计划、Markdown、代码围栏或其他文字。\n不要在同一次回复里输出多个 JSON 对象。\n\n需要工具时，使用当前运行器要求的 calls 结构。例如：\n{\"calls\":[{\"tool\":\"chest_xray_expert\",\"args\":{\"question\":\"Describe the location of the target finding, including any supported patient laterality.\"}}],\"reason\":\"Check the distinguishing location\"}\n这里的工具仅是结构示例，不是强制工具选择。工具名必须来自当前注册清单，参数必须符合该工具的 schema。\nreason 位于顶层；不要自行往单个 call 中添加 reason 等未许可字段。\n仅当当前协议允许多图 image_index 时，按原协议指定它；不要猜测图像或参数。\n\n决定完成本题时，使用原有最终答案结构：\n{\"answer\":\"原题选项标签或协议允许的原选项文本\",\"reason\":\"一条简短证据说明\"}\n\ncalls 和 answer 互斥。计划使用工具不等于已经获得工具观察。\n若收到格式修复指令，只纠正动作的结构；不要因为格式错误而自动转成最终答案。\n当前若是其他明确限定的阶段，继续使用该阶段原有 schema，不将该阶段改成答题阶段。\n"
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Question ID: chexbench_openi_0175\nQuestion: Which finding is in this chest X-ray?\nA. surgical instruments in the right abdomen\nB. surgical instruments in the left abdomen\nUse an original option letter or the complete original option text as answer."
+        },
+        {
+          "type": "text",
+          "text": "Original image 1: images/openi/images/CXR2568_IM-1070-2001.png"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": {
+              "cxr_request_image_base64_sha256": "01d538610760fcdf079b3c39b3fccc0f6f0c4e9e9df85c23d275074c06a90696",
+              "media_type": "image/png"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Retrieved prior-case memory for method guidance. Historical answers, findings, and side labels apply to their source cases. Verify the current image independently.\n[Context Note] Similar tasks have resolved laterality ambiguity by cross-checking orientation conventions against visual evidence before committing to a side-dependent answer. One approach that worked combined an orientation-verification step with targeted localization to confirm the finding's position."
+    },
+    {
+      "role": "user",
+      "content": "You may answer directly with the final answer/reason JSON, or request useful auxiliary evidence with {\"calls\":[{\"tool\":\"registered name\",\"args\":{}}],\"reason\":\"brief purpose\"}. Each call applies only to the bound original. No fixed total tool-call count limit. No fixed voting and no mandatory tool use. Tool catalog: {\"chest_xray_expert\": \"args={\\\"question\\\":\\\"focused image question\\\"}. CheXagent CXR visual QA.\", \"llava_med_qa\": \"args={\\\"question\\\":\\\"focused image question\\\"}. LLaVA-Med visual QA.\", \"medgemma\": \"args={\\\"question\\\":\\\"focused image question\\\"}. Unverified single-image CXR interpretation.\", \"llava_rad\": \"args={\\\"question\\\":\\\"focused image question\\\"}. Unverified single-image CXR interpretation.\", \"medvlm_r1\": \"args={\\\"question\\\":\\\"focused image question\\\"}. Unverified single-image CXR interpretation.\", \"maira2_grounded_report\": \"args={}. Single verified frontal CXR only: MAIRA-2 grounded findings report with original-image coordinates. Lateral, non-CXR or unknown view returns not_applicable. Report and boxes are one fallible model output, not independent evidence; no history or extra images are supplied.\", \"xray_phrase_grounding\": \"args={\\\"phrase\\\":\\\"specific finding\\\"}. Verified frontal CXR phrase localization, original-image normalized coordinates. Fallible same-MAIRA evidence: box presence is not disease proof and no box does not exclude disease. Lateral/unknown/non-CXR is not_applicable. 300-token original limit with inherited EOS guard, no output repair.\", \"roi_crop\": \"args={\\\"box\\\":[x0,y0,x1,y1],\\\"zoom\\\":2}. Explicit original-image normalized coordinates, top-left origin, x right/y down; zoom1-4, output side<=4096. Returns untouched original, full marked context, enlarged crop to main model. Use original/image coordinates, not MAIRA center-crop coordinates. Interpolation adds no acquired detail; screen side is not patient side. Other model tools always process original image; ROI is not rebound as tool input.\", \"medret\": \"For a specific medical knowledge gap only. args={\\\"query\\\":\\\"focused clinical concept\\\",\\\"top_k\\\":3}. Never search for the benchmark question, case ID, or its answer options.\", \"reflect\": \"Mid-process critique for a concrete conflict or evidence gap. args={\\\"reasoning\\\":\\\"current hypothesis, conflict or gap, and evidence\\\"}.\", \"verify\": \"Use before finalizing when a concrete unresolved risk warrants another check. args={\\\"proposed_answer\\\":\\\"candidate answer\\\",\\\"risk\\\":\\\"concrete uncertainty or conflict\\\"}. This tool sees all original images and options and prior retrieved evidence for this case. Change the answer only when the audit identifies specific supporting evidence.\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "{\"calls\":[{\"tool\":\"chest_xray_expert\",\"args\":{\"question\":\"Are there any surgical instruments or foreign bodies visible in the abdomen? If so, specify their location (right vs left) based on standard lateral view orientation.\"}}],\"reason\":\"Verify presence and laterality of surgical instruments in the abdomen on this lateral chest X-ray.\"}"
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Bound tool observations (untrusted):\n[{\"status\": \"completed\", \"observation\": [{\"response\": \"No\", \"model\": \"StanfordAIMI/CheXagent-8b\", \"revision\": \"4934e91451945c8218c267aae9c34929a7677829\", \"backend_output_tokens\": 2}, {\"image_paths\": [\"/root/autodl-tmp/openi60_protocol_F_roi_fixed_20261121/runs/evaluation/data/images/openi/images/CXR2568_IM-1070-2001.png\"], \"analysis_status\": \"completed\"}], \"derived_images\": [], \"backend_compute_seconds\": 0.08103827945888042, \"cuda_peak_allocated_bytes_by_visible_device\": [17385391616], \"original_image\": \"/root/autodl-tmp/openi60_protocol_F_roi_fixed_20261121/runs/evaluation/data/images/openi/images/CXR2568_IM-1070-2001.png\", \"raw_result_file\": \"/root/autodl-tmp/openi60_protocol_F_roi_fixed_20261121/runs/evaluation/B0/services/tool_cache/711403659ec54b91d21c84b255bffb16679e355bdacf21f4f6f5332938a6514f/artifacts/raw.json\", \"clinical_correctness_verified\": false, \"actual_model_events\": [{\"kind\": \"generate\", \"model_class\": \"MistralForCausalLM\", \"module\": \"transformers.models.mistral.modeling_mistral\", \"status\": \"completed\", \"utc\": 1795250217.3481073, \"elapsed_s\": 0.037177626974880695}], \"cuda_visible_devices\": \"0\", \"adapter_revision\": \"cxr-vqa-existing-snapshot-binding-3\", \"elapsed_s\": 0.08575244713574648, \"backend\": \"chest_xray_expert\", \"identity\": {\"backend\": \"chest_xray_expert\", \"revision\": \"4934e91451945c8218c267aae9c34929a7677829\", \"image\": \"699442aa9199474a2d0a01c89a8cdf5e32d1a1cb6362a555060700a96b3ef014\", \"args\": {\"question\": \"Are there any surgical instruments or foreign bodies visible in the abdomen? If so, specify their location (right vs left) based on standard lateral view orientation.\"}}, \"utc\": \"2026-11-21T08:36:57.388283+00:00\", \"tool\": \"chest_xray_expert\", \"cache_hit\": false, \"cache_key\": \"711403659ec54b91d21c84b255bffb16679e355bdacf21f4f6f5332938a6514f\"}]"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "You may answer directly with the final answer/reason JSON, or request useful auxiliary evidence with {\"calls\":[{\"tool\":\"registered name\",\"args\":{}}],\"reason\":\"brief purpose\"}. Each call applies only to the bound original. No fixed total tool-call count limit. No fixed voting and no mandatory tool use. Tool catalog: {\"chest_xray_expert\": \"args={\\\"question\\\":\\\"focused image question\\\"}. CheXagent CXR visual QA.\", \"llava_med_qa\": \"args={\\\"question\\\":\\\"focused image question\\\"}. LLaVA-Med visual QA.\", \"medgemma\": \"args={\\\"question\\\":\\\"focused image question\\\"}. Unverified single-image CXR interpretation.\", \"llava_rad\": \"args={\\\"question\\\":\\\"focused image question\\\"}. Unverified single-image CXR interpretation.\", \"medvlm_r1\": \"args={\\\"question\\\":\\\"focused image question\\\"}. Unverified single-image CXR interpretation.\", \"maira2_grounded_report\": \"args={}. Single verified frontal CXR only: MAIRA-2 grounded findings report with original-image coordinates. Lateral, non-CXR or unknown view returns not_applicable. Report and boxes are one fallible model output, not independent evidence; no history or extra images are supplied.\", \"xray_phrase_grounding\": \"args={\\\"phrase\\\":\\\"specific finding\\\"}. Verified frontal CXR phrase localization, original-image normalized coordinates. Fallible same-MAIRA evidence: box presence is not disease proof and no box does not exclude disease. Lateral/unknown/non-CXR is not_applicable. 300-token original limit with inherited EOS guard, no output repair.\", \"roi_crop\": \"args={\\\"box\\\":[x0,y0,x1,y1],\\\"zoom\\\":2}. Explicit original-image normalized coordinates, top-left origin, x right/y down; zoom1-4, output side<=4096. Returns untouched original, full marked context, enlarged crop to main model. Use original/image coordinates, not MAIRA center-crop coordinates. Interpolation adds no acquired detail; screen side is not patient side. Other model tools always process original image; ROI is not rebound as tool input.\", \"medret\": \"For a specific medical knowledge gap only. args={\\\"query\\\":\\\"focused clinical concept\\\",\\\"top_k\\\":3}. Never search for the benchmark question, case ID, or its answer options.\", \"reflect\": \"Mid-process critique for a concrete conflict or evidence gap. args={\\\"reasoning\\\":\\\"current hypothesis, conflict or gap, and evidence\\\"}.\", \"verify\": \"Use before finalizing when a concrete unresolved risk warrants another check. args={\\\"proposed_answer\\\":\\\"candidate answer\\\",\\\"risk\\\":\\\"concrete uncertainty or conflict\\\"}. This tool sees all original images and options and prior retrieved evidence for this case. Change the answer only when the audit identifies specific supporting evidence.\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "{\"calls\":[{\"tool\":\"llava_med_qa\",\"args\":{\"question\":\"Are there surgical instruments or foreign bodies visible in the abdomen on this lateral chest X-ray? If yes, specify right vs left based on standard lateral orientation.\"}}],\"reason\":\"Cross-check with a second VLM to confirm presence and laterality of abdominal surgical instruments.\"}"
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Bound tool observations (untrusted):\n[{\"status\": \"completed\", \"observation\": [\"No, there are no surgical instruments or foreign bodies visible in the abdomen on this lateral chest X-ray.\", {\"question\": \"Are there surgical instruments or foreign bodies visible in the abdomen on this lateral chest X-ray? If yes, specify right vs left based on standard lateral orientation.\", \"image_path\": \"/root/autodl-tmp/openi60_protocol_F_roi_fixed_20261121/runs/evaluation/data/images/openi/images/CXR2568_IM-1070-2001.png\", \"analysis_status\": \"completed\"}], \"derived_images\": [], \"backend_compute_seconds\": 2.504243079572916, \"cuda_peak_allocated_bytes_by_visible_device\": [8807500288], \"original_image\": \"/root/autodl-tmp/openi60_protocol_F_roi_fixed_20261121/runs/evaluation/data/images/openi/images/CXR2568_IM-1070-2001.png\", \"raw_result_file\": \"/root/autodl-tmp/openi60_protocol_F_roi_fixed_20261121/runs/evaluation/B0/services/tool_cache/20bf79ea26d9a154a012a013bd7f1108e6296ef59d21ec0c693640b7361d8d80/artifacts/raw.json\", \"clinical_correctness_verified\": false, \"actual_model_events\": [{\"kind\": \"generate\", \"model_class\": \"LlavaMistralForCausalLM\", \"module\": \"medrax.llava.model.language_model.llava_mistral\", \"status\": \"completed\", \"utc\": 1795250219.3375614, \"elapsed_s\": 2.4804273787885904}], \"cuda_visible_devices\": \"0\", \"adapter_revision\": \"cxr-vqa-existing-snapshot-binding-3\", \"elapsed_s\": 2.512945885770023, \"backend\": \"llava_med_qa\", \"identity\": {\"backend\": \"llava_med_qa\", \"revision\": \"MedRAX-dae30e2f136ef0b2a40885a4c335386e9ffad052\", \"image\": \"699442aa9199474a2d0a01c89a8cdf5e32d1a1cb6362a555060700a96b3ef014\", \"args\": {\"question\": \"Are there surgical instruments or foreign bodies visible in the abdomen on this lateral chest X-ray? If yes, specify right vs left based on standard lateral orientation.\"}}, \"utc\": \"2026-11-21T08:37:01.824155+00:00\", \"tool\": \"llava_med_qa\", \"cache_hit\": false, \"cache_key\": \"20bf79ea26d9a154a012a013bd7f1108e6296ef59d21ec0c693640b7361d8d80\"}]"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "You may answer directly with the final answer/reason JSON, or request useful auxiliary evidence with {\"calls\":[{\"tool\":\"registered name\",\"args\":{}}],\"reason\":\"brief purpose\"}. Each call applies only to the bound original. No fixed total tool-call count limit. No fixed voting and no mandatory tool use. Tool catalog: {\"chest_xray_expert\": \"args={\\\"question\\\":\\\"focused image question\\\"}. CheXagent CXR visual QA.\", \"llava_med_qa\": \"args={\\\"question\\\":\\\"focused image question\\\"}. LLaVA-Med visual QA.\", \"medgemma\": \"args={\\\"question\\\":\\\"focused image question\\\"}. Unverified single-image CXR interpretation.\", \"llava_rad\": \"args={\\\"question\\\":\\\"focused image question\\\"}. Unverified single-image CXR interpretation.\", \"medvlm_r1\": \"args={\\\"question\\\":\\\"focused image question\\\"}. Unverified single-image CXR interpretation.\", \"maira2_grounded_report\": \"args={}. Single verified frontal CXR only: MAIRA-2 grounded findings report with original-image coordinates. Lateral, non-CXR or unknown view returns not_applicable. Report and boxes are one fallible model output, not independent evidence; no history or extra images are supplied.\", \"xray_phrase_grounding\": \"args={\\\"phrase\\\":\\\"specific finding\\\"}. Verified frontal CXR phrase localization, original-image normalized coordinates. Fallible same-MAIRA evidence: box presence is not disease proof and no box does not exclude disease. Lateral/unknown/non-CXR is not_applicable. 300-token original limit with inherited EOS guard, no output repair.\", \"roi_crop\": \"args={\\\"box\\\":[x0,y0,x1,y1],\\\"zoom\\\":2}. Explicit original-image normalized coordinates, top-left origin, x right/y down; zoom1-4, output side<=4096. Returns untouched original, full marked context, enlarged crop to main model. Use original/image coordinates, not MAIRA center-crop coordinates. Interpolation adds no acquired detail; screen side is not patient side. Other model tools always process original image; ROI is not rebound as tool input.\", \"medret\": \"For a specific medical knowledge gap only. args={\\\"query\\\":\\\"focused clinical concept\\\",\\\"top_k\\\":3}. Never search for the benchmark question, case ID, or its answer options.\", \"reflect\": \"Mid-process critique for a concrete conflict or evidence gap. args={\\\"reasoning\\\":\\\"current hypothesis, conflict or gap, and evidence\\\"}.\", \"verify\": \"Use before finalizing when a concrete unresolved risk warrants another check. args={\\\"proposed_answer\\\":\\\"candidate answer\\\",\\\"risk\\\":\\\"concrete uncertainty or conflict\\\"}. This tool sees all original images and options and prior retrieved evidence for this case. Change the answer only when the audit identifies specific supporting evidence.\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "{\"calls\":[{\"tool\":\"roi_crop\",\"args\":{\"box\":[0.0,0.6,1.0,1.0],\"zoom\":2}}],\"reason\":\"Zoom into the lower abdomen region of the lateral CXR to visually inspect for surgical instruments or foreign bodies that may have been missed by VLMs.\"}"
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Bound tool observations (untrusted):\n[{\"status\": \"completed\", \"observation\": {\"original_size\": [512, 656], \"requested_box_normalized\": [0.0, 0.6, 1.0, 1.0], \"original_pixel_box\": [0, 393, 512, 656], \"actual_box_normalized\": [0.0, 0.5990853658536586, 1.0, 1.0], \"zoom\": 2, \"crop_size\": [1024, 526], \"derived_images\": [\"/root/autodl-tmp/openi60_protocol_F_roi_fixed_20261121/runs/evaluation/B0/services/tool_cache/4fe4f4e04eb92e48e717ca16b2240b6963e9e9bee35667c9a738ec7fb9867811/artifacts/original.png\", \"/root/autodl-tmp/openi60_protocol_F_roi_fixed_20261121/runs/evaluation/B0/services/tool_cache/4fe4f4e04eb92e48e717ca16b2240b6963e9e9bee35667c9a738ec7fb9867811/artifacts/roi_context.png\", \"/root/autodl-tmp/openi60_protocol_F_roi_fixed_20261121/runs/evaluation/B0/services/tool_cache/4fe4f4e04eb92e48e717ca16b2240b6963e9e9bee35667c9a738ec7fb9867811/artifacts/roi_zoom.png\"], \"coordinates\": \"original image, top-left origin; x right, y down; patient side not inferred\", \"limitations\": \"Interpolation adds no acquired detail. Do not infer patient laterality from screen position. Review original plus crop; crop can omit findings.\"}, \"derived_images\": [\"/root/autodl-tmp/openi60_protocol_F_roi_fixed_20261121/runs/evaluation/B0/services/tool_cache/4fe4f4e04eb92e48e717ca16b2240b6963e9e9bee35667c9a738ec7fb9867811/artifacts/original.png\", \"/root/autodl-tmp/openi60_protocol_F_roi_fixed_20261121/runs/evaluation/B0/services/tool_cache/4fe4f4e04eb92e48e717ca16b2240b6963e9e9bee35667c9a738ec7fb9867811/artifacts/roi_context.png\", \"/root/autodl-tmp/openi60_protocol_F_roi_fixed_20261121/runs/evaluation/B0/services/tool_cache/4fe4f4e04eb92e48e717ca16b2240b6963e9e9bee35667c9a738ec7fb9867811/artifacts/roi_zoom.png\"], \"backend_compute_seconds\": 0.2619312768802047, \"cuda_peak_allocated_bytes_by_visible_device\": [], \"original_image\": \"/root/autodl-tmp/openi60_protocol_F_roi_fixed_20261121/runs/evaluation/data/images/openi/images/CXR2568_IM-1070-2001.png\", \"raw_result_file\": \"/root/autodl-tmp/openi60_protocol_F_roi_fixed_20261121/runs/evaluation/B0/services/tool_cache/4fe4f4e04eb92e48e717ca16b2240b6963e9e9bee35667c9a738ec7fb9867811/artifacts/raw.json\", \"clinical_correctness_verified\": false, \"actual_model_events\": [], \"cuda_visible_devices\": \"0\", \"adapter_revision\": \"cxr-vqa-existing-snapshot-binding-3\", \"elapsed_s\": 0.3257822021842003, \"backend\": \"roi_crop\", \"identity\": {\"backend\": \"roi_crop\", \"revision\": \"r54-roi-v1\", \"image\": \"699442aa9199474a2d0a01c89a8cdf5e32d1a1cb6362a555060700a96b3ef014\", \"args\": {\"box\": [0.0, 0.6, 1.0, 1.0], \"zoom\": 2}}, \"utc\": \"2026-11-21T08:37:07.384237+00:00\", \"tool\": \"roi_crop\", \"cache_hit\": false, \"cache_key\": \"4fe4f4e04eb92e48e717ca16b2240b6963e9e9bee35667c9a738ec7fb9867811\"}]"
+        },
+        {
+          "type": "text",
+          "text": "Derived evidence from roi_crop; retain original coordinate binding."
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": {
+              "cxr_request_image_base64_sha256": "0357a094e3907d76b660f51924edec673f79777fa9e41a5d52e93290af3bfd9e",
+              "media_type": "image/png"
+            }
+          }
+        },
+        {
+          "type": "text",
+          "text": "Derived evidence from roi_crop; retain original coordinate binding."
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": {
+              "cxr_request_image_base64_sha256": "f2abffd7b46523979d765f202e8cdfca6f46d15d3d482d6eaa23a21e384de0e1",
+              "media_type": "image/png"
+            }
+          }
+        },
+        {
+          "type": "text",
+          "text": "Derived evidence from roi_crop; retain original coordinate binding."
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": {
+              "cxr_request_image_base64_sha256": "f385f6b03f786a039b20e722c2b2d60cfb396b6c2cef095c05ad094b98b75381",
+              "media_type": "image/png"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "You may answer directly with the final answer/reason JSON, or request useful auxiliary evidence with {\"calls\":[{\"tool\":\"registered name\",\"args\":{}}],\"reason\":\"brief purpose\"}. Each call applies only to the bound original. No fixed total tool-call count limit. No fixed voting and no mandatory tool use. Tool catalog: {\"chest_xray_expert\": \"args={\\\"question\\\":\\\"focused image question\\\"}. CheXagent CXR visual QA.\", \"llava_med_qa\": \"args={\\\"question\\\":\\\"focused image question\\\"}. LLaVA-Med visual QA.\", \"medgemma\": \"args={\\\"question\\\":\\\"focused image question\\\"}. Unverified single-image CXR interpretation.\", \"llava_rad\": \"args={\\\"question\\\":\\\"focused image question\\\"}. Unverified single-image CXR interpretation.\", \"medvlm_r1\": \"args={\\\"question\\\":\\\"focused image question\\\"}. Unverified single-image CXR interpretation.\", \"maira2_grounded_report\": \"args={}. Single verified frontal CXR only: MAIRA-2 grounded findings report with original-image coordinates. Lateral, non-CXR or unknown view returns not_applicable. Report and boxes are one fallible model output, not independent evidence; no history or extra images are supplied.\", \"xray_phrase_grounding\": \"args={\\\"phrase\\\":\\\"specific finding\\\"}. Verified frontal CXR phrase localization, original-image normalized coordinates. Fallible same-MAIRA evidence: box presence is not disease proof and no box does not exclude disease. Lateral/unknown/non-CXR is not_applicable. 300-token original limit with inherited EOS guard, no output repair.\", \"roi_crop\": \"args={\\\"box\\\":[x0,y0,x1,y1],\\\"zoom\\\":2}. Explicit original-image normalized coordinates, top-left origin, x right/y down; zoom1-4, output side<=4096. Returns untouched original, full marked context, enlarged crop to main model. Use original/image coordinates, not MAIRA center-crop coordinates. Interpolation adds no acquired detail; screen side is not patient side. Other model tools always process original image; ROI is not rebound as tool input.\", \"medret\": \"For a specific medical knowledge gap only. args={\\\"query\\\":\\\"focused clinical concept\\\",\\\"top_k\\\":3}. Never search for the benchmark question, case ID, or its answer options.\", \"reflect\": \"Mid-process critique for a concrete conflict or evidence gap. args={\\\"reasoning\\\":\\\"current hypothesis, conflict or gap, and evidence\\\"}.\", \"verify\": \"Use before finalizing when a concrete unresolved risk warrants another check. args={\\\"proposed_answer\\\":\\\"candidate answer\\\",\\\"risk\\\":\\\"concrete uncertainty or conflict\\\"}. This tool sees all original images and options and prior retrieved evidence for this case. Change the answer only when the audit identifies specific supporting evidence.\"}"
+    }
+  ],
+  "temperature": 0.2,
+  "top_p": 0.95,
+  "max_tokens": 2048,
+  "extra_body": {
+    "enable_thinking": false
+  },
+  "stream": false
+}
