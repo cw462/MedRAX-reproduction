@@ -1,0 +1,187 @@
+--- a/native_worker.py
++++ b/native_worker.py
+@@ -7,6 +7,7 @@
+ from __future__ import annotations
+ import argparse
+ import importlib
++import importlib.util
+ import inspect
+ import json
+ import os
+@@ -31,6 +32,26 @@
+     require(counts.ARMS["M5"] == "R55-M5-11tools-CheXagent8B", "Native arm changed")
+     require(counts.COUNTS["chexbench"] == 618, "Original dataset count unexpectedly modified")
+     return runner, counts, services
++
++def install_resident_tools(cfg, services):
++    route = cfg.get("autodl_residents")
++    if route is None:
++        return
++    modules = {}
++    for name, filename in (("r55_resident_tools", route["model_module"]),
++                           ("openi60_autodl_resident_pool", route["dispatch_module"])):
++        path = Path(filename).resolve()
++        spec = importlib.util.spec_from_file_location(name, path)
++        module = importlib.util.module_from_spec(spec)
++        sys.modules[name] = module
++        spec.loader.exec_module(module)
++        modules[name] = module
++    require(list(inspect.signature(services.Tools.observe).parameters) ==
++            ["self", "name", "spec", "args", "image", "identity", "folder", "saved"],
++            "Unsupported native tool observation interface")
++    services.Tools = modules["openi60_autodl_resident_pool"].tools_factory(
++        services.Tools, {"resident_control": route["resident_control"],
++                         "run_root": cfg["work_dir"]})
+ 
+ def seed_semantics(value):
+     """Exclude runtime IDs and clocks, preserve initial rule payloads and statistics."""
+@@ -86,6 +107,7 @@
+     frozen = verify_frozen(work)
+     cfg = frozen["config"]
+     runner, native, services = load_native(cfg)
++    install_resident_tools(cfg, services)
+     qids = set(frozen["cohort"]["selected_ids"])
+     suffix = (work / a.arm / "solver_suffix.txt").read_text(encoding="utf-8").strip()
+     replacement = make_services(services.Services, suffix, a.arm, qids)
+--- a/openi60/setup.py
++++ b/openi60/setup.py
+@@ -112,6 +112,9 @@
+     route = root / "jobs" / "memory-writer-token-plan.json"
+     if route.is_file():
+         files.add(route)
++    resident = cfg.get("autodl_residents")
++    if resident is not None:
++        files.update(Path(resident[key]) for key in ("model_module", "dispatch_module"))
+     return {str(p.resolve()): file_hash(p) for p in sorted(files)}
+ 
+ def prepare(cfg: dict) -> dict:
+--- a/openi60/parallel.py
++++ b/openi60/parallel.py
+@@ -0,0 +1,68 @@
++"""Run the two independent memory streams concurrently on shared resident tools."""
++from __future__ import annotations
++
++import argparse
++from concurrent.futures import ThreadPoolExecutor
++import json
++import os
++from pathlib import Path
++import sys
++
++from openi60.common import ExperimentError, require
++from openi60.setup import verify_frozen
++from openi60_cli import child, lock_work, preflight, run
++
++
++def run_parallel(work: Path, execute: bool):
++    require(execute, "Add --execute to start the configured B0/L1 experiment")
++    frozen = verify_frozen(work)
++    cfg = frozen['config']
++    preflight(work)
++    main_key = os.environ.get(cfg['main_key_env'], '').strip()
++    memory_key = os.environ.get(cfg['memory_key_env'], '').strip()
++    require(main_key and memory_key, "The configured model credentials are required")
++    require('\n' not in main_key and '\n' not in memory_key, "Credentials must be single lines")
++    credentials = (main_key + '\n' + memory_key + '\n').encode()
++
++    with lock_work(work):
++        attempts = {}
++        for arm in ('B0', 'L1'):
++            out = work / arm
++            require(not any((out / name).exists() for name in
++                            ('storage', 'external_memory', 'services', 'predictions', 'generation.exitcode')),
++                    f"{arm} already has execution state; inspect it and use the native resume workflow")
++            attempt = work / 'jobs' / arm / 'attempt-001'
++            attempt.mkdir(parents=True)
++            attempts[arm] = attempt
++
++        def generate(arm):
++            print(f"Running {arm}: {cfg['n']} ordered episodes; logs: {attempts[arm]}", flush=True)
++            code = child('generate', work, arm, cfg, attempts[arm], credentials)
++            (work / arm / 'generation.exitcode').write_text(str(code) + '\n')
++            return code
++
++        with ThreadPoolExecutor(max_workers=2) as pool:
++            futures = {arm: pool.submit(generate, arm) for arm in ('B0', 'L1')}
++            codes = {arm: future.result() for arm, future in futures.items()}
++        require(all(code == 0 for code in codes.values()),
++                f"Generation stopped: {codes}. Inspect the arm logs before any explicit resume")
++
++    return run(work, True, False, 'all')
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--work', type=Path, required=True)
++    parser.add_argument('--execute', action='store_true')
++    args = parser.parse_args()
++    try:
++        value = run_parallel(args.work.resolve(), args.execute)
++    except (ExperimentError, FileNotFoundError, KeyError, ValueError) as error:
++        print(f'ERROR: {error}', file=sys.stderr)
++        return 2
++    print(json.dumps(value, ensure_ascii=False, indent=2))
++    return 0
++
++
++if __name__ == '__main__':
++    raise SystemExit(main())
+--- a/tests/test_parallel.py
++++ b/tests/test_parallel.py
+@@ -0,0 +1,56 @@
++import os
++from pathlib import Path
++import sys
++import tempfile
++import threading
++import unittest
++from unittest.mock import patch
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
++from openi60.common import ExperimentError
++from openi60.parallel import run_parallel
++
++
++class ParallelArmsTests(unittest.TestCase):
++    def exercise(self, failure=False):
++        with tempfile.TemporaryDirectory() as temporary:
++            work = Path(temporary)
++            for arm in ('B0', 'L1'):
++                (work / arm).mkdir()
++            barrier = threading.Barrier(2, timeout=5)
++            finished = set()
++
++            def generate(phase, directory, arm, cfg, attempt, credentials):
++                self.assertEqual(phase, 'generate')
++                self.assertEqual(directory, work)
++                self.assertEqual(attempt, work / 'jobs' / arm / 'attempt-001')
++                barrier.wait()
++                finished.add(arm)
++                return 1 if failure and arm == 'B0' else 0
++
++            def score(directory, execute, resume, arm):
++                self.assertEqual(finished, {'B0', 'L1'})
++                self.assertEqual((execute, resume, arm), (True, False, 'all'))
++                return {'paired': 'complete'}
++
++            cfg = {'n': 60, 'main_key_env': 'OPENI60_TEST_MAIN', 'memory_key_env': 'OPENI60_TEST_MEMORY'}
++            with patch('openi60.parallel.verify_frozen', return_value={'config': cfg}), \
++                 patch('openi60.parallel.preflight'), \
++                 patch('openi60.parallel.child', side_effect=generate), \
++                 patch('openi60.parallel.run', side_effect=score) as scorer, \
++                 patch.dict(os.environ, {'OPENI60_TEST_MAIN': 'offline', 'OPENI60_TEST_MEMORY': 'offline'}):
++                if failure:
++                    with self.assertRaises(ExperimentError):
++                        run_parallel(work, True)
++                    scorer.assert_not_called()
++                else:
++                    self.assertEqual(run_parallel(work, True), {'paired': 'complete'})
++                    scorer.assert_called_once()
++            self.assertEqual((work / 'B0/generation.exitcode').read_text().strip(), '1' if failure else '0')
++            self.assertEqual((work / 'L1/generation.exitcode').read_text().strip(), '0')
++
++    def test_arms_overlap_and_scoring_waits_for_both(self):
++        self.exercise()
++
++    def test_failed_arm_preserves_exit_and_prevents_comparison(self):
++        self.exercise(failure=True)
