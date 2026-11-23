@@ -111,11 +111,19 @@
     （OpenI 755 / SLAKE 159 / VQA-RAD 58，972 个文件，**勿删**）
   - GitHub 推送：从实例用 deploy key 推**新分支**可直接成功（10 s）；
     **反向拉取会断流**（`fetch-pack: unexpected disconnect`），别在实例上 clone
+  - 2026-11-23 19:23 起实例 SSH 拒绝连接（`116.172.94.204:32922`），疑为关机/重建；
+    权重已落盘在 `/root/autodl-tmp/maira2`，实例恢复后无需重下
 
 ### 4.3 本机 Windows（当前这台）
 - 工作区 `D:\Documents\deepseek-harness\default-workspace\radiology_rag`
 - **无 H: 盘、无 `H:/RAG_KB`、无 7897 代理**（旧机的语料/索引/图片全部不在本机）
 - 远程操作统一走 `tools/rsh.py`（凭据在 `.creds.json`），不要用内联 `ssh`（PowerShell 会吃掉 `$(...)`）
+- **本机可直连 GitHub SSH**：`~/.ssh/medrax_deploy_key`，`github.com:22` 与 `ssh.github.com:443` 均通。
+  之前 `git ls-remote https://github.com/...` 报 "Failed to connect via 127.0.0.1"
+  是因为 git 配了 HTTP 代理而本机没有代理进程，**SSH 路径不受影响**。
+  推新分支直接在本机 `git push` 即可（25 MB / 26 s），不必经过实例。
+- 由于实例可能随时不可用，**推送不依赖实例**：`tools/build_upload.py` 脱敏出
+  `_gh_upload/`，在其中 `git init` 后直接推新分支
 
 
 ---
