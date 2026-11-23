@@ -1,0 +1,110 @@
+import base64,json,mimetypes,re
+from pathlib import Path
+
+ANSWER = ('Answer the current question using the original image. Return exactly one JSON object '
+          'with two string fields: {"answer":"short direct answer","reason":"one short sentence"}. '
+          'Do not add options or change the question. Do not put the answer only in reason. '
+          'Respect image labels. Tool observations may be incorrect; verify against original pixels. '
+          'Classifier scores are not disease probabilities or severity measurements. '
+          'Single-image reports cannot establish interval change. No prior patient history is supplied.')
+
+AGENT_SYSTEM = ('You are an image-grounded medical tool agent. Intermediate planning, evidence validation '
+                'and expert stages must use the stage-specific schema requested in the current instruction. '
+                'You may select zero, one or two registered tools, with early stopping when appropriate. '
+                'Only at the FINAL ANSWERING stage, output exactly {"answer":"short direct answer",'
+                '"reason":"one short sentence"}. Original image labels and coordinates must be preserved. '
+                'Tool claims are unverified: inspect original pixels, do not treat classifier scores as '
+                'severity, and do not infer temporal change from a single-image report. '
+                'No cross-case skills, sibling question context or additional patient history is available.')
+
+ACTION = ('You may answer directly with the final answer/reason JSON, or request useful auxiliary evidence '
+          'with {"calls":[{"tool":"registered name","args":{}}],"reason":"brief purpose"}. '
+          'Each call applies only to the bound original. At most two selectable tool calls total. '
+          'No fixed voting and no mandatory tool use. Tool catalog: ')
+
+MANUAL_EVIDENCE_RULES = ('do not treat classifier scores as severity, and do not infer temporal change '
+                         'from a single-image report.')
+
+M_MINUS_R_SYSTEM = AGENT_SYSTEM.replace(
+    'Tool claims are unverified: inspect original pixels, ' + MANUAL_EVIDENCE_RULES,
+    'Tool claims are unverified: inspect original pixels.')
+
+M_MINUS_R_TOOL_DESCRIPTIONS = {
+    'chest_xray_classifier': ('args={}. Single original CXR finding scores, never severity or localization.',
+                              'args={}. Single original CXR finding scores.'),
+    'chest_xray_report_generator': ('args={}. Single original CXR report; temporal claims unsupported.',
+                                    'args={}. Single original CXR report.'),
+}
+
+def agent_system(arm):
+    if arm == 'D-H':
+        return ANSWER.replace('No prior patient history is supplied.', 'Use only the independently supplied history.')
+    if arm == 'M-H':
+        return AGENT_SYSTEM.replace('No cross-case skills, sibling question context or additional patient history is available.',
+                                    'Use only the independently supplied history. No cross-case skills or sibling questions are available.')
+    return ANSWER if arm == 'D' else M_MINUS_R_SYSTEM if arm == 'M-R' else AGENT_SYSTEM
+
+def evidence_catalog(runtime, arm):
+    catalog = {k: runtime['tools'][k]['description'] for k in runtime['arms'][arm]['tools']}
+    if arm == 'M-R':
+        for name, (before, after) in M_MINUS_R_TOOL_DESCRIPTIONS.items():
+            if name in catalog:
+                if catalog[name] != before:
+                    raise ValueError('unexpected_manual_rule_catalog:' + name)
+                catalog[name] = after
+    return catalog
+
+def content(row, data_root):
+    question = 'Question ID: ' + row['question_id'] + '\nQuestion: ' + row['question']
+    if 'options' in row:
+        question += '\n' + '\n'.join(f'{key}. {value}' for key, value in row['options'].items())
+        question += '\nUse an original option letter or the complete original option text as answer.'
+    result = [{'type': 'text', 'text': question}]
+    for i, relative in enumerate(row['images'], 1):
+        path = Path(data_root[relative]).resolve()
+        result.append({'type': 'text', 'text': 'Original image ' + str(i) + ': ' + relative})
+        mime = mimetypes.guess_type(path.name)[0] or 'image/jpeg'
+        result.append({'type': 'image_url', 'image_url': {'url': 'data:' + mime + ';base64,' + base64.b64encode(path.read_bytes()).decode()}})
+    return result
+
+def append_observations(messages, observations, out, arm=None):
+    presented = observations
+    if arm == 'M-R':
+        presented = []
+        for item in observations:
+            value = item.get('observation')
+            if item['tool'] in M_MINUS_R_TOOL_DESCRIPTIONS and isinstance(value, dict):
+                value = {k: v for k, v in value.items() if k != 'limitations'}
+                item = dict(item, observation=value)
+            presented.append(item)
+    parts=[{'type':'text','text':'Bound tool observations (untrusted):\n'+json.dumps(presented,ensure_ascii=False)}]
+    for observation in observations:
+        for name in observation.get('derived_images',[]):
+            path=Path(name).resolve()
+            if not path.is_relative_to((out/'tool_cache').resolve()):raise ValueError('tool_image_outside_artifacts')
+            mime=mimetypes.guess_type(path.name)[0] or 'image/png'
+            parts.extend([{'type':'text','text':'Derived evidence from '+observation['tool']+'; retain original coordinate binding.'},
+                {'type':'image_url','image_url':{'url':'data:'+mime+';base64,'+base64.b64encode(path.read_bytes()).decode()}}])
+    messages.append({'role':'user','content':parts})
+
+def validate_actions(value, runtime, arm, remaining, images=1):
+    calls = value.get('calls')
+    if not isinstance(calls, list) or len(calls) > remaining: raise ValueError('tool_bound')
+    for call in calls:
+        keys = {'tool', 'args', 'image_index'} if images > 1 else {'tool', 'args'}
+        if set(call) != keys or call['tool'] not in runtime['arms'][arm]['tools'] or not isinstance(call['args'], dict):
+            raise ValueError('unregistered_tool_or_arguments')
+        index = call.get('image_index', 1)
+        if type(index) is not int or not 1 <= index <= images:
+            raise ValueError('invalid_bound_image_index')
+    return calls
+
+def resolve_action(call, observations):
+    if call['tool']=='roi_crop' and call['args'].get('box_from')=='region_parse':
+        if 'box' in call['args']:raise ValueError('ambiguous_crop_coordinates')
+        prior=next((x for x in reversed(observations) if x.get('tool')=='region_parse'
+                    and x.get('image_index',1)==call.get('image_index',1)),None)
+        box=((prior or {}).get('observation') or {}).get('combined_box_normalized')
+        if box is None:raise ValueError('prior_region_box_unavailable')
+        return dict(call,args={'box':box})
+    return call

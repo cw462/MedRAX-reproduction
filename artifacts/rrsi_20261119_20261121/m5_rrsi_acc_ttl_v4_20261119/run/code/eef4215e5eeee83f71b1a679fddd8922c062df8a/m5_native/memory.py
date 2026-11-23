@@ -1,0 +1,201 @@
+"""CerebraFusionMemory with per-state persistence and protected model services."""
+from dataclasses import asdict
+from datetime import datetime, timezone
+from enum import Enum
+import json
+from pathlib import Path
+import pickle
+
+import numpy as np
+
+from EvolveLab.config import get_memory_config
+from EvolveLab.memory_types import MemoryType
+from EvolveLab.providers import cerebra_fusion_memory_provider as provider_module
+
+PROVIDERS = {'M5': 'cerebra_fusion_memory'}
+MEMORY_CHARS = 6000
+
+def utc():
+    return datetime.now(timezone.utc).isoformat()
+
+def plain(value):
+    if isinstance(value, Enum):
+        return value.value
+    if type(value).__module__.startswith('numpy'):
+        return value.tolist()
+    raise TypeError(type(value).__name__)
+
+def text(value):
+    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=plain)
+
+def question(row):
+    options = row.get('options')
+    return row['question'] + '\nOptions: ' + text(options) if options else row['question']
+
+def reference_text(row, answer):
+    options = row.get('options')
+    return answer + '. ' + options[answer] if options else answer
+
+def record(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('x', encoding='utf-8') as file:
+        json.dump(value, file, ensure_ascii=False, default=plain, allow_nan=False)
+        file.write('\n')
+
+def save(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, ensure_ascii=False, default=plain, allow_nan=False) + '\n', encoding='utf-8')
+
+class GatewayModel:
+    def __init__(self, services, out, calls):
+        self.services = services
+        self.out = out
+        self.calls = calls
+        self.failure = None
+        self.scope = None
+    def __call__(self, messages):
+        if self.failure is not None:
+            raise RuntimeError('unresolved_memory_model_request')
+        if isinstance(messages, str):
+            messages = [{'role': 'user', 'content': messages}]
+        messages = json.loads(json.dumps(messages, default=plain))
+        phase, qid = self.scope
+        self.calls += 1
+        folder = self.out / qid / phase / str(self.calls)
+        record(folder / 'request.json', {'messages': messages})
+        try:
+            content = self.services.memory(messages)
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError('memory_model_returned_unusable_text')
+        except Exception as error:
+            self.failure = type(error).__name__
+            record(folder / 'result.json', {'error': self.failure})
+            raise
+        record(folder / 'result.json', {'content': content, 'error': None})
+        return content
+
+class GatewayEmbedding:
+    def __init__(self, services, cache):
+        self.services, self.cache = services, cache
+    def encode(self, value, **kwargs):
+        single = isinstance(value, str)
+        values = [value] if single else value
+        vectors = []
+        for item in values:
+            if item not in self.cache:
+                self.cache[item] = self.services.embed(item)
+            vectors.append(self.cache[item])
+        result = np.asarray(vectors, dtype=np.float32)
+        return result[0] if single else result
+
+class EmptyStartProvider(provider_module.CerebraFusionMemoryProvider):
+    def _seed_core_patterns(self):
+        return None
+
+    def _finalize_indices(self):
+        corpus = [node.content for node in self.nodes.values()]
+        node_ids = list(self.nodes)
+        cached = getattr(self, '_persisted_index', None)
+        if cached is not None and cached['corpus'] == corpus and cached['node_ids'] == node_ids:
+            self.text_index = cached['index']
+            return
+        super()._finalize_indices()
+        self._persisted_index = {'corpus': corpus, 'node_ids': node_ids, 'index': self.text_index}
+
+class Memory:
+    def __init__(self, state_dir, services):
+        self.state_dir = Path(state_dir)
+        self.out = self.state_dir / 'external_memory'
+        self.arm = 'M5'
+        runtime_file = self.state_dir / 'memory_runtime.json'
+        runtime = json.loads(runtime_file.read_text()) if runtime_file.is_file() else {}
+        self.model = GatewayModel(services, self.out / 'model_calls', runtime.get('model_calls', 0))
+        cache_file = self.state_dir / 'embedding_cache.json'
+        self.embedding_cache = json.loads(cache_file.read_text()) if cache_file.is_file() else {}
+        embedding = GatewayEmbedding(services, self.embedding_cache)
+        provider_module._load_embedding_model = lambda *args, **kwargs: embedding
+        config = get_memory_config(MemoryType.CEREBRA_FUSION_MEMORY)
+        config.update(model=self.model, enable_tool_memory=False,
+                      storage_dir=str(self.state_dir / 'cerebra_fusion_memory'),
+                      db_path=str(self.state_dir / 'cerebra_fusion_memory/cf_database.json'),
+                      model_cache_dir=str(self.state_dir / 'model_cache'),
+                      tools_storage_path=str(self.state_dir / 'cerebra_fusion_memory/tools_storage.py'))
+        index_file = self.state_dir / 'text_index.pkl'
+        self.provider = EmptyStartProvider.__new__(EmptyStartProvider)
+        if index_file.is_file():
+            with index_file.open('rb') as file:
+                self.provider._persisted_index = pickle.load(file)
+        self.provider.__init__(config)
+        self.provider.task_counter = runtime.get('task_counter', 0)
+        self.provider.active_usage_tracking = runtime.get('active_usage_tracking', {})
+
+    def persist(self):
+        self.provider._persist_db()
+        save(self.state_dir / 'memory_runtime.json', {
+            'task_counter': self.provider.task_counter,
+            'active_usage_tracking': self.provider.active_usage_tracking,
+            'model_calls': self.model.calls})
+        save(self.state_dir / 'embedding_cache.json', self.embedding_cache)
+        with (self.state_dir / 'text_index.pkl').open('wb') as file:
+            pickle.dump(self.provider._persisted_index, file)
+
+    def checked(self):
+        if self.model.failure is not None:
+            raise RuntimeError('memory_model_failure:'+self.model.failure)
+
+    def retrieve(self, row):
+        from EvolveLab.memory_types import MemoryItemType, MemoryRequest, MemoryStatus
+    
+        q = row['question_id']
+        folder = self.out/'episodes'/q
+        self.model.scope = ('retrieve', q)
+        query = question(row)
+        record(folder/'retrieval.started.json', {'utc':utc(),'query':query,'phase':'begin'})
+        native = self.provider.provide_memory(MemoryRequest(query=query, context='',status=MemoryStatus.BEGIN))
+        self.checked()
+        if any(x.type != MemoryItemType.TEXT for x in native.memories):
+            raise ValueError('tool_memory_cannot_change_R55_toolset')
+        items = [text(item.content) for item in native.memories]
+        # Give both ExpeL retrieval tracks space under the same text budget.
+        per_item = MEMORY_CHARS//max(1,len(items))
+        content = '\n'.join(item[:per_item] for item in items)
+        if content:
+            content = ('Retrieved prior-case memory for method guidance. Historical answers, findings, '
+                       'and side labels apply to their source cases. Verify the current image independently.\n'+content)
+        result = {'utc':utc(),'provider':PROVIDERS[self.arm],'native':asdict(native),
+                  'injected':content,'memory_chars':len(content),'items':len(items)}
+        record(folder/'retrieval.json',result)
+        return content
+
+    def ingest(self, row, trace, feedback):
+        from EvolveLab.memory_types import TrajectoryData
+    
+        q = row['question_id']
+        pred = trace['prediction']
+        assert feedback['saved_prediction'] == pred and feedback['timing'] == 'after_immutable_prediction'
+        self.model.scope = ('ingest', q)
+        messages = [{'role':'user','type':'task','content':question(row)}]
+        for step in trace['steps']:
+            messages.append({'role':'assistant','type':'action','content':text(step['response'])})
+            for call in step.get('executed_calls',[]):
+                observed = pred['observations'][call['observation_index']]
+                observation = text(observed.get('observation'))
+                if observation.startswith('data:image/'):
+                    observation = '[image output retained in the R55 tool artifact]'
+                messages.append({'role':'tool','type':'observation',
+                                 'content':text(call['action'])+'\n'+observation[:2000]})
+        annotation = feedback['reference_annotation']
+        ref = annotation['answer']
+        messages.append({'role':'user','type':'released_benchmark_feedback',
+                         'content':'Historical reference: '+reference_text(row, ref)})
+        args = {'query':question(row),'trajectory':messages,
+                'result':pred.get('answer') or '[no explicit answer]',
+                'metadata':{'task_id':q,'full_query':question(row),'is_correct':bool(trace['reward']),
+                            'status':'success','memory_feedback':{}}}
+        folder = self.out/'episodes'/q
+        record(folder/'ingest.started.json', {'utc':utc(),'trajectory':args})
+        stored, info = self.provider.take_in_memory(TrajectoryData(**args))
+        self.checked()
+        record(folder/'ingest.json', {'utc':utc(),'accepted':bool(stored),'native_description':info,
+                                    'prediction_saved_at':pred['prediction_saved_at'],
+                                    'feedback_released_at':feedback['released_at']})

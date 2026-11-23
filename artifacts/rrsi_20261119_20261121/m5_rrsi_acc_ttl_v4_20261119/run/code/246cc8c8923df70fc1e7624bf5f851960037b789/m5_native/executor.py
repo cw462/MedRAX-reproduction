@@ -1,0 +1,83 @@
+"""Native unbounded M5 decision loop with protected service calls."""
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from . import toolset
+from .context import tool_failure_reason
+from .failures import delivered_failure
+
+def digest(value):
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+
+class ToolCalls:
+    def __init__(self, services):
+        self.services = services
+    def call(self, row, action, arm, ordinal):
+        return self.services.tool(row, action, ordinal)
+
+class Executor:
+    def __init__(self, services, state_dir):
+        self.services = services
+        self.runtime = services.runtime_catalog
+        self.out = Path(state_dir)
+        self.tools = ToolCalls(services)
+        self.candidates = []
+        self.activated = set()
+        self.base = SimpleNamespace(**{name: getattr(toolset, name) for name in
+            ('agent_system', 'ACTION', 'evidence_catalog', 'validate_actions', 'resolve_action', 'append_observations')})
+        self.base.content = lambda row, data: toolset.content(row, services.image_views)
+    def activate(self, row, observations, step):
+        return [], {'ids': [], 'reason': 'no_candidates'}
+    def call(self, row, arm, ordinal, messages):
+        return self.services.main(messages)
+
+    def execute(self,row,policy,data,conditioning):
+        # Native count-unbounded decision loop.
+        from .parser import parse,answer
+        from .completion import prompt
+        system=self.base.agent_system('M').replace('You may select zero, one or two registered tools, with early stopping when appropriate.',
+            'Select useful registered tools as needed; there is no fixed total call-count limit. Stop when sufficient evidence supports an answer.')
+        if conditioning or self.candidates:system=system.replace('No cross-case skills, sibling question context or additional patient history is available.',
+            'Optional learned procedural skills and previously completed same-image questions with post-prediction dataset feedback may be supplied. Skills are not current-patient facts. No current or future reference answer is supplied.')
+        messages=[{'role':'system','content':system},{'role':'user','content':self.base.content(row,Path(data))}]
+        if conditioning:messages.append({'role':'user','content':conditioning})
+        observations=[];calls=[];seen={};n=0;used=0;invalid=0;next_prompt=None
+        action=self.base.ACTION.replace('At most two selectable tool calls total.','No fixed total tool-call count limit.')
+        if len(row['images'])>1:action=action.replace('"args":{}','"args":{},"image_index":1').replace('Each call applies only to the bound original.','Select numbered original via image_index.')
+        while True:
+            n+=1
+            active,activation=self.activate(row,observations,n)
+            if self.candidates:
+                messages.append({'role':'user','content':'R54 activation for THIS decision only. Earlier activation directives expire; only this list is currently active (empty means none): '+json.dumps(active,ensure_ascii=False)})
+            messages.append({'role':'user','content':next_prompt or action+json.dumps(self.base.evidence_catalog(self.runtime,'M'))})
+            raw=self.call(row,'R49-AGENT',n,messages);calls.append({'step_index':n-1,'response':raw,'skill_activation':activation})
+            messages.append({'role':'assistant','content':raw});next_prompt=None
+            try:obj=parse(raw)
+            except (ValueError,IndexError):obj={}
+            result=answer(obj)
+            if result:
+                from .completion import unscorable
+                if not unscorable(row,result):
+                    result.update(activated_skill_ids=sorted(self.activated),main_calls=n,tool_calls=used,observations=observations,terminal_raw=raw)
+                    return result,calls
+            actions=obj.get('calls')
+            if not isinstance(actions,list) or not actions:
+                invalid+=1
+                if invalid>=3:return {'activated_skill_ids':sorted(self.activated),'answer':None,'reason':None,'status':'repeated_invalid_output','main_calls':n,'tool_calls':used,'observations':observations,'terminal_raw':raw},calls
+                next_prompt=prompt(row);continue
+            try:actions=self.base.validate_actions(obj,self.runtime,'M',len(actions),len(row['images']))
+            except (ValueError,TypeError,KeyError):
+                invalid+=1
+                if invalid>=3:return {'activated_skill_ids':sorted(self.activated),'answer':None,'reason':None,'status':'repeated_invalid_plan','main_calls':n,'tool_calls':used,'observations':observations,'terminal_raw':raw},calls
+                next_prompt='Use only registered tool names and valid arguments, or give final answer/reason JSON.';continue
+            fresh=[]
+            for action_item in actions:
+                actual=self.base.resolve_action(action_item,observations);signature=digest(actual);seen[signature]=seen.get(signature,0)+1
+                if seen[signature]>=3:
+                    return {'activated_skill_ids':sorted(self.activated),'answer':None,'reason':None,'status':'repeated_identical_action_no_progress','main_calls':n,'tool_calls':used,'observations':observations,'terminal_raw':raw},calls
+                used+=1;obs=self.tools.call(row,actual,'R49-AGENT',used)
+                failure=tool_failure_reason(obs)
+                if failure:obs=delivered_failure(self.out,row,used,actual,obs)
+                observations.append(obs);fresh.append(obs)
+            self.base.append_observations(messages,fresh,self.out,'M')
+

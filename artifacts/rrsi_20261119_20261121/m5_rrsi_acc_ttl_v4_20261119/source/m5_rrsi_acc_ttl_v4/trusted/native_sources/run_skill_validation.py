@@ -1,0 +1,306 @@
+"""V4 orchestrator: drive S0-S4 stages in order, resumable, no silent skipping.
+
+Usage:
+  python experiments/run_skill_validation.py --config configs/skill_validation_v4.yaml \
+      --stage all --resume
+
+Stages
+  collect  run the semantic-trace collection arms (S1)
+  distill  turn the collected traces into skills v0 (C representation)
+  validate run A/B/C on the fixed validation questions (S0 pilot, then S2)
+  replay   build tool-step replay checkpoints and branch plans (S4 planning)
+  report   write reports/skill_v4_validation.md from what actually finished
+
+A stage that is not implemented yet fails loudly with the reason instead of
+reporting success, and `--resume` skips only stages whose output artefact already
+exists. Heldout (S5) is refused here: the config disables it until the user
+authorises that spend separately.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]          # .../MedRAX_reproduction_20261027
+CODE = ROOT / "code"
+EXPERIMENTS = CODE / "experiments"
+RUNS = ROOT / "runs"
+REPORTS = ROOT / "reports"
+
+
+# ----------------------------------------------------------------- config
+def load_flat_yaml(path):
+    """Tiny loader for the flat `key: value` / `key: [a, b]` config used here."""
+    config = {}
+    for raw in Path(path).read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key, value = key.strip(), value.strip()
+        if value.startswith("[") and value.endswith("]"):
+            inner = value[1:-1].strip()
+            config[key] = [v.strip() for v in inner.split(",") if v.strip()] if inner else []
+        elif value.lower() in ("true", "false"):
+            config[key] = value.lower() == "true"
+        else:
+            try:
+                config[key] = int(value)
+            except ValueError:
+                try:
+                    config[key] = float(value)
+                except ValueError:
+                    config[key] = value
+    return config
+
+
+# ----------------------------------------------------------------- helpers
+def run(cmd, log_path, label):
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as log:
+        log.write(f"\n=== {label}: {' '.join(str(c) for c in cmd)}\n")
+        log.flush()
+        proc = subprocess.run([str(c) for c in cmd], stdout=log, stderr=subprocess.STDOUT)
+    return proc.returncode
+
+
+def stage_done(marker):
+    return Path(marker).exists()
+
+
+# ----------------------------------------------------------------- stages
+def stage_collect(config, resume):
+    run_dir = RUNS / "v4_collect60"
+    if resume and stage_done(run_dir / "summary.json"):
+        return "skipped (already collected)"
+    script = CODE / "v4_collect60.sh"
+    if not script.exists():
+        return "MISSING CODE: v4_collect60.sh"
+    code = run(["bash", script], ROOT / "logs/v4_orchestrator.log", "collect")
+    return "ok" if code == 0 else f"failed with exit {code}"
+
+
+def stage_distill(config, resume):
+    skills = RUNS / "skills_v0" / "skills.json"
+    if resume and stage_done(skills):
+        return "skipped (skills v0 already distilled)"
+    traces = RUNS / "v4_collect60" / "semantic_trace.jsonl"
+    outcomes = RUNS / "v4_collect60_scored" / "outcomes.json"
+    questions = ROOT / "data/memory_v1/inputs/memory_train_subset_v1.jsonl"
+    if not traces.exists() or not outcomes.exists():
+        return "blocked: collection or scoring not finished"
+    repo_py = subprocess.run([str(ROOT / ".venv/bin/python"), "--version"],
+                             capture_output=True, text=True)
+    if repo_py.returncode != 0:
+        return "blocked: server venv python not found"
+    key_path = Path("/tmp/.qwen_key")
+    if not key_path.exists():
+        return "blocked: /tmp/.qwen_key missing"
+    cmd = (f"cat /tmp/.qwen_key | {ROOT}/.venv/bin/python {EXPERIMENTS}/skill_distill.py "
+           f"--traces {traces} --outcomes {outcomes} --questions {questions} "
+           f"--out {skills} --ledger {REPORTS}/api_budget_qwen_100cny_v8.json "
+           f"--inherit-ledger {REPORTS}/api_budget_qwen_100cny_v7.json --api-key-stdin")
+    code = run(["bash", "-lc", cmd], ROOT / "logs/v4_orchestrator.log", "distill")
+    return "ok" if code == 0 else f"failed with exit {code}"
+
+
+def _run_complete(run_dir):
+    """A finished arm, not merely a directory that the journal has touched."""
+    summary_path = Path(run_dir) / "summary.json"
+    if not summary_path.exists():
+        return False
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+    planned = summary.get("planned_question_count") or 0
+    finished = len(summary.get("question_results") or [])
+    return (summary.get("stop_reason") == "complete" and planned > 0
+            and finished >= planned)
+
+
+ARM_SPECS = {
+    "A": {"arm": "r0", "memory": False, "skills": False},
+    "B": {"arm": "r1", "memory": True, "skills": False},
+    "C": {"arm": "r0", "memory": False, "skills": True},
+}
+
+
+def _arm_command(letter, input_path, name, cases, skills_path, ledger, inherit):
+    spec = ARM_SPECS[letter]
+    pool = ROOT / "runs/memory_pool_v3/pool.json"
+    pool_sha = "2eba53f789ea3c175e18c41f2a842c0a6dba4d3d5e73397e9d4174497a2e4644"
+    train = ROOT / "data/memory_v1/inputs/memory_train_subset_v1.jsonl"
+    # empty positional slots must survive the shell: an unquoted "" collapses and
+    # shifts $6/$7, which made run_arm.sh exit 2 on the no-memory arms.
+    args = [str(CODE / "run_arm.sh"), spec["arm"], str(input_path), name, str(cases), "0"]
+    if spec["memory"]:
+        args += [str(pool), pool_sha, "3", "--recursion-limit", "40",
+                 "--text-retrieval", "--training-inputs", str(train), "--diverse-retrieval"]
+    else:
+        args += ["''", "''", "3", "--recursion-limit", "40"]
+        if spec["skills"]:
+            args += ["--skills", str(skills_path)]
+    env = (f"cat /tmp/.qwen_key | LEDGER={ledger} INHERIT={inherit} CAP=1000000 "
+           f"MAX_TOOL=12 MAX_MODEL=16 bash {' '.join(args)}")
+    return ["bash", "-lc", env]
+
+
+def stage_validate(config, resume, cases=None, rounds=None, input_path=None, tag=""):
+    """Run A/B/C on a fixed case list. D and E are refused, not faked."""
+    skills = RUNS / "skills_v0" / "skills.json"
+    if not skills.exists():
+        return "blocked: no skills v0 yet, so arm C has nothing to inject"
+    if input_path is None:
+        input_path = ROOT / str(config.get("validation_input",
+                                           "data/memory_v1/inputs/validation_subset_v2.jsonl"))
+    # run_arm.sh cds into code/, so a relative input path would not resolve there.
+    input_path = Path(input_path).resolve()
+    if not input_path.exists():
+        return f"blocked: validation input not found: {input_path}"
+    if tag:
+        tag = "_" + tag.strip("_") if not tag.startswith("_") else tag
+    wanted = int(cases or config.get("pilot_validation_cases") or 5)
+    n_rounds = int(rounds or config.get("validation_repeats") or 1)
+    ledger = REPORTS / "api_budget_qwen_100cny_v8.json"
+    inherit = REPORTS / "api_budget_qwen_100cny_v7.json"
+    log = ROOT / "logs/v4_orchestrator.log"
+    done = []
+    for rnd in range(1, n_rounds + 1):
+        order = list(ARM_SPECS)                      # randomised per round below
+        import random
+        random.Random(20261029 + rnd).shuffle(order)
+        for letter in order:
+            name = f"v4{tag}_{letter}_r{rnd}"
+            if resume and _run_complete(RUNS / name):
+                done.append(f"{name}:skipped")
+                continue
+            if (RUNS / name).exists():
+                # Used to abort the stage with FileExistsError inside the eval.
+                # Move it aside (never delete) so the arm restarts from zero.
+                if not resume:
+                    return f"refusing to overwrite runs/{name}: pass --resume to set it aside"
+                stale = (RUNS / name).with_name(name + ".stale-" + time.strftime("%Y%m%dT%H%M%S"))
+                (RUNS / name).rename(stale)
+                done.append(f"{name}:stale->{stale.name}")
+            code = run(_arm_command(letter, input_path, name, wanted, skills, ledger, inherit),
+                       log, f"validate {name}")
+            if code != 0:
+                return f"failed at {name} (exit {code})"
+            run([str(ROOT / ".venv/bin/python"), str(EXPERIMENTS / "score_memory_runs.py"),
+                 "--run", str(RUNS / name), "--splits", str(ROOT / "data/prepared_v2"),
+                 "--labels", str(ROOT / "data/prepared_v2/validation.labels.jsonl"),
+                 "--outcomes", str(RUNS / f"{name}_scored/outcomes.json"),
+                 "--report", str(RUNS / f"{name}_scored/score.json"),
+                 "--expected-split", "validation"], log, f"score {name}")
+            done.append(f"{name}:ok")
+    note = (" ran A/B/C only; D (conditional branches) and E (step credit) need the "
+            "continuation runner that is not written, so they are not reported")
+    return (f"completed {len(done)} arm-runs on {wanted} questions from {input_path.name} "
+            f"({', '.join(done[:6])}...){note}")
+
+
+def stage_replay(config, resume):
+    traces = RUNS / "v4_collect60" / "semantic_trace.jsonl"
+    if not traces.exists():
+        return "blocked: no traces yet"
+    sys.path.insert(0, str(EXPERIMENTS))
+    import tool_step_replay as replay          # noqa: E402
+    rows = [json.loads(line) for line in traces.read_text(encoding="utf-8").splitlines() if line.strip()]
+    plans = replay.plan_replays(replay.group_by_question(rows),
+                                max_states=int(config.get("credit_states", 20)))
+    out = RUNS / "v4_replay_plan.json"
+    out.write_text(json.dumps({"planned_states": len(plans), "plans": plans}, ensure_ascii=False,
+                              indent=1) + "\n", encoding="utf-8")
+    return (f"planned {len(plans)} checkpoints -> {out}. Executing do/skip/alternate replays needs a "
+            "continuation runner that is not written yet; the plan file is real, the executions are not.")
+
+
+def stage_report(config, resume):
+    lines = ["# V4 skill validation", "",
+             "Status is generated from finished artefacts only.", ""]
+    rows = []
+    for name, label in (("v4_collect60", "S1 collection"),
+                        ("val8b_r0", "A baseline (released budget)"),
+                        ("val8b_r1", "B frozen retriever"),
+                        ("val8b_r5", "R5 text retriever"),
+                        ("val8b_r57", "R5+R7")):
+        score = RUNS / f"{name}_scored" / "score.json"
+        if score.exists():
+            data = json.loads(score.read_text(encoding="utf-8"))
+            rows.append((label, data.get("graded_denominator"),
+                         round((data.get("accuracy_among_all_planned") or 0) * 29)))
+        else:
+            rows.append((label, "-", "-"))
+    lines.append("| run | graded | correct (of 29) |")
+    lines.append("|---|---:|---:|")
+    for label, graded, correct in rows:
+        lines.append(f"| {label} | {graded} | {correct} |")
+    skills = RUNS / "skills_v0" / "skills.json"
+    lines.append("")
+    if skills.exists():
+        payload = json.loads(skills.read_text(encoding="utf-8"))
+        lines.append(f"Skills v0: {payload.get('distilled')} distilled, "
+                     f"{payload.get('rejected')} rejected of {payload.get('source_traces')} traces.")
+        lines.append("")
+        lines.append("NOTE: C/D/E arms have not run, so this table is not a method comparison.")
+    else:
+        lines.append("Skills v0: not distilled yet.")
+    lines.append("")
+    lines.append("Heldout (S5) is deliberately not run.")
+    out = REPORTS / "skill_v4_validation.md"
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return f"wrote {out}"
+
+
+STAGES = [("collect", stage_collect), ("distill", stage_distill),
+          ("validate", stage_validate), ("replay", stage_replay),
+          ("report", stage_report)]
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--config", type=Path, required=True)
+    ap.add_argument("--stage", default="all",
+                    choices=["all"] + [name for name, _ in STAGES])
+    ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--cases", type=int)
+    ap.add_argument("--rounds", type=int)
+    ap.add_argument("--input", type=Path,
+                    help="question JSONL; default is the config's validation_input")
+    ap.add_argument("--tag", default="",
+                    help="prefix inserted into run names, so a new stage cannot collide "
+                         "with an earlier one (e.g. --tag s2 -> runs/v4_s2_A_r1)")
+    args = ap.parse_args(argv)
+
+    config = load_flat_yaml(args.config)
+    if config.get("heldout_enabled") is True:
+        raise SystemExit("refusing to run: this orchestrator does not implement heldout (S5)")
+    print(f"config: {args.config} -> {len(config)} keys")
+    chosen = STAGES if args.stage == "all" else [s for s in STAGES if s[0] == args.stage]
+    results = {}
+    for name, fn in chosen:
+        try:
+            if name == "validate":
+                results[name] = fn(config, args.resume, args.cases, args.rounds,
+                                   args.input, args.tag)
+            else:
+                results[name] = fn(config, args.resume)
+        except Exception as exc:                      # record, never swallow silently
+            results[name] = f"error: {type(exc).__name__}: {exc}"
+        print(f"[{name}] {results[name]}")
+    summary = REPORTS / "skill_v4_stage_log.json"
+    summary.parent.mkdir(parents=True, exist_ok=True)
+    summary.write_text(json.dumps(results, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    failed = [k for k, v in results.items() if not str(v).startswith(("ok", "skipped", "planned", "wrote"))]
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
